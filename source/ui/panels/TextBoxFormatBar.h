@@ -86,6 +86,9 @@ private:
     bool m_syncing = false;
     bool m_interactionActive = false;
     bool m_closingPopups = false;
+    /// Set only when the user activates an entry in the font list. Arrow-key
+    /// browsing previews live, so a popup dismissed without this must revert.
+    bool m_fontChoiceActivated = false;
 };
 
 #endif // TEXTBOXFORMATBAR_H

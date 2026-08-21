@@ -72,6 +72,18 @@ void PdfSearchEngine::setDocument(Document *doc)
     }
 }
 
+void PdfSearchEngine::setLegacyLayoutZoom(qreal zoom)
+{
+    const qreal safeZoom = zoom > 0.0 ? zoom : 1.0;
+    if (qFuzzyCompare(1.0 + m_legacyLayoutZoom.load(), 1.0 + safeZoom))
+        return;
+
+    // Legacy match rectangles were measured against the old zoom, so they no
+    // longer describe where the glyphs are.
+    m_legacyLayoutZoom.store(safeZoom);
+    clearCache();
+}
+
 // ============================================================================
 // Cache Management
 // ============================================================================
@@ -489,7 +501,11 @@ QVector<PdfSearchMatch> PdfSearchEngine::searchTextBoxObjects(
         const QPointF& objPos = textBox->position;
         // PdfSearchEngine runs this on QtConcurrent workers. Build a local
         // layout from copied scalar inputs instead of touching the GUI cache.
-        const TextBoxLayoutInput input = textBox->layoutInput();
+        // Legacy layout pads in screen pixels, so it has to be measured at the
+        // zoom the viewport renders it at or the hit rectangles land beside the
+        // glyphs. Version-1 layout ignores the argument entirely.
+        const TextBoxLayoutInput input =
+            textBox->layoutInput(m_legacyLayoutZoom.load());
         const std::unique_ptr<TextBoxLayoutResult> layout =
             TextBoxObject::buildLayout(input);
         if (!layout)

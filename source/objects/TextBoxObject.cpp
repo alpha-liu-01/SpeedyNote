@@ -237,14 +237,28 @@ QRectF documentRangeRect(const QTextDocument& document, int start, int end)
 
 bool sameLayoutInput(const TextBoxLayoutInput& a, const TextBoxLayoutInput& b)
 {
-    return a.text == b.text
+    if (a.textLayoutVersion != b.textLayoutVersion
+        || a.userTextBox != b.userTextBox) {
+        return false;
+    }
+
+    // Versioned layout derives height from the text, so the stored height is an
+    // output of the previous build. Comparing it would invalidate the cache on
+    // every reflow that writes that output back, forcing a second full build.
+    const bool versioned =
+        a.userTextBox
+        && a.textLayoutVersion == TextBoxObject::CURRENT_TEXT_LAYOUT_VERSION;
+    const bool sameSize = versioned
+        ? qFuzzyCompare(1.0 + a.objectSize.width(),
+                        1.0 + b.objectSize.width())
+        : a.objectSize == b.objectSize;
+
+    return sameSize
+        && a.text == b.text
         && a.fontFamily == b.fontFamily
         && qFuzzyCompare(1.0 + a.fontSize, 1.0 + b.fontSize)
         && a.fontColor == b.fontColor
         && a.alignment == b.alignment
-        && a.objectSize == b.objectSize
-        && a.textLayoutVersion == b.textLayoutVersion
-        && a.userTextBox == b.userTextBox
         && qFuzzyCompare(1.0 + a.legacyZoom, 1.0 + b.legacyZoom);
 }
 
@@ -462,6 +476,19 @@ const TextBoxLayoutResult* TextBoxObject::ensureLayout(qreal legacyZoom) const
         m_cachedLayoutInput = input;
         m_hasCachedLayoutInput = true;
     }
+
+    // A document saved on another machine can carry a height measured with a
+    // font this one substitutes. Rendering clips to the stored height, so
+    // trusting it would silently cut text off with nothing to explain why.
+    // Height is derived state rather than user intent, so adopt the measured
+    // value. The const_cast keeps ensureLayout() usable from render and search;
+    // no page is marked dirty, so opening a document still writes nothing.
+    if (m_cachedLayout && m_cachedLayout->versioned
+        && m_cachedLayout->normalizedHeight > size.height()) {
+        const_cast<TextBoxObject*>(this)->size.setHeight(
+            m_cachedLayout->normalizedHeight);
+    }
+
     return m_cachedLayout.get();
 }
 
@@ -521,9 +548,28 @@ void TextBoxObject::reflowToWidth(qreal width)
     if (!usesCurrentLayout())
         return;
 
-    const QSizeF normalized = normalizedSizeForWidth(width);
-    size = normalized;
-    invalidateLayoutCache();
+    const qreal safeWidth = validPositive(width)
+        ? width : qMax<qreal>(1.0, size.width());
+
+    TextBoxLayoutInput input = layoutInput();
+    input.objectSize.setWidth(safeWidth);
+    std::unique_ptr<TextBoxLayoutResult> result = buildLayout(input);
+    if (!result) {
+        size.setWidth(safeWidth);
+        invalidateLayoutCache();
+        return;
+    }
+
+    size = QSizeF(safeWidth, result->normalizedHeight);
+
+    // Keep the layout that produced this height instead of discarding it. The
+    // versioned cache key ignores the derived height, so the next paint reuses
+    // this build; inline typing reflows on every keystroke and used to pay for
+    // two full QTextDocument layouts each time.
+    input.objectSize = size;
+    m_cachedLayout = std::move(result);
+    m_cachedLayoutInput = input;
+    m_hasCachedLayoutInput = true;
 }
 
 bool TextBoxObject::upgradeToCurrentLayout(TextBoxState* before,

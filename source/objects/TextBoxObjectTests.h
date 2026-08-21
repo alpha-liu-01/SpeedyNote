@@ -408,11 +408,75 @@ inline bool testOcrBaseFontEstimation()
     return ok;
 }
 
+/**
+ * @brief Height is derived state, so it must heal itself and cost one build.
+ */
+inline bool testDerivedHeightRecovery()
+{
+    bool ok = true;
+
+    // A document written where the font measured taller (or hand-edited) must
+    // not render clipped: rendering clips to the stored height, and nothing
+    // else reflows a box that is only being displayed.
+    TextBoxObject box;
+    configureCurrentBox(
+        box, QStringLiteral("Several words that will certainly need "
+                            "more than one line at this width."));
+    box.reflowToWidth(120.0);
+    const qreal measured = box.size.height();
+    ok &= require(measured > 2.0 * TextBoxObject::CONTENT_PADDING,
+                  "reflow did not measure a height");
+
+    QJsonObject json = box.toJson();
+    json[QStringLiteral("height")] = measured / 3.0;
+    TextBoxObject shrunk;
+    shrunk.loadFromJson(json);
+    ok &= require(qAbs(shrunk.size.height() - measured / 3.0) < 0.001,
+                  "loadFromJson ignored the stored height");
+    shrunk.ensureLayout();
+    ok &= require(qAbs(shrunk.size.height() - measured) < 1.001,
+                  "an undersized stored height was not healed on layout");
+
+    // Growing only: extra whitespace is cosmetic, and silently shrinking a box
+    // the user may have sized deliberately would be worse than leaving it.
+    QJsonObject tallJson = box.toJson();
+    tallJson[QStringLiteral("height")] = measured + 400.0;
+    TextBoxObject tall;
+    tall.loadFromJson(tallJson);
+    tall.ensureLayout();
+    ok &= require(qAbs(tall.size.height() - (measured + 400.0)) < 0.001,
+                  "an oversized stored height was not left alone");
+
+    // Legacy boxes drive layout from their rectangle, so their height is user
+    // intent and must never be rewritten.
+    TextBoxObject legacy;
+    legacy.text = QStringLiteral("Legacy sizing");
+    legacy.size = QSizeF(160.0, 12.0);
+    legacy.ensureLayout();
+    ok &= require(qAbs(legacy.size.height() - 12.0) < 0.001,
+                  "legacy height was overwritten by the layout");
+
+    // reflowToWidth keeps the layout it measured, so typing does not pay for
+    // one build to size the box and a second to paint it.
+    TextBoxObject reused;
+    configureCurrentBox(reused, QStringLiteral("Cache reuse check"));
+    reused.reflowToWidth(150.0);
+    const TextBoxLayoutResult* afterReflow = reused.ensureLayout();
+    const TextBoxLayoutResult* afterPaint = reused.ensureLayout();
+    ok &= require(afterReflow && afterReflow == afterPaint,
+                  "reflow discarded the layout it just built");
+    ok &= require(qAbs(reused.size.width() - 150.0) < 0.001,
+                  "reflow did not apply the requested width");
+
+    return ok;
+}
+
 inline bool runAllTests()
 {
     qDebug() << "=== TextBoxObject tests ===";
     bool ok = true;
     ok &= testOcrBaseFontEstimation();
+    ok &= testDerivedHeightRecovery();
     ok &= testPersistenceAndOcrIsolation();
     ok &= testLayoutMeasurementAndCache();
     ok &= testLegacyUpgradeAndState();

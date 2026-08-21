@@ -510,6 +510,15 @@ private:
     void syncAllDocumentPositions();
 
     /**
+     * @brief Commit any open inline text edit across every tab.
+     *
+     * In-progress inline text lives only in the object model until the session
+     * commits, and an uncommitted page is never dirty, so autosave would write
+     * the document without it. Explicit Save already commits first.
+     */
+    void commitAllInlineTextEdits();
+
+    /**
      * @brief Sync position and silently auto-save if the only change is the position.
      *
      * Used by both tab-close and app-close to persist ephemeral view state
@@ -847,7 +856,16 @@ private:
     void onOcrBatchFinished(int pagesScanned, int pagesWithText);
     void onOcrError(const QString& pageId, const QString& message);
     QVector<VectorStroke> collectPageStrokes(const Page* page) const;
-    void syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blocks);
+    void syncOcrTextObjects(Document* owner, Page* page,
+                            const QVector<OcrTextBlock>& blocks);
+    /**
+     * @brief Drop viewport references to objects about to be destroyed.
+     *
+     * Selection and hover hold raw pointers, so any code that frees objects
+     * directly on a Page must notify every viewport showing @p owner first.
+     */
+    void forgetObjectsInViewports(Document* owner,
+                                  const QVector<QString>& objectIds);
     void setOcrTextVisibility(bool visible);
     void setOcrConfidenceVisibility(bool enabled);
     // MAC.6: showOcrLanguageDialog() promoted to private slots: above.
@@ -871,8 +889,8 @@ private:
     // by ShortcutManager, dispatched via wireQActionDispatchers). m_escapeShortcut
     // is the lone exception — it's a per-window QShortcut because Escape
     // dismissal walks a per-window priority list (modal -> search bar ->
-    // floating editor -> viewport -> launcher) that doesn't fit the
-    // activeMainWindow() dispatch model and needs Qt::WindowShortcut scope.
+    // viewport -> launcher) that doesn't fit the activeMainWindow() dispatch
+    // model and needs Qt::WindowShortcut scope.
     // setupManagedShortcuts() also installs an unnamed Cmd+K alternate for
     // Settings on macOS (parent-owned by `this`, no separate handle needed).
     QShortcut* m_escapeShortcut = nullptr;

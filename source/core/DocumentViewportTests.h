@@ -20,6 +20,7 @@
 #include "../strokes/VectorStroke.h"
 #include "../strokes/StrokePoint.h"
 
+#include <QAbstractItemView>
 #include <QApplication>
 #include <QBuffer>
 #include <QColorDialog>
@@ -2224,6 +2225,114 @@ public:
         return true;
     }
     
+    /**
+     * @brief The inline editor and format bar must not outlive their target.
+     *
+     * Both overlays are anchored to one selected object. Every path that
+     * removes that object or the selection has to tear them down, or the user
+     * is left typing into a widget floating over nothing.
+     */
+    static bool testTextOverlayLifecycle() {
+        printf("  testTextOverlayLifecycle... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto doc = Document::createNew("Overlay lifecycle");
+        doc->addPage();
+        DocumentViewport viewport;
+        viewport.resize(900, 700);
+        viewport.setDocument(doc.get());
+        viewport.setCurrentTool(ToolType::ObjectSelect);
+
+        auto addBox = [&](int pageIndex, const QString& text) {
+            auto object = std::make_unique<TextBoxObject>();
+            object->textLayoutVersion =
+                TextBoxObject::CURRENT_TEXT_LAYOUT_VERSION;
+            object->text = text;
+            object->fontSize = TextBoxObject::DEFAULT_BASE_FONT_SIZE;
+            object->position = QPointF(60.0, 60.0);
+            object->size = QSizeF(200.0, 1.0);
+            object->reflowToWidth(200.0);
+            TextBoxObject* raw = object.get();
+            doc->page(pageIndex)->addObject(std::move(object));
+            return raw;
+        };
+
+        // Deleting the page being typed on must fold the text into the page
+        // snapshot rather than leave a live editor over a destroyed page.
+        TextBoxObject* onSecondPage = addBox(1, QStringLiteral("Doomed"));
+        viewport.startInlineTextEdit(onSecondPage, false);
+        if (!viewport.hasActiveInlineTextEdit())
+            return fail("inline edit did not start");
+        viewport.handleInlineTextSourceChanged(
+            QStringLiteral("Doomed edit"));
+        if (!viewport.deletePagesWithUndo({1}))
+            return fail("page delete was rejected");
+        if (viewport.hasActiveInlineTextEdit()
+            || (viewport.m_inlineTextBoxEditor
+                && viewport.m_inlineTextBoxEditor->isVisible()))
+            return fail("page delete left the inline editor alive");
+        viewport.undo();
+        TextBoxObject* restored = nullptr;
+        for (const auto& object : doc->page(1)->objects) {
+            if (object && object->type() == QLatin1String("textbox"))
+                restored = static_cast<TextBoxObject*>(object.get());
+        }
+        if (!restored || restored->text != QStringLiteral("Doomed edit"))
+            return fail("page delete undo lost the in-progress text");
+
+        // An owner outside the viewport (the OCR rescan) frees objects
+        // directly, so forgetObject has to drop every reference first.
+        TextBoxObject* target = addBox(0, QStringLiteral("Forget me"));
+        const QString targetId = target->id;
+        viewport.selectObject(target, false);
+        viewport.m_hoveredObject = target;
+        viewport.startInlineTextEdit(target, false);
+        viewport.beginTextBoxFormatInteraction();
+        viewport.forgetObject(targetId);
+        if (viewport.hasSelectedObjects()
+            || viewport.m_hoveredObject
+            || viewport.hasActiveInlineTextEdit()
+            || viewport.m_textBoxFormatTransaction.active)
+            return fail("forgetObject left a reference behind");
+        doc->page(0)->removeObject(targetId);
+
+        // Browsing the font list previews every entry it passes over, so a
+        // popup dismissed without an explicit choice has to roll the preview
+        // back rather than commit whatever was highlighted last.
+        TextBoxFormatBar bar;
+        auto* fontCombo = bar.findChild<QFontComboBox*>();
+        if (!fontCombo || !fontCombo->view())
+            return fail("font combo was not found");
+        QSignalSpy finished(
+            &bar, &TextBoxFormatBar::interactionFinished);
+        QEvent popupShow(QEvent::Show);
+        QEvent popupHide(QEvent::Hide);
+
+        QApplication::sendEvent(fontCombo->view(), &popupShow);
+        fontCombo->setCurrentFont(QFont(QStringLiteral("Courier New")));
+        QApplication::sendEvent(fontCombo->view(), &popupHide);
+        QCoreApplication::processEvents();
+        if (finished.size() != 1 || finished.at(0).at(0).toBool())
+            return fail("dismissed font popup committed a browsed font");
+
+        finished.clear();
+        QApplication::sendEvent(fontCombo->view(), &popupShow);
+        fontCombo->setCurrentFont(QFont(QStringLiteral("Arial")));
+        emit fontCombo->activated(0);
+        QApplication::sendEvent(fontCombo->view(), &popupHide);
+        QCoreApplication::processEvents();
+        if (finished.size() != 1 || !finished.at(0).at(0).toBool())
+            return fail("activated font choice did not commit once");
+
+        viewport.setDocument(nullptr);
+        printf("PASSED\n");
+        return true;
+    }
+
     static bool testOcrTextBoxConversion() {
         printf("  testOcrTextBoxConversion... ");
 
@@ -2255,11 +2364,12 @@ public:
             return block;
         };
 
-        // The suppression predicate is shared with the OCR result handler and
+        // The dismissal predicate is shared with the OCR result handler and
         // with load-time materialization, so check its contract directly.
         {
-            QSet<QString> suppressed{QStringLiteral("s1"),
-                                     QStringLiteral("s2")};
+            const QSet<QString> suppressed{QStringLiteral("s1"),
+                                           QStringLiteral("s2")};
+            const QSet<QString> noKeys;
             OcrTextBlock all = makeBlock(QStringLiteral("all"),
                                          QRectF(0, 0, 10, 10),
                                          {QStringLiteral("s1"),
@@ -2270,11 +2380,25 @@ public:
                                               QStringLiteral("s3")});
             OcrTextBlock none = makeBlock(QStringLiteral("none"),
                                           QRectF(0, 0, 10, 10), {});
-            if (!isOcrBlockFullySuppressed(all, suppressed)
-                || isOcrBlockFullySuppressed(partial, suppressed)
-                || isOcrBlockFullySuppressed(none, suppressed)
-                || isOcrBlockFullySuppressed(all, QSet<QString>())) {
-                return fail("suppressed-block predicate was wrong");
+            if (!isOcrBlockDismissed(all, suppressed, noKeys)
+                || isOcrBlockDismissed(partial, suppressed, noKeys)
+                || isOcrBlockDismissed(none, suppressed, noKeys)
+                || isOcrBlockDismissed(all, QSet<QString>(), noKeys)) {
+                return fail("dismissed-block predicate was wrong");
+            }
+
+            // A stroke-less block has no suppression to key off, so only the
+            // geometry fingerprint can keep a rescan from resurrecting it. A
+            // rescan mints a new block id, so the key must ignore ids.
+            const QSet<QString> dismissedKeys{ocrBlockDismissalKey(none)};
+            OcrTextBlock rescanned = makeBlock(QStringLiteral("none"),
+                                               QRectF(0, 0, 10, 10), {});
+            OcrTextBlock elsewhere = makeBlock(QStringLiteral("none"),
+                                               QRectF(400, 0, 10, 10), {});
+            if (!isOcrBlockDismissed(rescanned, suppressed, dismissedKeys)
+                || isOcrBlockDismissed(elsewhere, suppressed, dismissedKeys)
+                || isOcrBlockDismissed(all, QSet<QString>(), dismissedKeys)) {
+                return fail("stroke-less dismissal key was wrong");
             }
         }
 
@@ -2554,6 +2678,8 @@ public:
                 "testInlineTextBoxEditing");
         runTest(testTextBoxFormattingBar,
                 "testTextBoxFormattingBar");
+        runTest(testTextOverlayLifecycle,
+                "testTextOverlayLifecycle");
         runTest(testOcrTextBoxConversion,
                 "testOcrTextBoxConversion");
         

@@ -96,6 +96,14 @@ public:
     // ===== OCR Data (Phase 1A - derived cache) =====
     QVector<OcrTextBlock> ocrTextBlocks;    ///< Recognized text blocks (derived from strokes)
     QSet<QString> suppressedStrokeIds;      ///< Strokes user explicitly excluded from OCR
+    /**
+     * @brief Fingerprints of dismissed blocks that carry no source stroke ids.
+     *
+     * Stroke suppression is how a deleted or converted block normally stays
+     * gone, but a block with no stroke ids cannot be described that way. See
+     * ocrBlockDismissalKey().
+     */
+    QSet<QString> dismissedOcrBlockKeys;
     bool ocrDirty = false;                  ///< True if strokes changed since last OCR pass
     
     // ===== Constructors & Rule of Five =====

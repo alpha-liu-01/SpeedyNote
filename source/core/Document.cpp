@@ -5534,7 +5534,8 @@ bool Document::savePageOcr(const QString& uuid, const Page* page)
 
     QString ocrPath = m_bundlePath + "/pages/" + uuid + ".ocr.json";
 
-    if (page->ocrTextBlocks.isEmpty() && page->suppressedStrokeIds.isEmpty()) {
+    if (page->ocrTextBlocks.isEmpty() && page->suppressedStrokeIds.isEmpty()
+        && page->dismissedOcrBlockKeys.isEmpty()) {
         QFile::remove(ocrPath);
         return true;
     }
@@ -5556,6 +5557,13 @@ bool Document::savePageOcr(const QString& uuid, const Page* page)
         for (const auto& id : page->suppressedStrokeIds)
             suppressed.append(id);
         root["suppressedStrokeIds"] = suppressed;
+    }
+
+    if (!page->dismissedOcrBlockKeys.isEmpty()) {
+        QJsonArray dismissed;
+        for (const auto& key : page->dismissedOcrBlockKeys)
+            dismissed.append(key);
+        root["dismissedBlockKeys"] = dismissed;
     }
 
     QFile file(ocrPath);
@@ -5587,11 +5595,14 @@ bool Document::loadPageOcr(Page* page, const QString& uuid) const
 
     page->ocrTextBlocks.clear();
     page->suppressedStrokeIds.clear();
+    page->dismissedOcrBlockKeys.clear();
 
     for (const auto& val : root["blocks"].toArray())
         page->ocrTextBlocks.append(OcrTextBlock::fromJson(val.toObject()));
     for (const auto& val : root["suppressedStrokeIds"].toArray())
         page->suppressedStrokeIds.insert(val.toString());
+    for (const auto& val : root["dismissedBlockKeys"].toArray())
+        page->dismissedOcrBlockKeys.insert(val.toString());
 
     page->ocrDirty = false;
     return true;
@@ -5610,7 +5621,8 @@ bool Document::saveTileOcr(TileCoord coord)
     QString ocrPath = m_bundlePath + "/tiles/" +
         QString("%1,%2.ocr.json").arg(coord.first).arg(coord.second);
 
-    if (tile->ocrTextBlocks.isEmpty() && tile->suppressedStrokeIds.isEmpty()) {
+    if (tile->ocrTextBlocks.isEmpty() && tile->suppressedStrokeIds.isEmpty()
+        && tile->dismissedOcrBlockKeys.isEmpty()) {
         QFile::remove(ocrPath);
         return true;
     }
@@ -5632,6 +5644,13 @@ bool Document::saveTileOcr(TileCoord coord)
         for (const auto& id : tile->suppressedStrokeIds)
             suppressed.append(id);
         root["suppressedStrokeIds"] = suppressed;
+    }
+
+    if (!tile->dismissedOcrBlockKeys.isEmpty()) {
+        QJsonArray dismissed;
+        for (const auto& key : tile->dismissedOcrBlockKeys)
+            dismissed.append(key);
+        root["dismissedBlockKeys"] = dismissed;
     }
 
     QFile file(ocrPath);
@@ -5665,11 +5684,14 @@ bool Document::loadTileOcr(Page* tile, TileCoord coord) const
 
     tile->ocrTextBlocks.clear();
     tile->suppressedStrokeIds.clear();
+    tile->dismissedOcrBlockKeys.clear();
 
     for (const auto& val : root["blocks"].toArray())
         tile->ocrTextBlocks.append(OcrTextBlock::fromJson(val.toObject()));
     for (const auto& val : root["suppressedStrokeIds"].toArray())
         tile->suppressedStrokeIds.insert(val.toString());
+    for (const auto& val : root["dismissedBlockKeys"].toArray())
+        tile->dismissedOcrBlockKeys.insert(val.toString());
 
     tile->ocrDirty = false;
     return true;
@@ -5720,7 +5742,8 @@ void Document::materializeOcrTextObjects(Page* page) const
 
         // A sidecar written before a block was dismissed can still hold it;
         // its strokes are suppressed, so it must not become an overlay again.
-        if (isOcrBlockFullySuppressed(block, page->suppressedStrokeIds))
+        if (isOcrBlockDismissed(block, page->suppressedStrokeIds,
+                                page->dismissedOcrBlockKeys))
             continue;
 
         // Skip blocks whose strokes are claimed by locked objects

@@ -63,6 +63,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QImage>
+#include <QAbstractSpinBox>
 #include <QSpinBox>
 #include <QInputDialog>
 #include <QStandardPaths>
@@ -271,6 +272,10 @@ MainWindow::MainWindow(QWidget *parent)
                      state == Qt::ApplicationInactive ? "Inactive" : "Hidden");
 #endif
         if (state == Qt::ApplicationSuspended || state == Qt::ApplicationInactive) {
+            // Fold in-progress inline text into the model first, otherwise its
+            // page is not dirty and autosave persists the pre-edit text.
+            commitAllInlineTextEdits();
+
             // Sync positions for all documents before auto-save
             // This ensures lastAccessedPage/edgeless position is saved
             syncAllDocumentPositions();
@@ -1406,6 +1411,24 @@ void MainWindow::setupUi() {
 // Canonical event flow:
 //   keystroke -> Qt shortcut map (active window) -> QAction::triggered ->
 //   dispatcher slot (here) -> activeMainWindow() -> handler lambda.
+// The format bar's editable controls wrap their own QLineEdit rather than being
+// one, so undo/redo has to reach through the spin box or combo to find it.
+// Returning nullptr means the focused control has no text to undo, and the
+// caller should fall through to document undo.
+static QLineEdit* focusedEditableLineEdit()
+{
+    QWidget* focused = QApplication::focusWidget();
+    if (!focused)
+        return nullptr;
+    if (auto* edit = qobject_cast<QLineEdit*>(focused))
+        return edit;
+    if (auto* spin = qobject_cast<QAbstractSpinBox*>(focused))
+        return spin->findChild<QLineEdit*>();
+    if (auto* combo = qobject_cast<QComboBox*>(focused))
+        return combo->lineEdit();
+    return nullptr;
+}
+
 void MainWindow::wireQActionDispatchers()
 {
     static bool s_wired = false;
@@ -1478,10 +1501,10 @@ void MainWindow::wireQActionDispatchers()
     wire("edit.undo", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
             if (vp->textBoxFormatBarHasFocus()) {
-                if (auto* edit = qobject_cast<QLineEdit*>(
-                        QApplication::focusWidget()))
+                if (QLineEdit* edit = focusedEditableLineEdit()) {
                     edit->undo();
-                return;
+                    return;
+                }
             }
             if (vp->inlineTextEditorHasFocus()) {
                 if (auto* edit = qobject_cast<QPlainTextEdit*>(
@@ -1496,10 +1519,10 @@ void MainWindow::wireQActionDispatchers()
     wire("edit.redo", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
             if (vp->textBoxFormatBarHasFocus()) {
-                if (auto* edit = qobject_cast<QLineEdit*>(
-                        QApplication::focusWidget()))
+                if (QLineEdit* edit = focusedEditableLineEdit()) {
                     edit->redo();
-                return;
+                    return;
+                }
             }
             if (vp->inlineTextEditorHasFocus()) {
                 if (auto* edit = qobject_cast<QPlainTextEdit*>(
@@ -1517,10 +1540,10 @@ void MainWindow::wireQActionDispatchers()
     wire("edit.redo_alt", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
             if (vp->textBoxFormatBarHasFocus()) {
-                if (auto* edit = qobject_cast<QLineEdit*>(
-                        QApplication::focusWidget()))
+                if (QLineEdit* edit = focusedEditableLineEdit()) {
                     edit->redo();
-                return;
+                    return;
+                }
             }
             if (vp->inlineTextEditorHasFocus()) {
                 if (auto* edit = qobject_cast<QPlainTextEdit*>(
@@ -2186,8 +2209,8 @@ void MainWindow::setupManagedShortcuts()
     // registry because:
     //  - it doesn't appear in any menu (modal-style dismissal, not a command);
     //  - its handler walks a per-window priority list (modal -> search bar ->
-    //    floating editor -> viewport -> launcher) that doesn't fit the
-    //    activeMainWindow() dispatch model;
+    //    viewport -> launcher) that doesn't fit the activeMainWindow()
+    //    dispatch model;
     //  - it uses Qt::WindowShortcut (the dispatcher pattern uses
     //    Qt::ApplicationShortcut), so each window must own its own QShortcut
     //    so Escape only dismisses things in the focused window.
@@ -6145,6 +6168,7 @@ void MainWindow::setupPdfSearch()
             return;
         }
         m_searchEngine->setDocument(doc);
+        m_searchEngine->setLegacyLayoutZoom(vp->zoomLevel());
         m_searchResultsByPage.clear();
         m_searchTotalMatches = 0;
         // SBS3: clear stale ticks; the new scan refills them as it streams.
@@ -6341,6 +6365,7 @@ void MainWindow::onSearchNext(const QString& text, bool caseSensitive, bool whol
     
     // Set the document on the engine
     m_searchEngine->setDocument(doc);
+    m_searchEngine->setLegacyLayoutZoom(vp->zoomLevel());
     
     // Clear status before searching
     m_pdfSearchBar->clearStatus();
@@ -6385,6 +6410,7 @@ void MainWindow::onSearchPrev(const QString& text, bool caseSensitive, bool whol
     
     // Set the document on the engine
     m_searchEngine->setDocument(doc);
+    m_searchEngine->setLegacyLayoutZoom(vp->zoomLevel());
     
     // Clear status before searching
     m_pdfSearchBar->clearStatus();
@@ -6959,14 +6985,15 @@ void MainWindow::onOcrResultsReady(const QString& pageId, const QVector<OcrTextB
     QVector<OcrTextBlock> acceptedBlocks;
     acceptedBlocks.reserve(blocks.size());
     for (const auto& block : blocks) {
-        if (!isOcrBlockFullySuppressed(block, page->suppressedStrokeIds))
+        if (!isOcrBlockDismissed(block, page->suppressedStrokeIds,
+                                 page->dismissedOcrBlockKeys))
             acceptedBlocks.append(block);
     }
 
     page->ocrTextBlocks = acceptedBlocks;
     page->ocrDirty = false;
 
-    syncOcrTextObjects(page, acceptedBlocks);
+    syncOcrTextObjects(doc, page, acceptedBlocks);
 
     // Invalidate the Highlighter's OCR-block cache on any viewport currently
     // showing this document, so a new drag will see the refreshed OCR data.
@@ -7058,7 +7085,26 @@ QVector<VectorStroke> MainWindow::collectPageStrokes(const Page* page) const
     return allStrokes;
 }
 
-void MainWindow::syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blocks)
+void MainWindow::forgetObjectsInViewports(Document* owner,
+                                          const QVector<QString>& objectIds)
+{
+    if (!owner || objectIds.isEmpty() || !m_splitViewManager)
+        return;
+
+    m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane) {
+        if (!tm) return;
+        const int n = tm->tabCount();
+        for (int i = 0; i < n; ++i) {
+            DocumentViewport* vp = tm->viewportAt(i);
+            if (!vp || vp->document() != owner) continue;
+            for (const auto& objectId : objectIds)
+                vp->forgetObject(objectId);
+        }
+    });
+}
+
+void MainWindow::syncOcrTextObjects(Document* owner, Page* page,
+                                    const QVector<OcrTextBlock>& blocks)
 {
     if (!page) return;
 
@@ -7076,6 +7122,10 @@ void MainWindow::syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blo
             }
         }
     }
+    // Selection and hover point straight at these objects, and a scan can land
+    // while the user has one selected (the convert dialog even runs a nested
+    // event loop), so clear those references before the memory goes away.
+    forgetObjectsInViewports(owner, toRemove);
     for (const auto& oid : toRemove)
         page->removeObject(oid);
 
@@ -7559,8 +7609,14 @@ void MainWindow::convertOcrTextToTextBox(InsertedObject* obj)
     // object in the meantime; resolve it again instead of trusting obj.
     auto* target =
         dynamic_cast<OcrTextObject*>(viewport->objectById(objectId));
-    if (!target)
+    if (!target) {
+        // The user said yes and nothing happened, so say why rather than
+        // leaving them to wonder whether the click registered.
+        QMessageBox::information(this, tr("Convert OCR Text"),
+            tr("This recognized text is no longer available. "
+               "A new scan may have replaced it."));
         return;
+    }
 
     viewport->convertOcrTextToTextBox(target, true);
 }
@@ -8094,6 +8150,20 @@ void MainWindow::syncAllDocumentPositions()
             if (syncDocumentPosition(doc, vp)) {
                 doc->markModified();
             }
+        }
+    });
+}
+
+void MainWindow::commitAllInlineTextEdits()
+{
+    if (!m_splitViewManager)
+        return;
+
+    m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane) {
+        if (!tm) return;
+        for (int i = 0; i < tm->tabCount(); ++i) {
+            if (DocumentViewport* vp = tm->viewportAt(i))
+                vp->commitInlineTextEdit();
         }
     });
 }

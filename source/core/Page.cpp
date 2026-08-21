@@ -916,6 +916,7 @@ void Page::clearOcrData()
 {
     ocrTextBlocks.clear();
     suppressedStrokeIds.clear();
+    dismissedOcrBlockKeys.clear();
     ocrDirty = false;
 }
 

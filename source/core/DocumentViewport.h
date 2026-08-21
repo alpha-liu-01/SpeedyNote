@@ -83,6 +83,29 @@ struct UndoAction {
         PageInsert              ///< One or more whole pages inserted (import); undo removes them
     };
 
+    /**
+     * @brief Whether undoing/redoing @p type can change text-box text or layout.
+     *
+     * Search caches match rectangles produced by the text-box layout engine, so
+     * they must be dropped whenever this returns true. Erring towards true only
+     * costs a cache rebuild; erring the other way leaves stale hits on screen.
+     */
+    static bool affectsTextLayout(Type type) {
+        switch (type) {
+        case ObjectInsert:
+        case ObjectDelete:
+        case ObjectMove:
+        case ObjectResize:
+        case ObjectTextEdit:
+        case OcrConvertToTextBox:
+        case PageDelete:
+        case PageInsert:
+            return true;
+        default:
+            return false;
+        }
+    }
+
     Type type = AddStroke;
     int layerIndex = 0;
 
@@ -171,6 +194,8 @@ struct UndoAction {
     bool ocrSourceBlockValid = false;
     int ocrSourceBlockIndex = -1;                    ///< Position the block occupied
     QVector<QString> ocrSuppressedStrokeIdsAdded;    ///< Only the newly suppressed ids
+    /// Fingerprint recorded for a block with no source strokes; empty otherwise.
+    QString ocrDismissedBlockKeyAdded;
 };
 
 #include <QWidget>
@@ -804,6 +829,16 @@ public:
      * re-resolve their target this way instead of holding a raw pointer.
      */
     InsertedObject* objectById(const QString& objectId) const;
+
+    /**
+     * @brief Drop every viewport-side reference to an object about to be freed.
+     *
+     * Code outside the viewport (the OCR rescan, for instance) destroys objects
+     * directly on the Page. Selection and hover hold raw pointers into them, so
+     * that owner must call this first for each id it is about to remove.
+     * Safe to call for ids this viewport never referenced.
+     */
+    void forgetObject(const QString& objectId);
 
     /**
      * @brief Mark the page/tile that contains @p link as dirty AND refresh

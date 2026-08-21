@@ -12,6 +12,7 @@
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QSignalBlocker>
@@ -59,6 +60,11 @@ TextBoxFormatBar::TextBoxFormatBar(QWidget* parent)
     m_fontFamily->setAccessibleName(tr("Font family"));
     m_fontFamily->installEventFilter(this);
     m_fontFamily->view()->installEventFilter(this);
+    // QFontComboBox is editable, so keystrokes land on its internal line edit
+    // rather than the combo. Without this the bar's Escape and Ctrl+Enter
+    // contract silently stops working while the user types a font name.
+    if (QLineEdit* fontEdit = m_fontFamily->lineEdit())
+        fontEdit->installEventFilter(this);
     layout->addWidget(m_fontFamily);
 
     m_alignmentGroup = new QButtonGroup(this);
@@ -163,7 +169,10 @@ TextBoxFormatBar::TextBoxFormatBar(QWidget* parent)
     });
     connect(m_fontFamily,
             QOverload<int>::of(&QFontComboBox::activated),
-            this, [this](int) { finishInteraction(true); });
+            this, [this](int) {
+        m_fontChoiceActivated = true;
+        finishInteraction(true);
+    });
 
     connect(m_alignmentGroup,
             QOverload<int>::of(&QButtonGroup::idClicked),
@@ -304,6 +313,12 @@ bool TextBoxFormatBar::hasOpenPopup() const
 
 bool TextBoxFormatBar::controlHasFocus() const
 {
+    // An open popup grabs focus for its own window, so checking only the bar's
+    // widget tree would report "not focused" while the user is browsing fonts
+    // and hand their Ctrl+Z to the document instead.
+    if (hasOpenPopup())
+        return true;
+
     QWidget* focused = QApplication::focusWidget();
     return focused && (focused == this || isAncestorOf(focused)
         || (m_colorDialog
@@ -313,12 +328,20 @@ bool TextBoxFormatBar::controlHasFocus() const
 
 bool TextBoxFormatBar::eventFilter(QObject* watched, QEvent* event)
 {
-    if (watched == m_fontFamily->view()
-        && event->type() == QEvent::Hide && !m_closingPopups
-        && m_interactionActive) {
-        QTimer::singleShot(0, this, [this]() {
-            finishInteraction(true);
-        });
+    if (watched == m_fontFamily->view()) {
+        if (event->type() == QEvent::Show) {
+            m_fontChoiceActivated = false;
+        } else if (event->type() == QEvent::Hide && !m_closingPopups
+                   && m_interactionActive) {
+            // Keyboard browsing previews each font it passes over, so a popup
+            // dismissed by clicking away must roll back to the original font
+            // instead of committing whatever was last highlighted.
+            // Qt hides the popup before emitting activated, so the flag is
+            // read from the deferred slot rather than captured here.
+            QTimer::singleShot(0, this, [this]() {
+                finishInteraction(m_fontChoiceActivated);
+            });
+        }
     }
     if (event->type() == QEvent::KeyPress) {
         auto* keyEvent = static_cast<QKeyEvent*>(event);
@@ -468,7 +491,13 @@ void TextBoxFormatBar::openColorDialog(bool background)
             ->setFocus(Qt::PopupFocusReason);
     });
     connect(dialog, &QObject::destroyed,
-            this, [this]() { m_colorDialog.clear(); });
+            this, [this]() {
+        m_colorDialog.clear();
+        // accepted/rejected already finished the interaction in the normal
+        // paths; this catches a dialog torn down by anything else, which
+        // would otherwise strand the viewport transaction open forever.
+        finishInteraction(false);
+    });
     dialog->open();
 }
 

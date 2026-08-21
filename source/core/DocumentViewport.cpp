@@ -7087,6 +7087,12 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
 
 void DocumentViewport::clearObjectSelection()
 {
+    // The inline editor is anchored to a selected object, so it cannot outlive
+    // the selection: leaving it up would float a live editor over a canvas with
+    // nothing selected and silently drop whatever the user typed next.
+    if (m_inlineEditSession.active)
+        commitInlineTextEdit();
+
     closeTextBoxFormatPopups(true);
     finishTextBoxFormatInteraction(true);
     cancelObjectPointerGesture();
@@ -7329,6 +7335,12 @@ void DocumentViewport::deselectAllObjects()
     if (hasActiveObjectPointerGesture()) {
         cancelObjectPointerGesture();
     }
+
+    // Commit before the early return: page deletion deselects first and then
+    // snapshots the page, so committing here is what puts in-progress text into
+    // the undo snapshot instead of losing it behind a still-visible editor.
+    if (m_inlineEditSession.active)
+        commitInlineTextEdit();
 
     if (m_selectedObjects.isEmpty()) return;
 
@@ -7898,6 +7910,12 @@ void DocumentViewport::deleteSelectedObjects()
             bool removedBlock = false;
             for (int b = page->ocrTextBlocks.size() - 1; b >= 0; --b) {
                 if (page->ocrTextBlocks[b].id == ocrObj->id) {
+                    // A block with no strokes cannot be kept out by stroke
+                    // suppression, so remember it by fingerprint instead.
+                    if (ocrObj->sourceStrokeIds.isEmpty()) {
+                        page->dismissedOcrBlockKeys.insert(
+                            ocrBlockDismissalKey(page->ocrTextBlocks[b]));
+                    }
                     page->ocrTextBlocks.removeAt(b);
                     removedBlock = true;
                     break;
@@ -8111,6 +8129,29 @@ InsertedObject* DocumentViewport::objectById(const QString& objectId) const
     return container ? container->objectById(objectId) : nullptr;
 }
 
+void DocumentViewport::forgetObject(const QString& objectId)
+{
+    if (objectId.isEmpty())
+        return;
+
+    if (m_inlineEditSession.active
+        && m_inlineEditSession.objectId == objectId) {
+        // The object is already doomed, so the session cannot commit into it.
+        endInlineTextEdit(false, true);
+    }
+
+    if (m_textBoxFormatTransaction.active
+        && m_textBoxFormatTransaction.objectId == objectId) {
+        closeTextBoxFormatPopups(false);
+        finishTextBoxFormatInteraction(false);
+    }
+
+    if (m_hoveredObject && m_hoveredObject->id == objectId)
+        m_hoveredObject = nullptr;
+
+    deselectObjectById(objectId);
+}
+
 void DocumentViewport::persistOcrSidecar(Page* container, int pageIndex,
                                          Document::TileCoord tileCoord)
 {
@@ -8147,6 +8188,10 @@ void DocumentViewport::applyOcrConversion(const UndoAction& action)
 
     for (const auto& strokeId : action.ocrSuppressedStrokeIdsAdded)
         container->suppressedStrokeIds.insert(strokeId);
+    if (!action.ocrDismissedBlockKeyAdded.isEmpty()) {
+        container->dismissedOcrBlockKeys.insert(
+            action.ocrDismissedBlockKeyAdded);
+    }
 
     for (int i = container->ocrTextBlocks.size() - 1; i >= 0; --i) {
         if (container->ocrTextBlocks[i].id == ocrId) {
@@ -8156,7 +8201,7 @@ void DocumentViewport::applyOcrConversion(const UndoAction& action)
     }
 
     if (!ocrId.isEmpty()) {
-        deselectObjectById(ocrId);
+        forgetObject(ocrId);
         container->removeObject(ocrId);
     }
 
@@ -8183,13 +8228,17 @@ void DocumentViewport::revertOcrConversion(const UndoAction& action)
     if (!container)
         return;
 
-    deselectObjectById(action.objectId);
+    forgetObject(action.objectId);
     container->removeObject(action.objectId);
 
     // Only the ids this conversion added: a stroke suppressed by an earlier
     // OCR deletion must stay suppressed.
     for (const auto& strokeId : action.ocrSuppressedStrokeIdsAdded)
         container->suppressedStrokeIds.remove(strokeId);
+    if (!action.ocrDismissedBlockKeyAdded.isEmpty()) {
+        container->dismissedOcrBlockKeys.remove(
+            action.ocrDismissedBlockKeyAdded);
+    }
 
     if (action.ocrSourceBlockValid) {
         const int index = qBound(0, action.ocrSourceBlockIndex,
@@ -8243,8 +8292,10 @@ bool DocumentViewport::convertOcrTextToTextBox(OcrTextObject* ocr,
     textBox.position = ocr->position;
     textBox.rotation = ocr->rotation;
     textBox.setLayerAffinity(ocr->getLayerAffinity());
-    textBox.zOrder = getNextZOrderForAffinity(container,
-                                              ocr->getLayerAffinity());
+    // Conversion replaces the block in place, so it keeps the stacking the user
+    // already sees. Promoting it to the top would reorder it against unrelated
+    // neighbours on every convert.
+    textBox.zOrder = ocr->zOrder;
     textBox.visible = true;
     textBox.text = ocr->text;
     textBox.fontFamily = ocr->fontFamily;
@@ -8310,9 +8361,15 @@ bool DocumentViewport::convertOcrTextToTextBox(OcrTextObject* ocr,
             action.ocrSuppressedStrokeIdsAdded.append(strokeId);
     }
 
-    // Without stroke ids there is nothing to suppress, so only the removed
-    // block keeps a rescan from recreating this text.
-    const bool nothingSuppressed = ocr->sourceStrokeIds.isEmpty();
+    // Without stroke ids there is nothing to suppress, so the block is recorded
+    // by geometry fingerprint instead; otherwise a scan already in flight would
+    // hand the block straight back.
+    if (ocr->sourceStrokeIds.isEmpty() && action.ocrSourceBlockValid) {
+        const QString key = ocrBlockDismissalKey(
+            OcrTextBlock::fromJson(action.ocrSourceBlock));
+        if (!container->dismissedOcrBlockKeys.contains(key))
+            action.ocrDismissedBlockKeyAdded = key;
+    }
 
     applyOcrConversion(action);
     pushUndoAction(action);
@@ -8329,13 +8386,6 @@ bool DocumentViewport::convertOcrTextToTextBox(OcrTextObject* ocr,
     emit documentModified();
     emit textBoxLayoutCommitted();
     update();
-
-    if (nothingSuppressed) {
-        showObjectGeometryFeedback(
-            tr("Converted. This block has no source strokes, "
-               "so a rescan may recognize the ink again."),
-            ocrBounds);
-    }
 
     if (startEditing && created)
         startInlineTextEdit(static_cast<TextBoxObject*>(created), false);
@@ -8641,6 +8691,16 @@ void DocumentViewport::pasteObjects()
         for (const auto& c : touchedTiles) m_document->refreshLinkOutlineFor(c);
         for (int p : touchedPages) m_document->refreshLinkOutlineFor(p);
         emit linkObjectListMayHaveChanged();  // M.7.3: Refresh sidebar
+
+        // documentModified alone is not enough: the thumbnail refresh it drives
+        // is skipped while the pasted objects are still selected, and the search
+        // cache only listens for a layout commit. Pasted text would otherwise
+        // stay unsearchable until something else committed.
+        for (int p : touchedPages) {
+            m_pendingThumbnailPages.insert(p);
+            emit pageModified(p);
+        }
+        emit textBoxLayoutCommitted();
     }
     
     update();
@@ -8928,10 +8988,16 @@ TextBoxObject* DocumentViewport::resolveTextBoxFormatTarget() const
         container = m_document->page(
             m_textBoxFormatTransaction.pageIndex);
     }
-    if (!container)
-        return nullptr;
-    InsertedObject* object = container->objectById(
-        m_textBoxFormatTransaction.objectId);
+    InsertedObject* object = container
+        ? container->objectById(m_textBoxFormatTransaction.objectId)
+        : nullptr;
+    if (!object) {
+        // The transaction pins the page/tile it started on, but an edgeless
+        // object can relocate mid-preview. Losing the target here would strand
+        // the preview mutations with no undo record and no way to roll back,
+        // so fall back to an id search across everything loaded.
+        object = objectById(m_textBoxFormatTransaction.objectId);
+    }
     if (!object || object->type() != QLatin1String("textbox"))
         return nullptr;
     return static_cast<TextBoxObject*>(object);
@@ -9033,6 +9099,34 @@ bool DocumentViewport::pointerOverTextOverlay(const QPointF& viewportPos) const
         && m_inlineTextBoxEditor->geometry().contains(pos);
 }
 
+/**
+ * @brief Axis-aligned bounds of @p rect after rotating it about @p center.
+ *
+ * Object bounds are stored unrotated, so anything that positions a widget
+ * beside a rotated object has to expand to the rotated hull first or it will
+ * anchor to an edge the user cannot see.
+ */
+static QRectF rotatedViewportBounds(const QRectF& rect, const QPointF& center,
+                                    qreal degrees)
+{
+    if (qFuzzyIsNull(degrees))
+        return rect;
+
+    const qreal radians = qDegreesToRadians(degrees);
+    const qreal cosine = qCos(radians);
+    const qreal sine = qSin(radians);
+    auto rotate = [&](const QPointF& point) {
+        const QPointF delta = point - center;
+        return center + QPointF(delta.x() * cosine - delta.y() * sine,
+                                delta.x() * sine + delta.y() * cosine);
+    };
+
+    QPolygonF corners;
+    corners << rotate(rect.topLeft()) << rotate(rect.topRight())
+            << rotate(rect.bottomRight()) << rotate(rect.bottomLeft());
+    return corners.boundingRect();
+}
+
 void DocumentViewport::updateTextBoxFormatBarGeometry()
 {
     if (!m_textBoxFormatBar || m_textBoxFormatBar->isHidden())
@@ -9043,9 +9137,11 @@ void DocumentViewport::updateTextBoxFormatBarGeometry()
         return;
     }
 
-    const QRectF objectRect = objectBoundsInViewport(textBox);
-    if (objectRect.isEmpty())
+    const QRectF unrotated = objectBoundsInViewport(textBox);
+    if (unrotated.isEmpty())
         return;
+    const QRectF objectRect = rotatedViewportBounds(
+        unrotated, unrotated.center(), textBox->rotation);
 
     const int inset = 8;
     const qreal gap = 8.0;
@@ -9375,25 +9471,8 @@ QRectF DocumentViewport::inlineTextEditorRect(TextBoxObject* textBox) const
     if (content.height() < 4.0)
         content.setHeight(4.0);
 
-    if (qFuzzyIsNull(textBox->rotation))
-        return content;
-
-    const QPointF center = outer.center();
-    const qreal radians = qDegreesToRadians(textBox->rotation);
-    auto rotate = [center, radians](const QPointF& point) {
-        const QPointF delta = point - center;
-        return center + QPointF(
-            delta.x() * qCos(radians)
-                - delta.y() * qSin(radians),
-            delta.x() * qSin(radians)
-                + delta.y() * qCos(radians));
-    };
-    QPolygonF corners;
-    corners << rotate(content.topLeft())
-            << rotate(content.topRight())
-            << rotate(content.bottomRight())
-            << rotate(content.bottomLeft());
-    return corners.boundingRect();
+    return rotatedViewportBounds(content, outer.center(),
+                                 textBox->rotation);
 }
 
 void DocumentViewport::updateInlineTextEditorGeometry()
@@ -15683,10 +15762,7 @@ void DocumentViewport::undo()
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(canRedo());
     emit documentModified();
-    if (((action.type == UndoAction::ObjectResize
-          || action.type == UndoAction::ObjectTextEdit)
-         && action.objectHasTextBoxState)
-        || action.type == UndoAction::OcrConvertToTextBox) {
+    if (UndoAction::affectsTextLayout(action.type)) {
         emit textBoxLayoutCommitted();
     }
     if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete) {
@@ -16131,10 +16207,7 @@ void DocumentViewport::redo()
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(canRedo());
     emit documentModified();
-    if (((action.type == UndoAction::ObjectResize
-          || action.type == UndoAction::ObjectTextEdit)
-         && action.objectHasTextBoxState)
-        || action.type == UndoAction::OcrConvertToTextBox) {
+    if (UndoAction::affectsTextLayout(action.type)) {
         emit textBoxLayoutCommitted();
     }
     if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete) {

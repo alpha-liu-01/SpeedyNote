@@ -71,7 +71,9 @@ public:
 
     QString text;
     QString fontFamily;
-    qreal fontSize = 0.0;                          // 0 = auto-calculated from boundingRect height
+    /// Base size in document units. Version-1 boxes always carry a real value;
+    /// only legacy (version 0) boxes use 0 to mean "fit to the rectangle".
+    qreal fontSize = 0.0;
     QColor fontColor = QColor(60, 60, 60);
     QColor backgroundColor = QColor(255, 255, 255, 160);
     TextAlignment alignment = TextAlignment::Left;
