@@ -31,7 +31,6 @@ class PagePanelActionBar;
  * - LassoActionBar: Lasso tool + lasso selection exists
  * - ObjectSelectActionBar: whenever ObjectSelect is active
  * - TextSelectionActionBar: Highlighter tool + PDF text selected
- * - ClipboardActionBar: available for contexts that need a standalone paste action
  * 
  * Usage:
  * 1. Create container as child of MainWindow (or viewport parent)

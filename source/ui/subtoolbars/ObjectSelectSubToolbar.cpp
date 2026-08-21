@@ -18,14 +18,6 @@ ObjectSelectSubToolbar::ObjectSelectSubToolbar(QWidget* parent)
     setupConnections();
 }
 
-ObjectSelectSubToolbar::~ObjectSelectSubToolbar()
-{
-    // Clean up popup widget (has no parent)
-    delete m_descriptionPopup;
-    m_descriptionPopup = nullptr;
-    m_descriptionEdit = nullptr;  // Deleted as child of popup
-}
-
 bool ObjectSelectSubToolbar::eventFilter(QObject* watched, QEvent* event)
 {
     // Handle popup close event to sync button state
@@ -83,8 +75,7 @@ void ObjectSelectSubToolbar::createWidgets()
     }
     
     // Create description popup with text editor and buttons
-    m_descriptionPopup = new QWidget();
-    m_descriptionPopup->setWindowFlags(Qt::Popup);
+    m_descriptionPopup = new QWidget(this, Qt::Popup);
     m_descriptionPopup->installEventFilter(this);
     
     QHBoxLayout* popupLayout = new QHBoxLayout(m_descriptionPopup);
@@ -164,19 +155,11 @@ void ObjectSelectSubToolbar::refreshFromSettings()
 
 void ObjectSelectSubToolbar::restoreTabState(int tabIndex)
 {
-    // LinkObject editing controls reflect the current selection, not tab state.
     Q_UNUSED(tabIndex);
 }
 
 void ObjectSelectSubToolbar::saveTabState(int tabIndex)
 {
-    // LinkObject editing controls have no per-tab state.
-    Q_UNUSED(tabIndex);
-}
-
-void ObjectSelectSubToolbar::clearTabState(int tabIndex)
-{
-    // LinkObject editing controls have no per-tab state.
     Q_UNUSED(tabIndex);
 }
 

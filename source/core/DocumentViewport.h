@@ -28,6 +28,7 @@ enum class TouchGestureMode {
 #include "Document.h"
 #include "Page.h"
 #include "ToolType.h"
+#include "../objects/TextBoxObject.h"
 #include "../strokes/VectorStroke.h"
 #include "../pdf/PdfProvider.h"
 #include "../pdf/PdfSearchEngine.h"
@@ -36,6 +37,10 @@ enum class TouchGestureMode {
 #include <QSet>
 
 class QContextMenuEvent;
+class ImageObject;
+class InlineTextBoxEditor;
+class OcrTextObject;
+class TextBoxFormatBar;
 
 // ============================================================================
 // UndoAction - Unified undo action for both paged and edgeless modes
@@ -48,7 +53,9 @@ class QContextMenuEvent;
  * a stroke may span multiple tiles, producing multiple segments.  The undo/redo
  * loop iterates segments identically regardless of mode.
  *
- * Memory bound: MAX_UNDO actions × ~20KB avg = ~2MB max
+ * Memory bound: MAX_UNDO actions. Most actions are compact; an unpersisted
+ * clipboard image can temporarily retain a shared full-resolution snapshot
+ * so undo/redo remains lossless if its background asset write fails.
  */
 struct UndoAction {
     enum Type {
@@ -67,6 +74,7 @@ struct UndoAction {
         ObjectResize,
         ObjectTextEdit,
         OcrLockChange,
+        OcrConvertToTextBox,    ///< One OCR block replaced by an editable text box
 
         // ===== Page-structure types (Plan A2) =====
         PageDelete,             ///< One or more whole pages removed; undo restores them
@@ -74,6 +82,29 @@ struct UndoAction {
         // ===== Page-structure types (Plan B) =====
         PageInsert              ///< One or more whole pages inserted (import); undo removes them
     };
+
+    /**
+     * @brief Whether undoing/redoing @p type can change text-box text or layout.
+     *
+     * Search caches match rectangles produced by the text-box layout engine, so
+     * they must be dropped whenever this returns true. Erring towards true only
+     * costs a cache rebuild; erring the other way leaves stale hits on screen.
+     */
+    static bool affectsTextLayout(Type type) {
+        switch (type) {
+        case ObjectInsert:
+        case ObjectDelete:
+        case ObjectMove:
+        case ObjectResize:
+        case ObjectTextEdit:
+        case OcrConvertToTextBox:
+        case PageDelete:
+        case PageInsert:
+            return true;
+        default:
+            return false;
+        }
+    }
 
     Type type = AddStroke;
     int layerIndex = 0;
@@ -125,6 +156,9 @@ struct UndoAction {
     int objectPageIndex = -1;                      ///< Container page (paged mode)
     Document::TileCoord objectTileCoord = {0, 0};  ///< Container tile (edgeless mode)
     QJsonObject objectData;
+    QImage objectImageSnapshot;                       ///< Shared full-resolution recovery pixels
+    QByteArray objectImageEncodedData;                ///< Original file bytes, when available
+    QByteArray objectImageFormat;                     ///< Safe original format/extension
     QString objectId;
     QPointF objectOldPosition;
     QPointF objectNewPosition;
@@ -140,20 +174,28 @@ struct UndoAction {
     qreal objectNewRotation = 0.0;
     bool objectOldAspectLock = true;
     bool objectNewAspectLock = true;
-
-    // ObjectTextEdit fields
-    QString objectOldText;
-    QString objectNewText;
-    int objectOldTextAlignment = 0;
-    int objectNewTextAlignment = 0;
-    int objectOldBgAlpha = 180;
-    int objectNewBgAlpha = 180;
-    QColor objectOldFontColor = QColor(60, 60, 60);
-    QColor objectNewFontColor = QColor(60, 60, 60);
+    /// ObjectResize only carries a text-box state when the object is one;
+    /// ObjectTextEdit always does.
+    bool objectHasTextBoxState = false;
+    TextBoxState objectOldTextBoxState;
+    TextBoxState objectNewTextBoxState;
 
     // OcrLockChange fields
     QVector<QString> ocrLockObjectIds;
     bool ocrLockNewState = false;
+
+    // ===== OcrConvertToTextBox fields =====
+    // objectData holds the produced text box, objectId its (fresh) id, and the
+    // container fields locate both objects. Everything below restores the OCR
+    // side of the conversion, including the derived-cache state that lives in
+    // the .ocr.json sidecar rather than in page JSON.
+    QJsonObject ocrSourceObjectData;                 ///< OcrTextObject::toJson snapshot
+    QJsonObject ocrSourceBlock;                      ///< Removed OcrTextBlock, when one existed
+    bool ocrSourceBlockValid = false;
+    int ocrSourceBlockIndex = -1;                    ///< Position the block occupied
+    QVector<QString> ocrSuppressedStrokeIdsAdded;    ///< Only the newly suppressed ids
+    /// Fingerprint recorded for a block with no source strokes; empty otherwise.
+    QString ocrDismissedBlockKeyAdded;
 };
 
 #include <QWidget>
@@ -751,14 +793,14 @@ public:
                             int newPageIndex = -1);
     void pushObjectResizeUndo(InsertedObject* obj, const QPointF& oldPos,
                               const QSizeF& oldSize, qreal oldRotation = 0.0,
-                              bool oldAspectLock = true);
+                              bool oldAspectLock = true,
+                              const TextBoxState* oldTextBoxState = nullptr);
     void pushObjectAffinityUndo(InsertedObject* obj, int oldAffinity);
-    void pushObjectTextEditUndo(InsertedObject* obj,
-                                const QString& oldText, const QString& newText,
-                                int oldAlignment, int newAlignment,
-                                int oldOpacity, int newOpacity,
-                                const QColor& oldFontColor = QColor(60, 60, 60),
-                                const QColor& newFontColor = QColor(60, 60, 60));
+    void pushObjectTextEditUndo(
+        TextBoxObject* obj, const TextBoxState& oldState,
+        const TextBoxState& newState, int pageIndex,
+        Document::TileCoord oldTile = {0, 0},
+        Document::TileCoord newTile = {0, 0});
 
     void pushOcrLockUndo(const QVector<QString>& objectIds, bool newState);
 
@@ -778,6 +820,25 @@ public:
      * @return Pointer to the Page, or nullptr if not found.
      */
     Page* findPageContainingObject(InsertedObject* obj, Document::TileCoord* outTileCoord = nullptr);
+
+    /**
+     * @brief Look up an object by id across the loaded pages/tiles.
+     * @return The object, or nullptr when it no longer exists.
+     *
+     * Callers that let an event loop run (a modal dialog, for instance) must
+     * re-resolve their target this way instead of holding a raw pointer.
+     */
+    InsertedObject* objectById(const QString& objectId) const;
+
+    /**
+     * @brief Drop every viewport-side reference to an object about to be freed.
+     *
+     * Code outside the viewport (the OCR rescan, for instance) destroys objects
+     * directly on the Page. Selection and hover hold raw pointers into them, so
+     * that owner must call this first for each id it is about to remove.
+     * Safe to call for ids this viewport never referenced.
+     */
+    void forgetObject(const QString& objectId);
 
     /**
      * @brief Mark the page/tile that contains @p link as dirty AND refresh
@@ -983,7 +1044,7 @@ public:
      * - If objects are selected: deselect all objects
      * - If no objects selected but clipboard has content: clear object clipboard
      * 
-     * Used by Escape key handler and ObjectSelectSubToolbar cancel button.
+     * Used by the Escape key handler and ObjectSelectActionBar cancel button.
      */
     void cancelObjectSelectAction();
     
@@ -1033,6 +1094,12 @@ public:
      * @return True if at least one object is selected.
      */
     bool hasSelectedObjects() const { return !m_selectedObjects.isEmpty(); }
+
+    bool hasActiveInlineTextEdit() const;
+    bool inlineTextEditorHasFocus() const;
+    bool textBoxFormatBarHasFocus() const;
+    void commitInlineTextEdit();
+    void cancelInlineTextEdit();
     
     /**
      * @brief Check if a lasso selection exists.
@@ -1325,6 +1392,23 @@ public:
      * creates undo entries, marks pages dirty, and clears selection.
      */
     void deleteSelectedObjects();
+
+    /**
+     * @brief Replace a recognized OCR block with an editable user text box.
+     *
+     * OCR objects are derived from ink and cannot be edited. Conversion hands
+     * the recognized text to a normal current-version TextBoxObject, removes
+     * the OCR object and its sidecar block, and suppresses the source strokes
+     * so a later scan does not recreate a duplicate block. The whole exchange
+     * is one undo action.
+     *
+     * @param ocr The OCR object to convert; may be locked or unlocked.
+     * @param startEditing Start an inline edit session on the new text box.
+     * @return True when the conversion happened. A paged conversion that
+     *         cannot fit its reflowed height on the page is rejected and
+     *         leaves the OCR object untouched.
+     */
+    bool convertOcrTextToTextBox(OcrTextObject* ocr, bool startEditing = true);
     
     /**
      * @brief Copy selected objects to internal clipboard.
@@ -1408,6 +1492,122 @@ public:
      * @param viewportPos A viewport position for tile determination in edgeless mode.
      */
     void createTextBoxAtRect(int pageIndex, const QRectF& rect, const QPointF& viewportPos);
+
+    struct InlineTextEditSession {
+        Document* document = nullptr;
+        QString objectId;
+        int pageIndex = -1;
+        Document::TileCoord tileCoord = {0, 0};
+        TextBoxState startState;
+        TextBoxState lastAcceptedState;
+        bool active = false;
+        bool newBox = false;
+
+        void clear() {
+            document = nullptr;
+            objectId.clear();
+            pageIndex = -1;
+            tileCoord = {0, 0};
+            startState = TextBoxState();
+            lastAcceptedState = TextBoxState();
+            active = false;
+            newBox = false;
+        }
+    };
+
+    /**
+     * @brief Find the page/tile holding @p objectId in the current document.
+     *
+     * Object ids are stable while raw pointers are not, so conversion, undo,
+     * and redo each re-resolve their container instead of caching one.
+     */
+    Page* locateObjectContainer(const QString& objectId, int& pageIndex,
+                                Document::TileCoord& tileCoord) const;
+    void applyOcrConversion(const UndoAction& action);
+    void revertOcrConversion(const UndoAction& action);
+    void persistOcrSidecar(Page* container, int pageIndex,
+                           Document::TileCoord tileCoord);
+
+    void startInlineTextEdit(TextBoxObject* textBox, bool newBox);
+    TextBoxObject* resolveInlineTextBox() const;
+    QRectF inlineTextEditorRect(TextBoxObject* textBox) const;
+    void updateInlineTextEditorGeometry();
+    void handleInlineTextSourceChanged(const QString& source);
+    void endInlineTextEdit(bool commit, bool targetBeingDeleted = false);
+    void removeUncommittedInlineTextBox();
+    void markInlineTextEditCommitted();
+    static bool textBoxStatesEqual(const TextBoxState& lhs,
+                                   const TextBoxState& rhs);
+
+    enum class TextBoxFormatChange {
+        FontSize,
+        FontFamily,
+        Alignment,
+        FontColor,
+        BackgroundColor,
+        BackgroundOpacity,
+        Border
+    };
+
+    struct TextBoxFormatTransaction {
+        Document* document = nullptr;
+        QString objectId;
+        int pageIndex = -1;
+        Document::TileCoord tileCoord = {0, 0};
+        TextBoxState startState;
+        TextBoxState lastAcceptedState;
+        QRectF dirtyViewport;
+        bool active = false;
+        bool attachedToInlineEdit = false;
+
+        void clear() {
+            document = nullptr;
+            objectId.clear();
+            pageIndex = -1;
+            tileCoord = {0, 0};
+            startState = TextBoxState();
+            lastAcceptedState = TextBoxState();
+            dirtyViewport = QRectF();
+            active = false;
+            attachedToInlineEdit = false;
+        }
+    };
+
+    TextBoxObject* selectedTextBoxForFormatting() const;
+    TextBoxObject* resolveTextBoxFormatTarget() const;
+    bool locateTextBoxObject(TextBoxObject* textBox, int& pageIndex,
+                             Document::TileCoord& tileCoord) const;
+    void ensureTextBoxFormatBar();
+    void syncTextBoxFormatBar();
+    /**
+     * @brief Whether a viewport point belongs to a text overlay widget.
+     *
+     * Stylus events are delivered to the deepest child and propagate back up
+     * when that child does not handle them. Consuming those here would make
+     * the canvas react to overlay interactions and would suppress the
+     * synthesized mouse events the overlay widgets rely on.
+     */
+    bool pointerOverTextOverlay(const QPointF& viewportPos) const;
+    void updateTextBoxFormatBarGeometry();
+    void beginTextBoxFormatInteraction();
+    void applyTextBoxFormatPreview(TextBoxFormatChange change,
+                                   const QVariant& value);
+    void finishTextBoxFormatInteraction(bool accept);
+    void closeTextBoxFormatPopups(bool acceptPreview);
+    void markTextBoxFormatCommitted(int pageIndex,
+                                    Document::TileCoord tileCoord);
+    static void preserveTextBoxTopAnchor(const TextBoxState& previous,
+                                         TextBoxState& candidate);
+
+    QRectF proposedTextBoxCreationRect(const QPointF& startPoint,
+                                       const QPointF& currentPoint,
+                                       int pageIndex) const;
+    QRectF proposedTextBoxCreationRectInViewport() const;
+    bool textBoxGeometryProposalAllowed(const TextBoxState& oldState,
+                                        const TextBoxState& proposedState,
+                                        int pageIndex) const;
+    void showObjectGeometryFeedback(const QString& message,
+                                    const QRectF& anchorViewportRect);
 
     /**
      * @brief Create a LinkObject for a text highlight.
@@ -1901,6 +2101,12 @@ signals:
     void pageModified(int pageIndex);
 
     /**
+     * Emitted after committed text-box geometry changes so search caches and
+     * visible match rectangles cannot outlive their layout.
+     */
+    void textBoxLayoutCommitted();
+
+    /**
      * @brief Emitted when the list of LinkObjects may have changed.
      * 
      * This is more targeted than documentModified() and should be used by
@@ -2087,7 +2293,13 @@ signals:
 
     void requestPdfSources();
 
-    void openTextEditorRequested(InsertedObject* obj);
+    /**
+     * @brief A recognized OCR block was double-clicked to be made editable.
+     *
+     * The viewport does not own dialogs, so MainWindow confirms the exchange
+     * before calling convertOcrTextToTextBox().
+     */
+    void convertOcrTextRequested(InsertedObject* obj);
     
 protected:
     // ===== Qt Event Overrides =====
@@ -2492,8 +2704,15 @@ private:
      */
     bool m_isCreatingTextBox = false;
     QPointF m_textBoxCreateStartDoc;   // page-local coords of press point
-    QPointF m_textBoxCreateStartVP;    // viewport coords of press point (for rubber band)
     int m_textBoxCreatePageIndex = -1; // page index where creation started
+    QTimer* m_objectGeometryFeedbackTimer = nullptr;
+    QString m_objectGeometryFeedbackText;
+    QRectF m_objectGeometryFeedbackAnchor;
+    InlineTextBoxEditor* m_inlineTextBoxEditor = nullptr;
+    InlineTextEditSession m_inlineEditSession;
+    bool m_revertingInlineText = false;
+    TextBoxFormatBar* m_textBoxFormatBar = nullptr;
+    TextBoxFormatTransaction m_textBoxFormatTransaction;
     
     /**
      * @brief Whether we're currently dragging selected objects.
@@ -2545,14 +2764,19 @@ private:
      */
     static QList<QJsonObject> s_objectClipboard;
     
+    struct ClipboardImageAsset {
+        QPixmap pixmap;
+        QByteArray encodedData;
+        QByteArray format;
+    };
+
     /**
      * @brief Cached image assets for cross-document object paste.
-     * 
-     * Maps imagePath (filename) to the loaded QPixmap. Populated during
-     * copySelectedObjects() so that pasteObjects() can supply the pixmap
-     * when pasting into a different document whose bundle lacks the file.
+     *
+     * Original encoded bytes are retained when reasonably sized so JPEG/WebP
+     * and other source formats do not become PNG merely by crossing documents.
      */
-    static QMap<QString, QPixmap> s_objectClipboardAssets;
+    static QMap<QString, ClipboardImageAsset> s_objectClipboardAssets;
     
     // ===== Object Resize State (Phase O3.1) =====
     
@@ -2620,6 +2844,12 @@ private:
      * page every frame without searching pages.
      */
     int m_resizeObjectPageIndex = -1;
+    bool m_hasResizeTextBoxState = false;
+    bool m_textBoxResizeActivated = false;
+    bool m_textBoxResizeChanged = false;
+    TextBoxState m_resizeOriginalTextBoxState;
+    TextBoxState m_resizeBaseTextBoxState;
+    TextBoxState m_resizeLastAcceptedTextBoxState;
     
     // =========================================================================
     // Phase O4.1: Object Drag/Resize Performance Optimization
@@ -2806,7 +3036,7 @@ private:
     // guard, every leaked stylus press re-enters handlePointerPress_ObjectSelect
     // and opens another file dialog, stacking until the app crashes.
     bool m_objectInsertDialogActive = false;
-    
+
     // ===== Stroke Drawing State (Task 2.2) =====
     VectorStroke m_currentStroke;             ///< Stroke currently being drawn
     bool m_isDrawing = false;                 ///< True while actively drawing a stroke
@@ -3100,6 +3330,7 @@ private:
         PointerEvent::Source source,
         Qt::MouseButton button);
 
+    bool hasActiveObjectPointerGesture() const;
     void beginObjectPointerGesture(const PointerEvent& pe);
     void cancelObjectPointerGesture();
     void resetObjectPointerGesture();
@@ -3203,6 +3434,15 @@ private:
      * Finalizes object drag operation.
      */
     void handlePointerRelease_ObjectSelect(const PointerEvent& pe);
+
+    /**
+     * @brief Normalize, constrain, and center a newly supplied raster image.
+     * @return False when the current page/tile has no valid insertion bounds.
+     */
+    bool prepareFreshImageForInsertion(ImageObject& imageObject);
+    void insertPreparedImage(const QImage& image,
+                             const QByteArray& encodedData = QByteArray(),
+                             const QByteArray& encodedFormat = QByteArray());
     
     /**
      * @brief Clear the current object selection.

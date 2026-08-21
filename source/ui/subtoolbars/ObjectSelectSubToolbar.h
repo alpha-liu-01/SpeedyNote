@@ -31,7 +31,7 @@ class ObjectSelectSubToolbar : public SubToolbar {
 
 public:
     explicit ObjectSelectSubToolbar(QWidget* parent = nullptr);
-    ~ObjectSelectSubToolbar() override;
+    ~ObjectSelectSubToolbar() override = default;
     
     // Event filter for popup handling
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -40,7 +40,6 @@ public:
     void refreshFromSettings() override;
     void restoreTabState(int tabIndex) override;
     void saveTabState(int tabIndex) override;
-    void clearTabState(int tabIndex) override;
     void setDarkMode(bool darkMode) override;
     
     /**

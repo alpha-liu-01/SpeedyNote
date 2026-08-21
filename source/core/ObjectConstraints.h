@@ -163,11 +163,54 @@ inline QSizeF shrinkByIntegerDivisor(const QSizeF& sourceSize,
                                      const QSizeF& targetSize,
                                      qreal maxFraction = 2.0 / 3.0)
 {
-    const int divisor = integerShrinkDivisor(sourceSize, targetSize, maxFraction);
-    if (divisor <= 1) {
+    const auto finitePositive = [](qreal value) {
+        return qIsFinite(value) && value > 0.0;
+    };
+    const qreal maxWidth = targetSize.width() * maxFraction;
+    const qreal maxHeight = targetSize.height() * maxFraction;
+    if (!finitePositive(sourceSize.width()) || !finitePositive(sourceSize.height())
+        || !finitePositive(maxWidth) || !finitePositive(maxHeight)) {
         return sourceSize;
     }
-    return QSizeF(sourceSize.width() / divisor, sourceSize.height() / divisor);
+    if (sourceSize.width() <= maxWidth && sourceSize.height() <= maxHeight) {
+        return sourceSize;
+    }
+
+    const int divisor = integerShrinkDivisor(sourceSize, targetSize, maxFraction);
+    if (divisor > 1) {
+        const QSizeF result(sourceSize.width() / divisor,
+                            sourceSize.height() / divisor);
+        if (result.width() <= maxWidth && result.height() <= maxHeight) {
+            return result;
+        }
+    }
+
+    // A finite QSizeF can require a divisor larger than int can represent.
+    // Fractional fallback is preferable to violating the insertion bound.
+    return shrinkToFit(sourceSize, QSizeF(maxWidth, maxHeight));
+}
+
+/**
+ * @brief Convert image pixels to logical document units, then constrain them.
+ *
+ * Pixmap DPR describes source pixel density; display DPR describes how many
+ * physical display pixels correspond to one document unit at 100% zoom.
+ * Using the larger value avoids double-sizing DPR-tagged clipboard images while
+ * preserving the existing 1:1 physical-pixel behavior for ordinary files.
+ */
+inline QSizeF freshImageInsertSize(const QSizeF& pixelSize,
+                                   qreal imageDpr,
+                                   qreal displayDpr,
+                                   const QSizeF& targetSize)
+{
+    const qreal safeImageDpr = qIsFinite(imageDpr) && imageDpr > 0.0 ? imageDpr : 1.0;
+    const qreal safeDisplayDpr =
+        qIsFinite(displayDpr) && displayDpr > 0.0 ? displayDpr : 1.0;
+    const qreal normalizationDpr = std::max(safeImageDpr, safeDisplayDpr);
+    return shrinkByIntegerDivisor(
+        QSizeF(pixelSize.width() / normalizationDpr,
+               pixelSize.height() / normalizationDpr),
+        targetSize);
 }
 
 }  // namespace ObjectConstraints

@@ -46,6 +46,14 @@ void ObjectSelectActionBar::setupButtons()
         m_ocrLockButton->setChecked(!m_ocrLockButton->isChecked());
         emit ocrLockToggleRequested();
     });
+
+    // === Convert recognized text to an editable text box (ocr-text-only) ===
+    m_ocrConvertButton = new ActionBarButton(this);
+    m_ocrConvertButton->setIconName("text");
+    m_ocrConvertButton->setToolTip(tr("Convert to Editable Text Box"));
+    addButton(m_ocrConvertButton);
+    connect(m_ocrConvertButton, &ActionBarButton::clicked,
+            this, &ObjectSelectActionBar::ocrConvertToTextBoxRequested);
     
     // === Clipboard operations ===
     
@@ -135,9 +143,12 @@ void ObjectSelectActionBar::updateButtonStates()
         m_aspectLockButton->setVisible(m_hasSelection && m_isImageSelected);
     }
     
-    // OCR lock: visible only when a single OcrTextObject is selected
+    // OCR lock and conversion: visible only when a single OcrTextObject is selected
     if (m_ocrLockButton) {
         m_ocrLockButton->setVisible(m_hasSelection && m_isOcrTextSelected);
+    }
+    if (m_ocrConvertButton) {
+        m_ocrConvertButton->setVisible(m_hasSelection && m_isOcrTextSelected);
     }
     
     // Copy, Delete, and layer ordering buttons: visible only when selection exists

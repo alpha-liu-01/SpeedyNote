@@ -30,7 +30,10 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QFile>
+#include <QFuture>
+#include <QImage>
 #include <QPixmap>
+#include <QThreadPool>
 #include <QSet>
 #include <QHash>
 #include <QVector>
@@ -39,6 +42,8 @@
 #include <map>
 #include <set>
 #include <memory>
+
+class ImageObject;
 
 // ============================================================================
 // LayerDefinition - Layer metadata for edgeless mode manifest (Phase 5.6)
@@ -438,7 +443,7 @@ public:
      * @brief Set the bundle path for saving/loading tiles.
      * @param path Path to the .snb directory.
      */
-    void setBundlePath(const QString& path) { m_bundlePath = path; }
+    void setBundlePath(const QString& path);
     
     /**
      * @brief Get the bundle path.
@@ -590,12 +595,27 @@ public:
     /**
      * @brief Save all unsaved ImageObjects to the assets folder.
      * @param bundlePath Path to the bundle directory.
-     * @return Number of images saved.
+     * @return Number of images saved, or -1 if any asset failed.
      * 
      * Phase O2: Called during saveBundle() to ensure all images are persisted.
      * ImageObjects with empty imagePath but valid cachedPixmap are saved.
      */
     int saveUnsavedImages(const QString& bundlePath);
+
+    /**
+     * @brief Persist a fresh image without blocking the GUI thread.
+     *
+     * File imports write their retained original bytes. Clipboard images pass
+     * an immutable QImage which the worker encodes once as lossless PNG.
+     */
+    bool enqueueImageAssetWrite(ImageObject* imageObject, const QImage& sourceImage);
+
+    /**
+     * @brief Wait for all pending image writes and publish their results.
+     *
+     * Called at every page/tile/bundle persistence and cleanup boundary.
+     */
+    bool flushPendingImageWrites();
     
     /**
      * @brief Clean up orphaned asset files from the assets folder.
@@ -1813,6 +1833,16 @@ public:
     static Mode stringToMode(const QString& str);
     
 private:
+    struct PendingImageWrite {
+        QString objectId;
+        QString fullPath;
+        QFuture<bool> future;
+    };
+
+    bool collectFinishedImageWrites(bool waitForAll);
+    void confirmPersistedImageAssets();
+    ImageObject* findLoadedImageObject(const QString& objectId) const;
+
     // ===== PDF Sources (multi-source model) =====
     /// Ordered list of PDF sources. Index 0 is the "primary" (born-from single PDF),
     /// mirrored to the legacy top-level pdf_path/pdf_hash/pdf_size keys on save.
@@ -1948,6 +1978,8 @@ private:
     mutable std::set<TileCoord> m_dirtyTiles;       ///< Tiles modified since last save
     std::set<TileCoord> m_deletedTiles;             ///< Tiles to delete from disk on next save
     bool m_lazyLoadEnabled = false;                 ///< True after loading from bundle
+    std::unique_ptr<QThreadPool> m_imageWritePool;  ///< Bounded pool isolated from PDF/render jobs
+    QVector<PendingImageWrite> m_pendingImageWrites;
 
     bool m_ocrTextVisible = false;
     bool m_ocrDarkMode = false;

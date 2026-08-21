@@ -11,6 +11,7 @@
 // ============================================================================
 
 #include <QMetaType>
+#include <QSet>
 #include <QString>
 #include <QVector>
 #include <QRectF>
@@ -158,6 +159,52 @@ struct OcrTextBlock {
         return block;
     }
 };
+
+/**
+ * @brief Stable identity for a block that carries no source stroke ids.
+ *
+ * Block ids are minted per scan, so they cannot match a block across a rescan.
+ * Text plus rounded geometry can: rescanning the same ink yields the same words
+ * in the same place, and rounding absorbs sub-pixel engine jitter.
+ */
+inline QString ocrBlockDismissalKey(const OcrTextBlock& block) {
+    return QStringLiteral("%1|%2|%3|%4|%5")
+        .arg(block.text)
+        .arg(qRound(block.boundingRect.x()))
+        .arg(qRound(block.boundingRect.y()))
+        .arg(qRound(block.boundingRect.width()))
+        .arg(qRound(block.boundingRect.height()));
+}
+
+/**
+ * @brief Whether the user has already dismissed @p block by deleting or
+ *        converting it.
+ *
+ * A scan started before the user dismissed a block still carries that block in
+ * its results, because the worker filtered its stroke list before the dismissal
+ * was recorded. Materializing it again would resurrect what the user just got
+ * rid of.
+ *
+ * Stroke-backed blocks are recognized through @p suppressedStrokeIds; a block
+ * that only partially overlaps that set still describes live ink, so it is
+ * kept. Blocks with no stroke ids cannot be expressed that way at all, so they
+ * fall back to the geometry fingerprint in @p dismissedBlockKeys.
+ */
+inline bool isOcrBlockDismissed(const OcrTextBlock& block,
+                                const QSet<QString>& suppressedStrokeIds,
+                                const QSet<QString>& dismissedBlockKeys) {
+    if (block.sourceStrokeIds.isEmpty()) {
+        return !dismissedBlockKeys.isEmpty()
+            && dismissedBlockKeys.contains(ocrBlockDismissalKey(block));
+    }
+    if (suppressedStrokeIds.isEmpty())
+        return false;
+    for (const auto& strokeId : block.sourceStrokeIds) {
+        if (!suppressedStrokeIds.contains(strokeId))
+            return false;
+    }
+    return true;
+}
 
 /**
  * @brief Flatten per-character geometry into a @p text-length rect array.

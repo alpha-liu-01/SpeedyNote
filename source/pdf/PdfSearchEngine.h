@@ -152,6 +152,18 @@ public:
      * @param doc Document containing the PDF.
      */
     void setDocument(Document *doc);
+
+    /**
+     * @brief Zoom to use when laying out legacy (pre-version-1) text boxes.
+     *
+     * Legacy layout measures its padding in screen pixels, so its document-space
+     * content rectangle depends on the zoom it is rendered at. Match rectangles
+     * are in document space, so searching at a fixed zoom would place hits a few
+     * units away from the glyphs the user sees. Callers set this from the
+     * viewport that started the search, before calling findNext/findPrev/
+     * scanAllPages. Version-1 boxes ignore it; their layout is zoom-independent.
+     */
+    void setLegacyLayoutZoom(qreal zoom);
     
     /**
      * @brief Find the next match.
@@ -346,6 +358,9 @@ private:
     void buildEdgelessTileOrder();
 
     Document *m_document = nullptr;
+    /// Set on the GUI thread before a search starts, read by the workers it
+    /// spawns. Same ownership contract as m_document.
+    std::atomic<qreal> m_legacyLayoutZoom{1.0};
     std::atomic<bool> m_searchCancelled{false};   ///< Cancellation for main search only
     std::atomic<bool> m_precacheCancelled{false}; ///< Cancellation for pre-cache only
     std::atomic<bool> m_scanCancelled{false};     ///< SBS2: cancellation for whole-document scan

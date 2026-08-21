@@ -138,6 +138,11 @@ signals:
      */
     void ocrLockToggleRequested();
 
+    /**
+     * @brief Emitted when the "convert OCR text to a text box" button is clicked.
+     */
+    void ocrConvertToTextBoxRequested();
+
 private:
     void setupButtons();
     void updateActionModeButton();
@@ -164,6 +169,9 @@ private:
     
     // OCR lock (ocr-text-only)
     ActionBarButton* m_ocrLockButton = nullptr;
+
+    // Convert recognized text into an editable text box (ocr-text-only)
+    ActionBarButton* m_ocrConvertButton = nullptr;
     
     // Cancel button (for paste-only mode)
     ActionBarButton* m_cancelButton = nullptr;

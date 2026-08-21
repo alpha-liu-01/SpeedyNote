@@ -73,6 +73,12 @@ class MarkdownHighlighter : public QSyntaxHighlighter {
         QTextDocument *parent = nullptr,
         HighlightingOptions highlightingOptions = HighlightingOption::None);
 
+    /**
+     * Override heading sizes for this highlighter instance without changing
+     * the shared color/style formats used by other Markdown editors.
+     */
+    void setBaseFontPixelSize(qreal pixelSize);
+
     static inline QColor codeBlockBackgroundColor() {
         const QBrush brush = _formats[CodeBlock].background();
 
@@ -362,6 +368,7 @@ class MarkdownHighlighter : public QSyntaxHighlighter {
     QHash<int, QVector<InlineRange>> _ranges;
 
     QTextCharFormat currentMaskedFormat() const;
+    QTextCharFormat formatForState(HighlighterState state) const;
     bool isHidingForCurrentBlock() const;
 
     static QVector<HighlightingRule> _highlightingRules;
@@ -371,4 +378,5 @@ class MarkdownHighlighter : public QSyntaxHighlighter {
 
     int _currentCursorBlockNumber = -1;
     bool _hideFormattingSyntax = false;
+    qreal _baseFontPixelSize = 0.0;
 };

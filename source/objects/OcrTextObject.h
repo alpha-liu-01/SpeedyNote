@@ -34,6 +34,17 @@ public:
         bool darkMode = false);
 
     /**
+     * @brief Base font size, in document units, matching the rendered glyphs.
+     *
+     * OCR objects are geometry-driven: the renderer derives a pixel size from
+     * each word segment's height. Converting to a user text box needs a single
+     * authoritative base size instead, so take the median segment height (the
+     * block rectangle when there is no segment geometry) through the same 0.75
+     * factor the renderer uses, then clamp it to a usable range.
+     */
+    qreal estimateBaseFontSize() const;
+
+    /**
      * @brief Compute the dominant stroke color from a page's vector layers.
      * @param page The page containing strokes.
      * @param strokeIds IDs of strokes to sample.

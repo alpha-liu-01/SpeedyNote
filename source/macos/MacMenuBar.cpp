@@ -3,6 +3,7 @@
 #ifdef Q_OS_MACOS
 
 #include <QAction>
+#include <QActionGroup>
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QMenu>
@@ -389,11 +390,28 @@ void MacMenuBar::populateToolsMenu()
     // their shared Add/Select interaction mode. Handlers activate ObjectSelect
     // before applying the requested mode, matching the main toolbar.
     QMenu* ins = m_toolsMenu->addMenu(tr("Object Mode"));
-    add(ins, "object.mode_image");
-    add(ins, "object.mode_link");
-    add(ins, "object.mode_text");
-    add(ins, "object.mode_create");
-    add(ins, "object.mode_select");
+    auto* subtypeGroup = new QActionGroup(this);
+    subtypeGroup->setExclusive(true);
+    for (const QString& id : {QStringLiteral("object.mode_image"),
+                              QStringLiteral("object.mode_link"),
+                              QStringLiteral("object.mode_text")}) {
+        if (QAction* action = sm->action(id)) {
+            action->setCheckable(true);
+            subtypeGroup->addAction(action);
+            ins->addAction(action);
+        }
+    }
+    ins->addSeparator();
+    auto* actionModeGroup = new QActionGroup(this);
+    actionModeGroup->setExclusive(true);
+    for (const QString& id : {QStringLiteral("object.mode_create"),
+                              QStringLiteral("object.mode_select")}) {
+        if (QAction* action = sm->action(id)) {
+            action->setCheckable(true);
+            actionModeGroup->addAction(action);
+            ins->addAction(action);
+        }
+    }
 
     // Submenu 3: Object — Z-order (4 items) + separator + Affinity (3 items).
     // All 7 grey out via MainWindow::updateObjectActionsEnabled() when the

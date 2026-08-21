@@ -64,8 +64,6 @@ class OcrWorker;
 class OcrSubToolbar;
 struct OcrSnapParams;
 
-// Phase 2B: Floating Text Editor
-class FloatingTextEditor;
 #include "ocr/OcrTextBlock.h"
 
 // Action Bar includes
@@ -73,7 +71,6 @@ class ActionBarContainer;
 class LassoActionBar;
 class ObjectSelectActionBar;
 class TextSelectionActionBar;
-class ClipboardActionBar;
 class PagePanelActionBar;
 
 // Phase 3.1.8: TouchGestureMode - extracted from InkCanvas.h for palm rejection
@@ -449,6 +446,10 @@ private slots:
     // disagree must re-seed the menu checkmarks from the now-active window).
     void syncOcrCheckActions();
 
+    // Keep the macOS Object Mode menu checkmarks aligned with the active
+    // viewport's per-tab insert and action modes.
+    void syncObjectModeCheckActions();
+
     /**
      * @brief Refresh the OS window title and NavigationBar filename label.
      *
@@ -507,6 +508,15 @@ private:
      * Used before auto-save (Android) and before closeEvent checks.
      */
     void syncAllDocumentPositions();
+
+    /**
+     * @brief Commit any open inline text edit across every tab.
+     *
+     * In-progress inline text lives only in the object model until the session
+     * commits, and an uncommitted page is never dirty, so autosave would write
+     * the document without it. Explicit Save already commits first.
+     */
+    void commitAllInlineTextEdits();
 
     /**
      * @brief Sync position and silently auto-save if the only change is the position.
@@ -640,7 +650,6 @@ private:
     LassoActionBar *m_lassoActionBar = nullptr;
     ObjectSelectActionBar *m_objectSelectActionBar = nullptr;
     TextSelectionActionBar *m_textSelectionActionBar = nullptr;
-    ClipboardActionBar *m_clipboardActionBar = nullptr;
     PagePanelActionBar *m_pagePanelActionBar = nullptr;
     
     // PDF Search
@@ -664,9 +673,6 @@ private:
     QStringList m_ocrDownloadedLanguages;
     std::set<std::pair<int,int>> m_ocrTempLoadedTiles;
     Document* m_ocrTempLoadedDoc = nullptr;
-    
-    // Phase 2B: Floating Text Editor
-    FloatingTextEditor* m_floatingTextEditor = nullptr;
     
     // Page Panel: Task 5.3: Pending delete state for undo support
     int m_pendingDeletePageIndex = -1;
@@ -795,7 +801,8 @@ private:
     QMetaObject::Connection m_linkObjectListConn;     // M.7.3: For linkObjectListMayHaveChanged
     QMetaObject::Connection m_pdfSourcesConn;
     QMetaObject::Connection m_strokesChangedConn;      // OCR: For strokesChanged → debounce
-    QMetaObject::Connection m_textEditorConn;          // Phase 2B: For openTextEditorRequested
+    QMetaObject::Connection m_ocrConvertConn;          // For convertOcrTextRequested
+    QMetaObject::Connection m_textBoxLayoutConn;       // Text-box commit → search invalidation
     
     // Pan tool hold (H key spring-loaded activation)
     bool m_panHoldActive = false;
@@ -849,16 +856,25 @@ private:
     void onOcrBatchFinished(int pagesScanned, int pagesWithText);
     void onOcrError(const QString& pageId, const QString& message);
     QVector<VectorStroke> collectPageStrokes(const Page* page) const;
-    void syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blocks);
+    void syncOcrTextObjects(Document* owner, Page* page,
+                            const QVector<OcrTextBlock>& blocks);
+    /**
+     * @brief Drop viewport references to objects about to be destroyed.
+     *
+     * Selection and hover hold raw pointers, so any code that frees objects
+     * directly on a Page must notify every viewport showing @p owner first.
+     */
+    void forgetObjectsInViewports(Document* owner,
+                                  const QVector<QString>& objectIds);
     void setOcrTextVisibility(bool visible);
     void setOcrConfidenceVisibility(bool enabled);
     // MAC.6: showOcrLanguageDialog() promoted to private slots: above.
     QString resolveOcrLanguage(Document* doc) const;
     OcrSnapParams buildOcrSnapParams(Document* doc, Page* page) const;
     
-    // Phase 2B: Floating Text Editor
-    void openFloatingTextEditor(InsertedObject* obj);
-    void closeFloatingTextEditor();
+    /// Confirms with the user, then asks the viewport to replace a recognized
+    /// OCR block with an editable text box.
+    void convertOcrTextToTextBox(InsertedObject* obj);
     
     // Responsive toolbar management - REMOVED MW4.3: All layout functions and variables removed
     
@@ -873,8 +889,8 @@ private:
     // by ShortcutManager, dispatched via wireQActionDispatchers). m_escapeShortcut
     // is the lone exception — it's a per-window QShortcut because Escape
     // dismissal walks a per-window priority list (modal -> search bar ->
-    // floating editor -> viewport -> launcher) that doesn't fit the
-    // activeMainWindow() dispatch model and needs Qt::WindowShortcut scope.
+    // viewport -> launcher) that doesn't fit the activeMainWindow() dispatch
+    // model and needs Qt::WindowShortcut scope.
     // setupManagedShortcuts() also installs an unnamed Cmd+K alternate for
     // Settings on macOS (parent-owned by `this`, no separate handle needed).
     QShortcut* m_escapeShortcut = nullptr;

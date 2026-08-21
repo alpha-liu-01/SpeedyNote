@@ -22,7 +22,6 @@
 #include "ui/actionbars/LassoActionBar.h"
 #include "ui/actionbars/ObjectSelectActionBar.h"
 #include "ui/actionbars/TextSelectionActionBar.h"
-#include "ui/actionbars/ClipboardActionBar.h"
 #include "ui/actionbars/PagePanelActionBar.h"
 #include "objects/LinkObject.h"  // For LinkSlot slot state access
 #include "core/MarkdownNote.h"   // Phase M.3: For loading markdown notes
@@ -35,8 +34,7 @@
 #include "ocr/OcrWorker.h"            // OCR background worker
 #include "objects/OcrTextObject.h"     // OCR text objects (Phase 1D)
 #include "ui/subtoolbars/OcrSubToolbar.h"  // OCR subtoolbar
-#include "ui/panels/FloatingTextEditor.h"  // Phase 2B: Floating text editor
-#include "objects/TextBoxObject.h"         // Phase 2B: TextBoxObject for editor
+#include "objects/TextBoxObject.h"
 #include <QMetaObject>                 // OCR queued invocations
 #include "ui/dialogs/BatchExportDialog.h"
 #include "pdf/MuPdfExporter.h"                 // Phase 8: PDF export engine
@@ -55,6 +53,7 @@
 #include <QTextBrowser>
 #include <QTextEdit>
 #include <QPlainTextEdit>
+#include <QTextCursor>
 #include <QPointer>
 #include "core/ToolType.h" // Include the header file where ToolType is defined
 #include "ui/SplitViewManager.h"
@@ -64,6 +63,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QImage>
+#include <QAbstractSpinBox>
 #include <QSpinBox>
 #include <QInputDialog>
 #include <QStandardPaths>
@@ -272,6 +272,10 @@ MainWindow::MainWindow(QWidget *parent)
                      state == Qt::ApplicationInactive ? "Inactive" : "Hidden");
 #endif
         if (state == Qt::ApplicationSuspended || state == Qt::ApplicationInactive) {
+            // Fold in-progress inline text into the model first, otherwise its
+            // page is not dirty and autosave persists the pre-edit text.
+            commitAllInlineTextEdits();
+
             // Sync positions for all documents before auto-save
             // This ensures lastAccessedPage/edgeless position is saved
             syncAllDocumentPositions();
@@ -1220,13 +1224,11 @@ void MainWindow::setupUi() {
     });
     connect(m_toolbar, &Toolbar::undoClicked, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
-            closeFloatingTextEditor();
             vp->undo();
         }
     });
     connect(m_toolbar, &Toolbar::redoClicked, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
-            closeFloatingTextEditor();
             vp->redo();
         }
     });
@@ -1409,6 +1411,24 @@ void MainWindow::setupUi() {
 // Canonical event flow:
 //   keystroke -> Qt shortcut map (active window) -> QAction::triggered ->
 //   dispatcher slot (here) -> activeMainWindow() -> handler lambda.
+// The format bar's editable controls wrap their own QLineEdit rather than being
+// one, so undo/redo has to reach through the spin box or combo to find it.
+// Returning nullptr means the focused control has no text to undo, and the
+// caller should fall through to document undo.
+static QLineEdit* focusedEditableLineEdit()
+{
+    QWidget* focused = QApplication::focusWidget();
+    if (!focused)
+        return nullptr;
+    if (auto* edit = qobject_cast<QLineEdit*>(focused))
+        return edit;
+    if (auto* spin = qobject_cast<QAbstractSpinBox*>(focused))
+        return spin->findChild<QLineEdit*>();
+    if (auto* combo = qobject_cast<QComboBox*>(focused))
+        return combo->lineEdit();
+    return nullptr;
+}
+
 void MainWindow::wireQActionDispatchers()
 {
     static bool s_wired = false;
@@ -1480,13 +1500,37 @@ void MainWindow::wireQActionDispatchers()
     // the underlying feature lands.
     wire("edit.undo", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
-            w->closeFloatingTextEditor();
+            if (vp->textBoxFormatBarHasFocus()) {
+                if (QLineEdit* edit = focusedEditableLineEdit()) {
+                    edit->undo();
+                    return;
+                }
+            }
+            if (vp->inlineTextEditorHasFocus()) {
+                if (auto* edit = qobject_cast<QPlainTextEdit*>(
+                        QApplication::focusWidget())) {
+                    edit->undo();
+                    return;
+                }
+            }
             vp->undo();
         }
     });
     wire("edit.redo", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
-            w->closeFloatingTextEditor();
+            if (vp->textBoxFormatBarHasFocus()) {
+                if (QLineEdit* edit = focusedEditableLineEdit()) {
+                    edit->redo();
+                    return;
+                }
+            }
+            if (vp->inlineTextEditorHasFocus()) {
+                if (auto* edit = qobject_cast<QPlainTextEdit*>(
+                        QApplication::focusWidget())) {
+                    edit->redo();
+                    return;
+                }
+            }
             vp->redo();
         }
     });
@@ -1495,11 +1539,38 @@ void MainWindow::wireQActionDispatchers()
     // NOT added to the macOS Edit menu (the menu shows the primary edit.redo only).
     wire("edit.redo_alt", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
-            w->closeFloatingTextEditor();
+            if (vp->textBoxFormatBarHasFocus()) {
+                if (QLineEdit* edit = focusedEditableLineEdit()) {
+                    edit->redo();
+                    return;
+                }
+            }
+            if (vp->inlineTextEditorHasFocus()) {
+                if (auto* edit = qobject_cast<QPlainTextEdit*>(
+                        QApplication::focusWidget())) {
+                    edit->redo();
+                    return;
+                }
+            }
             vp->redo();
         }
     });
     wire("edit.copy", [](MainWindow* w){
+        if (auto* vp = w->currentViewport();
+            vp && vp->textBoxFormatBarHasFocus()) {
+            if (auto* edit = qobject_cast<QLineEdit*>(
+                    QApplication::focusWidget()))
+                edit->copy();
+            return;
+        }
+        if (auto* vp = w->currentViewport();
+            vp && vp->inlineTextEditorHasFocus()) {
+            if (auto* edit = qobject_cast<QPlainTextEdit*>(
+                    QApplication::focusWidget())) {
+                edit->copy();
+                return;
+            }
+        }
         // Preserve the QTextBrowser focus fallback that pre-MAC.4 had inline:
         // if the markdown notes browser has selected text, Cmd+C copies the
         // browser selection rather than canvas objects. Other text widgets
@@ -1514,10 +1585,38 @@ void MainWindow::wireQActionDispatchers()
         if (auto* vp = w->currentViewport()) vp->handleCopyAction();
     });
     wire("edit.cut", [](MainWindow* w){
-        if (auto* vp = w->currentViewport()) vp->handleCutAction();
+        if (auto* vp = w->currentViewport()) {
+            if (vp->textBoxFormatBarHasFocus()) {
+                if (auto* edit = qobject_cast<QLineEdit*>(
+                        QApplication::focusWidget()))
+                    edit->cut();
+                return;
+            }
+            if (vp->inlineTextEditorHasFocus()) {
+                if (auto* edit = qobject_cast<QPlainTextEdit*>(
+                        QApplication::focusWidget())) {
+                    edit->cut();
+                    return;
+                }
+            }
+            vp->handleCutAction();
+        }
     });
     wire("edit.paste", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
+            if (vp->textBoxFormatBarHasFocus()) {
+                if (auto* edit = qobject_cast<QLineEdit*>(
+                        QApplication::focusWidget()))
+                    edit->paste();
+                return;
+            }
+            if (vp->inlineTextEditorHasFocus()) {
+                if (auto* edit = qobject_cast<QPlainTextEdit*>(
+                        QApplication::focusWidget())) {
+                    edit->paste();
+                    return;
+                }
+            }
             vp->handlePasteAction();
             // Pre-MAC.4 behaviour: clear any pen-tool override that targeted a
             // different viewport, so a paste into the active viewport doesn't
@@ -1527,7 +1626,27 @@ void MainWindow::wireQActionDispatchers()
         }
     });
     wire("edit.delete", [](MainWindow* w){
-        if (auto* vp = w->currentViewport()) vp->handleDeleteAction();
+        if (auto* vp = w->currentViewport()) {
+            if (vp->textBoxFormatBarHasFocus()) {
+                if (auto* edit = qobject_cast<QLineEdit*>(
+                        QApplication::focusWidget()))
+                    edit->del();
+                return;
+            }
+            if (vp->inlineTextEditorHasFocus()) {
+                if (auto* edit = qobject_cast<QPlainTextEdit*>(
+                        QApplication::focusWidget())) {
+                    QTextCursor cursor = edit->textCursor();
+                    if (cursor.hasSelection())
+                        cursor.removeSelectedText();
+                    else
+                        cursor.deleteChar();
+                    edit->setTextCursor(cursor);
+                    return;
+                }
+            }
+            vp->handleDeleteAction();
+        }
     });
 
     // ----- app.find* (MAC.4) -----
@@ -1745,8 +1864,18 @@ void MainWindow::wireQActionDispatchers()
     // it (modifier-bearing actions don't need this guard).
     auto isTextFocused = []() {
         QWidget* f = QApplication::focusWidget();
-        return qobject_cast<QLineEdit*>(f) || qobject_cast<QTextEdit*>(f)
-            || qobject_cast<QPlainTextEdit*>(f);
+        if (qobject_cast<QLineEdit*>(f) || qobject_cast<QTextEdit*>(f)
+            || qobject_cast<QPlainTextEdit*>(f)) {
+            return true;
+        }
+        for (QWidget* widget = f; widget;
+             widget = widget->parentWidget()) {
+            if (widget->objectName()
+                == QLatin1String("textBoxFormatBar")) {
+                return true;
+            }
+        }
+        return false;
     };
     auto wireToolKey = [&wire, isTextFocused](const QString& id, ToolType tool) {
         wire(id, [tool, isTextFocused](MainWindow* w) {
@@ -2080,8 +2209,8 @@ void MainWindow::setupManagedShortcuts()
     // registry because:
     //  - it doesn't appear in any menu (modal-style dismissal, not a command);
     //  - its handler walks a per-window priority list (modal -> search bar ->
-    //    floating editor -> viewport -> launcher) that doesn't fit the
-    //    activeMainWindow() dispatch model;
+    //    viewport -> launcher) that doesn't fit the activeMainWindow()
+    //    dispatch model;
     //  - it uses Qt::WindowShortcut (the dispatcher pattern uses
     //    Qt::ApplicationShortcut), so each window must own its own QShortcut
     //    so Escape only dismisses things in the focused window.
@@ -2096,10 +2225,6 @@ void MainWindow::setupManagedShortcuts()
             if (QApplication::activeModalWidget()) return;
             if (m_pdfSearchBar && m_pdfSearchBar->isVisible()) {
                 hidePdfSearchBar();
-                return;
-            }
-            if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
-                m_floatingTextEditor->closeEditor();
                 return;
             }
             if (DocumentViewport* vp = currentViewport()) {
@@ -2358,13 +2483,19 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_strokesChangedConn);
         m_strokesChangedConn = {};
     }
-    if (m_textEditorConn) {
-        disconnect(m_textEditorConn);
-        m_textEditorConn = {};
+    if (m_ocrConvertConn) {
+        disconnect(m_ocrConvertConn);
+        m_ocrConvertConn = {};
+    }
+    if (m_textBoxLayoutConn) {
+        disconnect(m_textBoxLayoutConn);
+        m_textBoxLayoutConn = {};
     }
 
-    // Close floating text editor when switching viewports (target may belong to old viewport)
-    closeFloatingTextEditor();
+    // End an inline session before another pane/tab becomes active. This
+    // prevents two viewport-owned editors from mutating the same object.
+    if (m_connectedViewport && m_connectedViewport != viewport)
+        m_connectedViewport->commitInlineTextEdit();
 
     // Remove event filter from previous viewport (QPointer auto-nulls if deleted)
     if (m_connectedViewport) {
@@ -2464,18 +2595,24 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     m_insertModeConn = connect(viewport, &DocumentViewport::objectInsertModeChanged,
                                this, [this](DocumentViewport::ObjectInsertMode mode) {
         if (m_toolbar) m_toolbar->setObjectInsertMode(mode);
+        if (isActiveWindow()) syncObjectModeCheckActions();
     });
     
     m_actionModeConn = connect(viewport, &DocumentViewport::objectActionModeChanged,
                                this, [this](DocumentViewport::ObjectActionMode mode) {
         if (m_objectSelectActionBar)
             m_objectSelectActionBar->setActionModeState(mode);
+        if (isActiveWindow()) syncObjectModeCheckActions();
     });
     
-    if (m_toolbar)
+    if (m_toolbar) {
         m_toolbar->setObjectInsertMode(viewport->objectInsertMode());
+        m_toolbar->setCurrentTool(viewport->currentTool());
+    }
     if (m_objectSelectActionBar)
         m_objectSelectActionBar->setActionModeState(viewport->objectActionMode());
+    if (isActiveWindow())
+        syncObjectModeCheckActions();
     
     // Phase D: Connect object selection changed to update LinkSlot buttons
     m_selectionChangedConn = connect(viewport, &DocumentViewport::objectSelectionChanged,
@@ -2541,13 +2678,6 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
             bool hasSelection = !viewport->selectedObjects().isEmpty();
             m_actionBarContainer->onObjectSelectionChanged(hasSelection);
         }
-        // Phase 2B: Close floating editor if target was deselected/deleted
-        if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
-            auto* tgt = m_floatingTextEditor->target();
-            if (tgt && !viewport->selectedObjects().contains(tgt)) {
-                m_floatingTextEditor->closeEditor();
-            }
-        }
     });
     
     // Text selection changed (shows/hides TextSelectionActionBar)
@@ -2574,9 +2704,24 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         else clearToolOverride(true);
     });
 
-    // Phase 2B: Floating text editor
-    m_textEditorConn = connect(viewport, &DocumentViewport::openTextEditorRequested,
-                               this, &MainWindow::openFloatingTextEditor);
+    m_ocrConvertConn = connect(viewport, &DocumentViewport::convertOcrTextRequested,
+                               this, &MainWindow::convertOcrTextToTextBox);
+    m_textBoxLayoutConn = connect(
+        viewport, &DocumentViewport::textBoxLayoutCommitted,
+        this, [this, viewport]() {
+            if (m_searchEngine) {
+                m_searchEngine->cancelAndWait();
+                m_searchEngine->clearCache();
+            }
+            if (m_searchScanDebounce) m_searchScanDebounce->stop();
+            if (m_searchMarkerRefresh) m_searchMarkerRefresh->stop();
+            m_searchResultsByPage.clear();
+            m_searchTotalMatches = 0;
+            if (m_searchState) m_searchState->resetMatch();
+            if (viewport) viewport->clearSearchMatches();
+            if (m_splitViewManager)
+                m_splitViewManager->clearScrollBarSearchMarkers(viewport);
+        });
 
     // Sync initial action bar state from viewport
     // CR-AB-2 FIX: Sync ALL context states to prevent stale state from previous tab
@@ -2846,6 +2991,7 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         // changeEvent re-seeds when focus returns.
         if (isActiveWindow()) {
             syncOcrCheckActions();
+            syncObjectModeCheckActions();
         }
 
         // OCR: Sync language for the new document
@@ -3681,6 +3827,8 @@ void MainWindow::saveDocument()
         #endif
         return;
     }
+    if (DocumentViewport* activeViewport = currentViewport())
+        activeViewport->commitInlineTextEdit();
 
     DocumentViewport* viewport = tabManager()->currentViewport();
     if (!viewport) {
@@ -3782,6 +3930,8 @@ void MainWindow::saveDocumentAs()
     if (!m_documentManager || !tabManager()) {
         return;
     }
+    if (DocumentViewport* activeViewport = currentViewport())
+        activeViewport->commitInlineTextEdit();
     DocumentViewport* vp = currentViewport();
     if (!vp) return;
     Document* doc = vp->document();
@@ -4785,6 +4935,7 @@ void MainWindow::changeEvent(QEvent *event) {
         // on) to window B (auto-OCR off) would leave the menu checkmark
         // showing A's state until B's user toggled something.
         syncOcrCheckActions();
+        syncObjectModeCheckActions();
     }
 
     // Keep the nav bar's fullscreen toggle in sync with the actual window
@@ -5275,11 +5426,6 @@ void MainWindow::updateTheme() {
         setOcrTextVisibility(true);
     }
 
-    // Phase 2B: Sync floating text editor theme
-    if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
-        m_floatingTextEditor->setDarkMode(darkMode);
-    }
-
     // Sync thumbnail renderer dark mode state (respect the current document's
     // PDF inversion override).
     if (m_pagePanel) {
@@ -5657,6 +5803,7 @@ void MainWindow::connectSubToolbarSignals()
                 if (m_objectSelectActionBar)
                     m_objectSelectActionBar->setActionModeState(vp->objectActionMode());
                 m_toolbar->setCurrentTool(currentTool);
+                syncObjectModeCheckActions();
                 applyAllSubToolbarValuesToViewport(vp);
             }
             m_previousTabId = newTabId;
@@ -5668,8 +5815,10 @@ void MainWindow::connectSubToolbarSignals()
     QTimer::singleShot(0, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             m_toolbar->setObjectInsertMode(vp->objectInsertMode());
+            m_toolbar->setCurrentTool(vp->currentTool());
             if (m_objectSelectActionBar)
                 m_objectSelectActionBar->setActionModeState(vp->objectActionMode());
+            syncObjectModeCheckActions();
             applyAllSubToolbarValuesToViewport(vp);
         }
     });
@@ -5784,17 +5933,11 @@ void MainWindow::setupActionBars()
     m_lassoActionBar = new LassoActionBar();
     m_objectSelectActionBar = new ObjectSelectActionBar();
     m_textSelectionActionBar = new TextSelectionActionBar();
-    m_clipboardActionBar = new ClipboardActionBar();
     
     // Register action bars with container
     m_actionBarContainer->setActionBar("lasso", m_lassoActionBar);
     m_actionBarContainer->setActionBar("objectSelect", m_objectSelectActionBar);
     m_actionBarContainer->setActionBar("textSelection", m_textSelectionActionBar);
-    m_actionBarContainer->setActionBar("clipboard", m_clipboardActionBar);
-    
-    // Connect tool changes from Toolbar to ActionBarContainer
-    connect(m_toolbar, &Toolbar::toolSelected, 
-            m_actionBarContainer, &ActionBarContainer::onToolChanged);
     
     // Connect clipboard changes from system clipboard
     connect(QApplication::clipboard(), &QClipboard::dataChanged,
@@ -5919,25 +6062,25 @@ void MainWindow::setupActionBars()
         m_objectSelectActionBar->updateOcrLockSelection(true, newState);
         vp->update();
     });
+    connect(m_objectSelectActionBar,
+            &ObjectSelectActionBar::ocrConvertToTextBoxRequested, this, [this]() {
+        DocumentViewport* vp = currentViewport();
+        if (!vp) return;
+        const auto& sel = vp->selectedObjects();
+        if (sel.size() != 1) return;
+        convertOcrTextToTextBox(sel.first());
+    });
 
     if (DocumentViewport* vp = currentViewport()) {
         m_objectSelectActionBar->setActionModeState(vp->objectActionMode());
         m_actionBarContainer->onToolChanged(vp->currentTool());
+        syncObjectModeCheckActions();
     }
 
     // Connect TextSelectionActionBar signals to viewport
     connect(m_textSelectionActionBar, &TextSelectionActionBar::copyRequested, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             vp->copyTextSelection();
-        }
-    });
-    
-    // Connect ClipboardActionBar signals to viewport
-    connect(m_clipboardActionBar, &ClipboardActionBar::pasteRequested, this, [this]() {
-        if (DocumentViewport* vp = currentViewport()) {
-            vp->pasteForObjectSelect();
-            if (m_toolOverrideViewport && m_toolOverrideViewport != vp)
-                clearToolOverride(true);
         }
     });
     
@@ -6025,6 +6168,7 @@ void MainWindow::setupPdfSearch()
             return;
         }
         m_searchEngine->setDocument(doc);
+        m_searchEngine->setLegacyLayoutZoom(vp->zoomLevel());
         m_searchResultsByPage.clear();
         m_searchTotalMatches = 0;
         // SBS3: clear stale ticks; the new scan refills them as it streams.
@@ -6221,6 +6365,7 @@ void MainWindow::onSearchNext(const QString& text, bool caseSensitive, bool whol
     
     // Set the document on the engine
     m_searchEngine->setDocument(doc);
+    m_searchEngine->setLegacyLayoutZoom(vp->zoomLevel());
     
     // Clear status before searching
     m_pdfSearchBar->clearStatus();
@@ -6265,6 +6410,7 @@ void MainWindow::onSearchPrev(const QString& text, bool caseSensitive, bool whol
     
     // Set the document on the engine
     m_searchEngine->setDocument(doc);
+    m_searchEngine->setLegacyLayoutZoom(vp->zoomLevel());
     
     // Clear status before searching
     m_pdfSearchBar->clearStatus();
@@ -6832,10 +6978,22 @@ void MainWindow::onOcrResultsReady(const QString& pageId, const QVector<OcrTextB
     }
     if (!page || !doc) return;
 
-    page->ocrTextBlocks = blocks;
+    // A scan that started before the user deleted or converted a block still
+    // reports that block, because the worker filtered its stroke list before
+    // the suppression was recorded. Drop those results so they cannot come
+    // back through the sidecar, search, or the object overlay.
+    QVector<OcrTextBlock> acceptedBlocks;
+    acceptedBlocks.reserve(blocks.size());
+    for (const auto& block : blocks) {
+        if (!isOcrBlockDismissed(block, page->suppressedStrokeIds,
+                                 page->dismissedOcrBlockKeys))
+            acceptedBlocks.append(block);
+    }
+
+    page->ocrTextBlocks = acceptedBlocks;
     page->ocrDirty = false;
 
-    syncOcrTextObjects(page, blocks);
+    syncOcrTextObjects(doc, page, acceptedBlocks);
 
     // Invalidate the Highlighter's OCR-block cache on any viewport currently
     // showing this document, so a new drag will see the refreshed OCR data.
@@ -6860,7 +7018,7 @@ void MainWindow::onOcrResultsReady(const QString& pageId, const QVector<OcrTextB
         doc->savePageOcr(localId, page);
 
     int wordCount = 0;
-    for (const auto& b : blocks)
+    for (const auto& b : acceptedBlocks)
         if (!b.text.isEmpty()) ++wordCount;
 
     m_toolbar->ocrSubToolbar()->setStatusText(
@@ -6927,20 +7085,28 @@ QVector<VectorStroke> MainWindow::collectPageStrokes(const Page* page) const
     return allStrokes;
 }
 
-void MainWindow::syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blocks)
+void MainWindow::forgetObjectsInViewports(Document* owner,
+                                          const QVector<QString>& objectIds)
+{
+    if (!owner || objectIds.isEmpty() || !m_splitViewManager)
+        return;
+
+    m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane) {
+        if (!tm) return;
+        const int n = tm->tabCount();
+        for (int i = 0; i < n; ++i) {
+            DocumentViewport* vp = tm->viewportAt(i);
+            if (!vp || vp->document() != owner) continue;
+            for (const auto& objectId : objectIds)
+                vp->forgetObject(objectId);
+        }
+    });
+}
+
+void MainWindow::syncOcrTextObjects(Document* owner, Page* page,
+                                    const QVector<OcrTextBlock>& blocks)
 {
     if (!page) return;
-
-    // Close floating editor if its target is an unlocked OCR text on this page
-    if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
-        if (auto* tgt = m_floatingTextEditor->target()) {
-            if (tgt->type() == QLatin1String("ocr_text") && page->objectById(tgt->id)) {
-                auto* ocrTgt = static_cast<OcrTextObject*>(tgt);
-                if (!ocrTgt->ocrLocked)
-                    m_floatingTextEditor->closeEditor();
-            }
-        }
-    }
 
     // Collect locked stroke IDs to suppress, and remove only unlocked OCR objects
     QSet<QString> suppressedStrokeIds;
@@ -6956,6 +7122,10 @@ void MainWindow::syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blo
             }
         }
     }
+    // Selection and hover point straight at these objects, and a scan can land
+    // while the user has one selected (the convert dialog even runs a nested
+    // event loop), so clear those references before the memory goes away.
+    forgetObjectsInViewports(owner, toRemove);
     for (const auto& oid : toRemove)
         page->removeObject(oid);
 
@@ -7186,6 +7356,29 @@ void MainWindow::syncOcrCheckActions()
         a->setChecked(ocrST->isSnapToGridEnabled());
 }
 
+void MainWindow::syncObjectModeCheckActions()
+{
+#ifdef Q_OS_MACOS
+    DocumentViewport* viewport = currentViewport();
+    auto* sm = ShortcutManager::instance();
+    if (!viewport || !sm) return;
+
+    const auto insertMode = viewport->objectInsertMode();
+    if (auto* a = sm->action(QStringLiteral("object.mode_image")))
+        a->setChecked(insertMode == DocumentViewport::ObjectInsertMode::Image);
+    if (auto* a = sm->action(QStringLiteral("object.mode_link")))
+        a->setChecked(insertMode == DocumentViewport::ObjectInsertMode::Link);
+    if (auto* a = sm->action(QStringLiteral("object.mode_text")))
+        a->setChecked(insertMode == DocumentViewport::ObjectInsertMode::Text);
+
+    const auto actionMode = viewport->objectActionMode();
+    if (auto* a = sm->action(QStringLiteral("object.mode_create")))
+        a->setChecked(actionMode == DocumentViewport::ObjectActionMode::Create);
+    if (auto* a = sm->action(QStringLiteral("object.mode_select")))
+        a->setChecked(actionMode == DocumentViewport::ObjectActionMode::Select);
+#endif
+}
+
 // Refresh both the OS window title (per-platform format with Qt's native
 // [*] modified marker) and the NavigationBar filename label from the active
 // pane's current tab. See the header comment for format details.
@@ -7390,127 +7583,42 @@ void MainWindow::applyDocumentOcrLanguage(Document* doc, const QString& lang)
 }
 
 // =========================================================================
-// Phase 2B: Floating Text Editor
+// OCR text conversion
 // =========================================================================
 
-void MainWindow::openFloatingTextEditor(InsertedObject* obj)
+void MainWindow::convertOcrTextToTextBox(InsertedObject* obj)
 {
-    auto* textBox = dynamic_cast<TextBoxObject*>(obj);
-    if (!textBox) return;
+    auto* ocrObj = dynamic_cast<OcrTextObject*>(obj);
+    if (!ocrObj)
+        return;
 
-    // If target is an unlocked OcrTextObject, ask user to lock before editing
-    auto* ocrObj = dynamic_cast<OcrTextObject*>(textBox);
-    if (ocrObj && !ocrObj->ocrLocked) {
-        auto result = QMessageBox::question(this, tr("Lock OCR Text"),
-            tr("Lock this OCR text? It will no longer be updated by automatic scanning.\n\nProceed to lock and edit?"),
-            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
-        if (result != QMessageBox::Yes) return;
-        ocrObj->ocrLocked = true;
-        if (DocumentViewport* vp = currentViewport())
-            vp->pushOcrLockUndo(QVector<QString>{ocrObj->id}, true);
+    QPointer<DocumentViewport> viewport = currentViewport();
+    if (!viewport)
+        return;
+    const QString objectId = ocrObj->id;
+
+    auto result = QMessageBox::question(this, tr("Convert OCR Text"),
+        tr("Convert this recognized text into an editable text box?\n\n"
+           "The recognized block is removed and its ink is excluded from "
+           "future scans."),
+        QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+    if (result != QMessageBox::Yes || !viewport)
+        return;
+
+    // The dialog ran an event loop, so an OCR rescan may have replaced the
+    // object in the meantime; resolve it again instead of trusting obj.
+    auto* target =
+        dynamic_cast<OcrTextObject*>(viewport->objectById(objectId));
+    if (!target) {
+        // The user said yes and nothing happened, so say why rather than
+        // leaving them to wonder whether the click registered.
+        QMessageBox::information(this, tr("Convert OCR Text"),
+            tr("This recognized text is no longer available. "
+               "A new scan may have replaced it."));
+        return;
     }
 
-    // Close existing session first (pushes undo if changed)
-    if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
-        m_floatingTextEditor->closeEditor();
-    }
-
-    // Lazy creation
-    if (!m_floatingTextEditor) {
-        m_floatingTextEditor = new FloatingTextEditor(this);
-        connect(m_floatingTextEditor, &FloatingTextEditor::repaintRequested,
-                this, [this]() {
-            if (DocumentViewport* vp = currentViewport())
-                vp->update();
-        });
-        connect(m_floatingTextEditor, &FloatingTextEditor::editorClosed,
-                this, [this](const QString& objectId,
-                             const QString& oldText, const QString& newText,
-                             int oldAlign, int newAlign,
-                             int oldOpacity, int newOpacity,
-                             const QColor& oldFontColor, const QColor& newFontColor) {
-            DocumentViewport* vp = currentViewport();
-            if (!vp) return;
-            InsertedObject* obj = nullptr;
-            if (Document* doc = vp->document()) {
-                if (doc->isEdgeless()) {
-                    for (const auto& coord : doc->allLoadedTileCoords()) {
-                        Page* tile = doc->getTile(coord.first, coord.second);
-                        if (tile) { obj = tile->objectById(objectId); if (obj) break; }
-                    }
-                } else {
-                    for (int i = 0; i < doc->pageCount(); ++i) {
-                        Page* page = doc->page(i);
-                        if (page) { obj = page->objectById(objectId); if (obj) break; }
-                    }
-                }
-            }
-            if (obj) {
-                vp->pushObjectTextEditUndo(obj, oldText, newText,
-                                           oldAlign, newAlign,
-                                           oldOpacity, newOpacity,
-                                           oldFontColor, newFontColor);
-            }
-        });
-    }
-
-    m_floatingTextEditor->setDarkMode(isDarkMode());
-    m_floatingTextEditor->setTarget(textBox);
-
-    // Position near the text box
-    if (DocumentViewport* vp = currentViewport()) {
-        QPointF docPos = textBox->position;
-
-        if (Document* doc = vp->document()) {
-            if (doc->isEdgeless()) {
-                for (const auto& coord : doc->allLoadedTileCoords()) {
-                    Page* tile = doc->getTile(coord.first, coord.second);
-                    if (tile && tile->objectById(textBox->id)) {
-                        docPos = QPointF(coord.first * Document::EDGELESS_TILE_SIZE,
-                                         coord.second * Document::EDGELESS_TILE_SIZE)
-                                 + textBox->position;
-                        break;
-                    }
-                }
-            } else {
-                for (int i = 0; i < doc->pageCount(); ++i) {
-                    Page* page = doc->page(i);
-                    if (page && page->objectById(textBox->id)) {
-                        docPos = vp->pageToDocument(i, textBox->position);
-                        break;
-                    }
-                }
-            }
-        }
-
-        QPointF vpPt = vp->documentToViewport(docPos);
-        QPoint globalPt = vp->mapToGlobal(vpPt.toPoint());
-        QPoint localPt = mapFromGlobal(globalPt);
-
-        int editorW = m_floatingTextEditor->width();
-        int editorH = m_floatingTextEditor->height();
-
-        // Place to the right of the object, or fall back to below
-        int x = localPt.x() + static_cast<int>(textBox->size.width() * vp->zoomLevel()) + 10;
-        int y = localPt.y();
-
-        if (x + editorW > width())
-            x = qMax(0, localPt.x() - editorW - 10);
-        if (y + editorH > height())
-            y = qMax(0, height() - editorH);
-
-        m_floatingTextEditor->move(x, y);
-    }
-
-    m_floatingTextEditor->show();
-    m_floatingTextEditor->raise();
-}
-
-void MainWindow::closeFloatingTextEditor()
-{
-    if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
-        m_floatingTextEditor->closeEditor();
-    }
+    viewport->convertOcrTextToTextBox(target, true);
 }
 
 // =========================================================================
@@ -8042,6 +8150,20 @@ void MainWindow::syncAllDocumentPositions()
             if (syncDocumentPosition(doc, vp)) {
                 doc->markModified();
             }
+        }
+    });
+}
+
+void MainWindow::commitAllInlineTextEdits()
+{
+    if (!m_splitViewManager)
+        return;
+
+    m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane) {
+        if (!tm) return;
+        for (int i = 0; i < tm->tabCount(); ++i) {
+            if (DocumentViewport* vp = tm->viewportAt(i))
+                vp->commitInlineTextEdit();
         }
     });
 }

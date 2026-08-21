@@ -78,6 +78,14 @@ MarkdownHighlighter::MarkdownHighlighter(
     initCodeLangs();
 }
 
+void MarkdownHighlighter::setBaseFontPixelSize(qreal pixelSize) {
+    if (qFuzzyCompare(1.0 + _baseFontPixelSize, 1.0 + pixelSize)) {
+        return;
+    }
+    _baseFontPixelSize = qMax<qreal>(0.0, pixelSize);
+    rehighlight();
+}
+
 /**
  * Does jobs every second
  */
@@ -430,6 +438,37 @@ QTextCharFormat MarkdownHighlighter::currentMaskedFormat() const {
     return fmt;
 }
 
+QTextCharFormat MarkdownHighlighter::formatForState(
+    HighlighterState state) const {
+    QTextCharFormat format = _formats[state];
+    if (_baseFontPixelSize <= 0.0 || !isHeading(state)) {
+        return format;
+    }
+
+    qreal ratio = 1.0;
+    switch (state) {
+        case H1: ratio = 1.6; break;
+        case H2: ratio = 1.5; break;
+        case H3: ratio = 1.4; break;
+        case H4: ratio = 1.3; break;
+        case H5: ratio = 1.2; break;
+        case H6: ratio = 1.1; break;
+        default: break;
+    }
+    format.clearProperty(QTextFormat::FontPointSize);
+    QFont headingFont = format.font();
+    headingFont.setPixelSize(qMax(1, qRound(_baseFontPixelSize * ratio)));
+    format.setFont(headingFont);
+    // setFont() writes the resolved family, which is the application default
+    // rather than the editor's font. Drop it so headings inherit the widget
+    // font that the inline text box editor configures per object.
+    format.clearProperty(QTextFormat::FontFamily);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 13, 0)
+    format.clearProperty(QTextFormat::FontFamilies);
+#endif
+    return format;
+}
+
 /**
  * Returns true if formatting syntax should be hidden for the block
  * currently being highlighted.
@@ -605,15 +644,16 @@ void MarkdownHighlighter::highlightHeadline(const QString &text) {
 
             // Set styling of the "#"s to "masked syntax", but with the size of
             // the heading
+            const QTextCharFormat headingFormat = formatForState(state);
             auto maskedFormat = currentMaskedFormat();
             if (!isHidingForCurrentBlock()) {
-                maskedFormat.setFontPointSize(_formats[state].fontPointSize());
+                maskedFormat.setFont(headingFormat.font());
             }
             setFormat(0, headingLevel, maskedFormat);
 
             // Set the styling of the rest of the heading
             setFormat(headingLevel + 1, text.length() - 1 - headingLevel,
-                      _formats[state]);
+                      headingFormat);
 
             setCurrentBlockState(state);
             return;
@@ -676,7 +716,8 @@ void MarkdownHighlighter::highlightHeadline(const QString &text) {
         const bool nextHasEqualChars =
             hasOnlyHeadChars(nextBlockText, QLatin1Char('='), nextSpaces);
         if (nextHasEqualChars) {
-            setFormat(0, text.length(), _formats[HighlighterState::H1]);
+            setFormat(0, text.length(),
+                      formatForState(HighlighterState::H1));
             setCurrentBlockState(HighlighterState::H1);
         }
     } else if (nextBlockText.at(nextSpaces) == QLatin1Char('-') &&
@@ -684,7 +725,8 @@ void MarkdownHighlighter::highlightHeadline(const QString &text) {
         const bool nextHasMinusChars =
             hasOnlyHeadChars(nextBlockText, QLatin1Char('-'), nextSpaces);
         if (nextHasMinusChars) {
-            setFormat(0, text.length(), _formats[HighlighterState::H2]);
+            setFormat(0, text.length(),
+                      formatForState(HighlighterState::H2));
             setCurrentBlockState(HighlighterState::H2);
         }
     }
@@ -702,8 +744,7 @@ void MarkdownHighlighter::highlightSubHeadline(const QString &text,
         QTextCharFormat headingMaskedFormat = maskedFormat;
         // set the font size from the current rule's font format
         if (!isHidingForCurrentBlock()) {
-            headingMaskedFormat.setFontPointSize(
-                _formats[state].fontPointSize());
+            headingMaskedFormat.setFont(formatForState(state).font());
         }
 
         setFormat(0, text.length(), headingMaskedFormat);

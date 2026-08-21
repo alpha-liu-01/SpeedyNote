@@ -9,7 +9,69 @@
 #include <QDir>
 #include <QCryptographicHash>
 #include <QBuffer>
+#include <QImageReader>
 #include <QPainter>
+#include <QPixmapCache>
+#include <QSaveFile>
+#include <QtEndian>
+#include <QtMath>
+#include <limits>
+
+namespace {
+
+QByteArray normalizedImageFormat(QByteArray format, bool hasOriginalBytes)
+{
+    format = format.trimmed().toLower();
+    if (format == "jpeg") {
+        return QByteArrayLiteral("jpg");
+    }
+    if (format == "tiff") {
+        return QByteArrayLiteral("tif");
+    }
+    if (format == "png" || format == "jpg" || format == "bmp"
+        || format == "gif" || format == "webp" || format == "tif"
+        || format == "ico" || format == "avif" || format == "heic"
+        || format == "svg" || format == "pbm" || format == "pgm"
+        || format == "ppm" || format == "xbm" || format == "xpm") {
+        return format;
+    }
+    return hasOriginalBytes ? QByteArrayLiteral("img") : QByteArrayLiteral("png");
+}
+
+QString imageAssetFilename(const QString& hash, const QByteArray& format)
+{
+    return hash + "." + QString::fromLatin1(format);
+}
+
+bool isDecodableImageFile(const QString& path)
+{
+    QImageReader reader(path);
+    return !reader.read().isNull();
+}
+
+void addCanonicalImageToHash(QCryptographicHash& hasher, const QImage& image)
+{
+    const QImage canonical = image.convertToFormat(QImage::Format_RGBA8888);
+    const quint32 width = qToBigEndian(static_cast<quint32>(canonical.width()));
+    const quint32 height = qToBigEndian(static_cast<quint32>(canonical.height()));
+    hasher.addData(QByteArray::fromRawData(
+        reinterpret_cast<const char*>(&width), sizeof(width)));
+    hasher.addData(QByteArray::fromRawData(
+        reinterpret_cast<const char*>(&height), sizeof(height)));
+
+    const uchar* data = canonical.constBits();
+    qint64 remaining = static_cast<qint64>(canonical.sizeInBytes());
+    while (remaining > 0) {
+        const int chunkSize = static_cast<int>(
+            qMin<qint64>(remaining, std::numeric_limits<int>::max()));
+        hasher.addData(QByteArray::fromRawData(
+            reinterpret_cast<const char*>(data), chunkSize));
+        data += chunkSize;
+        remaining -= chunkSize;
+    }
+}
+
+}  // namespace
 
 void ImageObject::render(QPainter& painter, qreal zoom) const
 {
@@ -51,7 +113,56 @@ void ImageObject::render(QPainter& painter, qreal zoom) const
         return;
     }
 
-    QRectF sourceRect(cachedPixmap.rect());
+    const QPixmap* renderPixmap = &cachedPixmap;
+
+    // Integer insertion scaling intentionally preserves the full-resolution
+    // source for export. Avoid paying the full 4K -> display-size smooth scale
+    // on every paint by caching the current effective device-pixel size.
+    const QTransform deviceTransform = painter.deviceTransform();
+    const QPointF mappedOrigin = deviceTransform.map(targetRect.topLeft());
+    const QPointF mappedX = deviceTransform.map(targetRect.topRight());
+    const QPointF mappedY = deviceTransform.map(targetRect.bottomLeft());
+    const QSize desiredPixels(
+        qMax(1, qRound(QLineF(mappedOrigin, mappedX).length())),
+        qMax(1, qRound(QLineF(mappedOrigin, mappedY).length())));
+    constexpr int MAX_DISPLAY_CACHE_DIMENSION = 4096;
+    const qint64 desiredCacheBytes =
+        static_cast<qint64>(desiredPixels.width()) * desiredPixels.height() * 4;
+    const qint64 perImageCacheBudget =
+        static_cast<qint64>(qMax(1, QPixmapCache::cacheLimit())) * 1024 / 2;
+    QPixmap displayPixmap;
+    if (desiredPixels.width() < cachedPixmap.width()
+        && desiredPixels.height() < cachedPixmap.height()
+        && desiredPixels.width() <= MAX_DISPLAY_CACHE_DIMENSION
+        && desiredPixels.height() <= MAX_DISPLAY_CACHE_DIMENSION
+        && desiredCacheBytes <= perImageCacheBudget) {
+        const QString cacheKey = QStringLiteral("speedynote-image-%1-%2-%3x%4")
+            .arg(id)
+            .arg(cachedPixmap.cacheKey())
+            .arg(desiredPixels.width())
+            .arg(desiredPixels.height());
+        if (m_displayCacheKey != cacheKey) {
+            if (!m_displayCacheKey.isEmpty()) {
+                QPixmapCache::remove(m_displayCacheKey);
+            }
+            m_displayCacheKey = cacheKey;
+        }
+        if (!QPixmapCache::find(cacheKey, &displayPixmap)) {
+            displayPixmap = cachedPixmap.scaled(
+                desiredPixels, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            if (!displayPixmap.isNull()) {
+                QPixmapCache::insert(cacheKey, displayPixmap);
+            }
+        }
+        if (!displayPixmap.isNull()) {
+            renderPixmap = &displayPixmap;
+        }
+    } else if (!m_displayCacheKey.isEmpty()) {
+        QPixmapCache::remove(m_displayCacheKey);
+        m_displayCacheKey.clear();
+    }
+
+    QRectF sourceRect(renderPixmap->rect());
 
     if (rotation != 0.0) {
         painter.save();
@@ -60,12 +171,12 @@ void ImageObject::render(QPainter& painter, qreal zoom) const
         painter.rotate(rotation);
         painter.translate(-centerPoint);
         painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-        painter.drawPixmap(targetRect, cachedPixmap, sourceRect);
+        painter.drawPixmap(targetRect, *renderPixmap, sourceRect);
         painter.restore();
     } else {
         bool hadSmooth = painter.testRenderHint(QPainter::SmoothPixmapTransform);
         painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-        painter.drawPixmap(targetRect, cachedPixmap, sourceRect);
+        painter.drawPixmap(targetRect, *renderPixmap, sourceRect);
         if (!hadSmooth) {
             painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
         }
@@ -73,6 +184,16 @@ void ImageObject::render(QPainter& painter, qreal zoom) const
 }
 
 QJsonObject ImageObject::toJson() const
+{
+    return toJsonImpl(true);
+}
+
+QJsonObject ImageObject::toJsonWithoutRecoveryData() const
+{
+    return toJsonImpl(false);
+}
+
+QJsonObject ImageObject::toJsonImpl(bool includeRecoveryData) const
 {
     // Start with base class serialization
     QJsonObject obj = InsertedObject::toJson();
@@ -88,12 +209,21 @@ QJsonObject ImageObject::toJson() const
     // undo/redo) AND the case where imagePath is set but the asset file is not
     // known to exist - so a later orphan cleanup or lost file can never turn the
     // reference into permanent data loss.
-    if (!cachedPixmap.isNull() && (imagePath.isEmpty() || !m_assetPersisted)) {
-        QByteArray imageData;
-        QBuffer buffer(&imageData);
-        buffer.open(QIODevice::WriteOnly);
-        cachedPixmap.save(&buffer, "PNG");
+    if (includeRecoveryData && !cachedPixmap.isNull()
+        && (imagePath.isEmpty() || !m_assetPersisted)) {
+        QByteArray imageData = m_encodedAssetData;
+        QByteArray format = m_assetFormat;
+        if (imageData.isEmpty()) {
+            QBuffer buffer(&imageData);
+            if (!buffer.open(QIODevice::WriteOnly)
+                || !cachedPixmap.save(&buffer, "PNG")) {
+                qWarning() << "ImageObject::toJson: failed to encode recovery image";
+                return obj;
+            }
+            format = QByteArrayLiteral("png");
+        }
         obj["embeddedImageData"] = QString::fromLatin1(imageData.toBase64());
+        obj["embeddedImageFormat"] = QString::fromLatin1(format);
     }
     
     return obj;
@@ -116,8 +246,12 @@ void ImageObject::loadFromJson(const QJsonObject& obj)
         QString base64Data = obj["embeddedImageData"].toString();
         QByteArray imageData = QByteArray::fromBase64(base64Data.toLatin1());
         QPixmap pixmap;
-        if (pixmap.loadFromData(imageData, "PNG")) {
+        if (pixmap.loadFromData(imageData)) {
             cachedPixmap = pixmap;
+            m_encodedAssetData = imageData;
+            m_assetFormat = normalizedImageFormat(
+                obj["embeddedImageFormat"].toString("png").toLatin1(), true);
+            clearDisplayCache();
             // Update size if not already set
             if (size.isEmpty() && !cachedPixmap.isNull()) {
                 size = cachedPixmap.size();
@@ -143,6 +277,8 @@ bool ImageObject::loadImage(const QString& basePath)
     
     // Convert to pixmap and cache
     cachedPixmap = QPixmap::fromImage(image);
+    clearDisplayCache();
+    m_encodedAssetData.clear();
 
     // The file we just read exists, so the asset is confirmed persisted.
     m_assetPersisted = true;
@@ -164,6 +300,11 @@ bool ImageObject::loadImage(const QString& basePath)
 void ImageObject::setPixmap(const QPixmap& pixmap)
 {
     cachedPixmap = pixmap;
+    clearDisplayCache();
+    m_encodedAssetData.clear();
+    m_assetFormat = QByteArrayLiteral("png");
+    imageHash.clear();
+    imagePath.clear();
 
     // A freshly supplied pixmap (clipboard/memory) is not yet on disk.
     m_assetPersisted = false;
@@ -182,6 +323,46 @@ void ImageObject::setPixmap(const QPixmap& pixmap)
     }
 }
 
+void ImageObject::setSourceImage(const QImage& image,
+                                 const QByteArray& encodedData,
+                                 const QByteArray& encodedFormat)
+{
+    setPixmap(QPixmap::fromImage(image));
+    if (cachedPixmap.isNull()) {
+        return;
+    }
+
+    m_encodedAssetData = encodedData;
+    m_assetFormat = normalizedImageFormat(encodedFormat, !encodedData.isEmpty());
+
+    QCryptographicHash hasher(QCryptographicHash::Sha256);
+    if (!encodedData.isEmpty()) {
+        hasher.addData(encodedData);
+    } else {
+        // Clipboard images do not have source bytes. Hash a canonical pixel
+        // representation quickly on the GUI thread; PNG compression remains
+        // entirely in the background writer.
+        addCanonicalImageToHash(hasher, image);
+    }
+    imageHash = QString::fromLatin1(hasher.result().toHex());
+    imagePath = imageAssetFilename(imageHash, m_assetFormat);
+}
+
+void ImageObject::markAssetPersisted()
+{
+    m_assetPersisted = true;
+    m_encodedAssetData.clear();
+    m_encodedAssetData.squeeze();
+}
+
+void ImageObject::clearDisplayCache() const
+{
+    if (!m_displayCacheKey.isEmpty()) {
+        QPixmapCache::remove(m_displayCacheKey);
+        m_displayCacheKey.clear();
+    }
+}
+
 void ImageObject::calculateHash()
 {
     if (cachedPixmap.isNull()) {
@@ -189,16 +370,23 @@ void ImageObject::calculateHash()
         return;
     }
     
-    // Convert pixmap to PNG bytes for consistent hashing
-    QByteArray bytes;
-    QBuffer buffer(&bytes);
-    buffer.open(QIODevice::WriteOnly);
-    cachedPixmap.save(&buffer, "PNG");
-    buffer.close();
-    
-    // Calculate SHA-256 hash
+    QByteArray bytes = m_encodedAssetData;
+    if (bytes.isEmpty()) {
+        QBuffer buffer(&bytes);
+        if (!buffer.open(QIODevice::WriteOnly)
+            || !cachedPixmap.save(&buffer, "PNG")) {
+            imageHash.clear();
+            imagePath.clear();
+            return;
+        }
+        m_assetFormat = QByteArrayLiteral("png");
+        m_encodedAssetData = bytes;
+    }
+
+    // Calculate SHA-256 hash over the exact bytes that will be written.
     QByteArray hash = QCryptographicHash::hash(bytes, QCryptographicHash::Sha256);
     imageHash = QString::fromLatin1(hash.toHex());
+    imagePath = imageAssetFilename(imageHash, m_assetFormat);
 }
 
 void ImageObject::resizeToWidth(qreal newWidth)
@@ -239,7 +427,7 @@ QString ImageObject::fullPath(const QString& basePath) const
     }
     
     // Phase O1.6: Resolve against assets/images/ subdirectory
-    // New format stores just the filename (e.g., "a1b2c3d4.png")
+    // New format stores just the full content hash and extension.
     // Full path becomes: bundlePath/assets/images/filename
     return basePath + "/assets/images/" + imagePath;
 }
@@ -266,20 +454,47 @@ bool ImageObject::saveToAssets(const QString& bundlePath)
         return false;
     }
     
-    // Use first 16 characters of hash as filename
-    QString filename = imageHash.left(16) + ".png";
+    if (imagePath.isEmpty()) {
+        imagePath = imageAssetFilename(imageHash, m_assetFormat);
+    }
+    QString filename = imagePath;
     QString assetsPath = bundlePath + "/assets/images";
     QString fullFilePath = assetsPath + "/" + filename;
     
     // Check if file already exists (deduplication)
-    if (QFile::exists(fullFilePath)) {
+    if (QFile::exists(fullFilePath) && isDecodableImageFile(fullFilePath)) {
         // Image already saved, just update path
         imagePath = filename;
-        m_assetPersisted = true;
+        markAssetPersisted();
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "ImageObject: reusing existing asset" << filename;
 #endif
         return true;
+    }
+
+    // A loaded original-format asset may have disappeared after its transient
+    // source bytes were released. Rebuild it as PNG from the retained pixels
+    // under a new matching content hash instead of writing PNG bytes into a
+    // misleading .jpg/.webp/etc. filename.
+    if (m_encodedAssetData.isEmpty()
+        && QFileInfo(filename).suffix().compare("png", Qt::CaseInsensitive) != 0) {
+        QByteArray recoveryPng;
+        QBuffer recoveryBuffer(&recoveryPng);
+        recoveryBuffer.open(QIODevice::WriteOnly);
+        if (!cachedPixmap.save(&recoveryBuffer, "PNG")) {
+            return false;
+        }
+        m_encodedAssetData = recoveryPng;
+        m_assetFormat = QByteArrayLiteral("png");
+        imageHash = QString::fromLatin1(
+            QCryptographicHash::hash(recoveryPng, QCryptographicHash::Sha256).toHex());
+        imagePath = imageAssetFilename(imageHash, m_assetFormat);
+        filename = imagePath;
+        fullFilePath = assetsPath + "/" + filename;
+        if (QFile::exists(fullFilePath)) {
+            markAssetPersisted();
+            return true;
+        }
     }
     
     // Ensure directory exists
@@ -288,15 +503,31 @@ bool ImageObject::saveToAssets(const QString& bundlePath)
         return false;
     }
     
-    // Save image to assets folder
-    if (!cachedPixmap.save(fullFilePath, "PNG")) {
+    QByteArray bytes = m_encodedAssetData;
+    if (bytes.isEmpty()) {
+        QBuffer buffer(&bytes);
+        buffer.open(QIODevice::WriteOnly);
+        if (!cachedPixmap.save(&buffer, "PNG")) {
+            qWarning() << "ImageObject::saveToAssets: failed to encode image";
+            return false;
+        }
+        m_assetFormat = QByteArrayLiteral("png");
+    }
+
+    // Atomically publish the exact bytes used for hashing. This avoids the
+    // previous second full-resolution PNG encode and prevents partial assets.
+    QSaveFile output(fullFilePath);
+    output.setDirectWriteFallback(false);
+    if (!output.open(QIODevice::WriteOnly)
+        || output.write(bytes) != bytes.size()
+        || !output.commit()) {
         qWarning() << "ImageObject::saveToAssets: failed to save" << fullFilePath;
         return false;
     }
     
     // Update imagePath to just the filename
     imagePath = filename;
-    m_assetPersisted = true;
+    markAssetPersisted();
     
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "ImageObject: saved to assets" << filename;

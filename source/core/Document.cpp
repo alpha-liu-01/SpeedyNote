@@ -5,16 +5,55 @@
 // ============================================================================
 
 #include "Document.h"
+#include "../objects/ImageObject.h"
 #include "../objects/OcrTextObject.h"
 #include "../objects/LinkObject.h"
 #include "../pdf/PdfMaterializer.h"
+#include <QBuffer>
 #include <QCryptographicHash>
+#include <QImageReader>
 #include <QSaveFile>
 #include <QSettings>
+#include <QtConcurrent>
 #include <cmath>
 #include <algorithm>  // Phase 5.4: for std::sort, std::greater in merge
 #include <functional>
 #include <limits>
+
+namespace {
+
+bool imageAssetMatches(const QString& path, const QString& expectedHash,
+                       const QByteArray& encodedData, const QImage& sourceImage)
+{
+    if (!QFileInfo::exists(path)) {
+        return false;
+    }
+    if (!encodedData.isEmpty()) {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly)) {
+            return false;
+        }
+        QCryptographicHash hasher(QCryptographicHash::Sha256);
+        if (!hasher.addData(&file)) {
+            return false;
+        }
+        return QString::fromLatin1(hasher.result().toHex()) == expectedHash;
+    }
+
+    QImageReader reader(path);
+    const QImage persisted = reader.read();
+    return !persisted.isNull() && !sourceImage.isNull()
+        && persisted.convertToFormat(QImage::Format_RGBA8888)
+            == sourceImage.convertToFormat(QImage::Format_RGBA8888);
+}
+
+bool isDecodableImageAsset(const QString& path)
+{
+    QImageReader reader(path);
+    return !reader.read().isNull();
+}
+
+}  // namespace
 
 #ifdef __GLIBC__
 #include <malloc.h>
@@ -24,6 +63,10 @@
 
 Document::Document()
 {
+    m_imageWritePool = std::make_unique<QThreadPool>();
+    m_imageWritePool->setMaxThreadCount(2);
+    m_imageWritePool->setExpiryTimeout(30000);
+
     // Generate unique ID
     id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     
@@ -38,6 +81,10 @@ Document::Document()
 
 Document::~Document()
 {
+    // A worker must never outlive the Document or write into a bundle after
+    // close-time orphan cleanup has completed.
+    flushPendingImageWrites();
+
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Document DESTROYED:" << this << "id=" << id.left(8) 
              << "pages=" << m_pageOrder.size() << "tiles=" << m_tiles.size();
@@ -57,6 +104,15 @@ Document::~Document()
 #ifdef __GLIBC__
     malloc_trim(0);
 #endif
+}
+
+void Document::setBundlePath(const QString& path)
+{
+    if (m_bundlePath == path) {
+        return;
+    }
+    flushPendingImageWrites();
+    m_bundlePath = path;
 }
 
 // ===== Factory Methods =====
@@ -1555,6 +1611,13 @@ bool Document::savePage(int index)
     if (m_bundlePath.isEmpty()) {
         return false;
     }
+
+    // Page JSON must never reference an asset whose background write has not
+    // completed. A failed worker is retried synchronously from in-memory data.
+    flushPendingImageWrites();
+    if (saveUnsavedImages(m_bundlePath) < 0) {
+        return false;
+    }
     
     if (index < 0 || index >= m_pageOrder.size()) {
         return false;
@@ -1567,18 +1630,24 @@ bool Document::savePage(int index)
     }
     
     // Ensure pages directory exists
-    QDir().mkpath(m_bundlePath + "/pages");
+    if (!QDir().mkpath(m_bundlePath + "/pages")) {
+        return false;
+    }
     
     QString pagePath = m_bundlePath + "/pages/" + uuid + ".json";
-    QFile file(pagePath);
+    QSaveFile file(pagePath);
+    file.setDirectWriteFallback(false);
     if (!file.open(QIODevice::WriteOnly)) {
         qWarning() << "Cannot save page:" << pagePath;
         return false;
     }
     
     QJsonDocument jsonDoc(it->second->toJson());
-    file.write(jsonDoc.toJson(QJsonDocument::Compact));
-    file.close();
+    const QByteArray pageData = jsonDoc.toJson(QJsonDocument::Compact);
+    if (file.write(pageData) != pageData.size() || !file.commit()) {
+        qWarning() << "Cannot commit page:" << pagePath;
+        return false;
+    }
     
     // Save OCR sidecar file
     savePageOcr(uuid, it->second.get());
@@ -1615,7 +1684,7 @@ void Document::evictPage(int index)
     if (m_dirtyPages.count(uuid) > 0) {
         if (!savePage(index)) {
             qWarning() << "Failed to save page before eviction" << index;
-            // Continue with eviction anyway to free memory
+            return;  // Keep the authoritative in-memory page.
         }
     }
     
@@ -3247,6 +3316,11 @@ bool Document::saveTile(TileCoord coord)
         qWarning() << "Cannot save tile: bundle path not set";
         return false;
     }
+
+    flushPendingImageWrites();
+    if (saveUnsavedImages(m_bundlePath) < 0) {
+        return false;
+    }
     
     auto it = m_tiles.find(coord);
     if (it == m_tiles.end()) {
@@ -3256,13 +3330,16 @@ bool Document::saveTile(TileCoord coord)
     
     // Ensure tiles directory exists
     QString tilesDir = m_bundlePath + "/tiles";
-    QDir().mkpath(tilesDir);
+    if (!QDir().mkpath(tilesDir)) {
+        return false;
+    }
     
     // Build tile file path
     QString tilePath = tilesDir + "/" + 
                        QString("%1,%2.json").arg(coord.first).arg(coord.second);
     
-    QFile file(tilePath);
+    QSaveFile file(tilePath);
+    file.setDirectWriteFallback(false);
     if (!file.open(QIODevice::WriteOnly)) {
         qWarning() << "Cannot save tile: failed to open file" << tilePath;
         return false;
@@ -3318,8 +3395,11 @@ bool Document::saveTile(TileCoord coord)
     }
     
     QJsonDocument jsonDoc(tileObj);
-    file.write(jsonDoc.toJson(QJsonDocument::Compact));
-    file.close();
+    const QByteArray tileData = jsonDoc.toJson(QJsonDocument::Compact);
+    if (file.write(tileData) != tileData.size() || !file.commit()) {
+        qWarning() << "Cannot commit tile:" << tilePath;
+        return false;
+    }
     
     // Save OCR sidecar file
     saveTileOcr(coord);
@@ -3503,7 +3583,7 @@ void Document::evictTile(TileCoord coord)
     if (m_dirtyTiles.count(coord) > 0) {
         if (!saveTile(coord)) {
             qWarning() << "Failed to save tile before eviction" << coord.first << coord.second;
-            // Continue with eviction anyway to free memory
+            return;  // Keep the authoritative in-memory tile.
         }
     }
     
@@ -3516,6 +3596,153 @@ void Document::evictTile(TileCoord coord)
 #endif
 }
 
+ImageObject* Document::findLoadedImageObject(const QString& objectId) const
+{
+    auto findInPage = [&objectId](Page* page) -> ImageObject* {
+        if (!page) {
+            return nullptr;
+        }
+        for (const auto& object : page->objects) {
+            if (object && object->id == objectId) {
+                return dynamic_cast<ImageObject*>(object.get());
+            }
+        }
+        return nullptr;
+    };
+
+    for (const auto& entry : m_loadedPages) {
+        if (ImageObject* image = findInPage(entry.second.get())) {
+            return image;
+        }
+    }
+    for (const auto& entry : m_tiles) {
+        if (ImageObject* image = findInPage(entry.second.get())) {
+            return image;
+        }
+    }
+    return nullptr;
+}
+
+bool Document::collectFinishedImageWrites(bool waitForAll)
+{
+    bool allSucceeded = true;
+    for (int i = m_pendingImageWrites.size() - 1; i >= 0; --i) {
+        PendingImageWrite& pending = m_pendingImageWrites[i];
+        if (!waitForAll && !pending.future.isFinished()) {
+            continue;
+        }
+        if (waitForAll) {
+            pending.future.waitForFinished();
+        }
+
+        const bool succeeded = pending.future.result() && QFile::exists(pending.fullPath);
+        allSucceeded = allSucceeded && succeeded;
+        if (succeeded) {
+            if (ImageObject* image = findLoadedImageObject(pending.objectId)) {
+                image->markAssetPersisted();
+            }
+        }
+        m_pendingImageWrites.removeAt(i);
+    }
+    return allSucceeded;
+}
+
+void Document::confirmPersistedImageAssets()
+{
+    auto confirmPage = [this](Page* page) {
+        if (!page) {
+            return;
+        }
+        for (const auto& object : page->objects) {
+            auto* image = dynamic_cast<ImageObject*>(object.get());
+            if (image && !image->assetPersisted() && !image->imagePath.isEmpty()
+                && isDecodableImageAsset(image->fullPath(m_bundlePath))) {
+                image->markAssetPersisted();
+            }
+        }
+    };
+
+    for (const auto& entry : m_loadedPages) {
+        confirmPage(entry.second.get());
+    }
+    for (const auto& entry : m_tiles) {
+        confirmPage(entry.second.get());
+    }
+}
+
+bool Document::enqueueImageAssetWrite(ImageObject* imageObject, const QImage& sourceImage)
+{
+    if (!imageObject || m_bundlePath.isEmpty() || imageObject->imagePath.isEmpty()
+        || (sourceImage.isNull() && imageObject->encodedAssetData().isEmpty())) {
+        return false;
+    }
+
+    collectFinishedImageWrites(false);
+
+    const QString assetsDir = m_bundlePath + "/assets/images";
+    if (!QDir().mkpath(assetsDir)) {
+        return false;
+    }
+    const QString fullPath = assetsDir + "/" + imageObject->imagePath;
+    const QByteArray encodedData = imageObject->encodedAssetData();
+    const QImage workerImage = encodedData.isEmpty() ? sourceImage : QImage();
+    const QString expectedHash = imageObject->imageHash;
+    if (imageAssetMatches(fullPath, expectedHash, encodedData, sourceImage)) {
+        imageObject->markAssetPersisted();
+        return true;
+    }
+    for (const PendingImageWrite& pending : m_pendingImageWrites) {
+        if (pending.fullPath == fullPath) {
+            return true;
+        }
+    }
+
+    constexpr int MAX_PENDING_IMAGE_WRITES = 4;
+    while (m_pendingImageWrites.size() >= MAX_PENDING_IMAGE_WRITES) {
+        // Bound retained full-resolution images and encoded payloads. Waiting
+        // for the oldest task provides backpressure during bulk insertion.
+        m_pendingImageWrites.first().future.waitForFinished();
+        collectFinishedImageWrites(false);
+    }
+    PendingImageWrite pending;
+    pending.objectId = imageObject->id;
+    pending.fullPath = fullPath;
+    pending.future = QtConcurrent::run(m_imageWritePool.get(),
+                                       [fullPath, expectedHash, encodedData,
+                                        workerImage]() -> bool {
+        QByteArray bytes = encodedData;
+        if (bytes.isEmpty()) {
+            QBuffer buffer(&bytes);
+            if (!buffer.open(QIODevice::WriteOnly)
+                || !workerImage.save(&buffer, "PNG")) {
+                return false;
+            }
+        }
+
+        // Another deduplicated write may have won the race.
+        if (imageAssetMatches(fullPath, expectedHash, encodedData, workerImage)) {
+            return true;
+        }
+
+        QSaveFile output(fullPath);
+        output.setDirectWriteFallback(false);
+        return output.open(QIODevice::WriteOnly)
+            && output.write(bytes) == bytes.size()
+            && output.commit();
+    });
+    m_pendingImageWrites.append(std::move(pending));
+    return true;
+}
+
+bool Document::flushPendingImageWrites()
+{
+    const bool succeeded = collectFinishedImageWrites(true);
+    if (!m_bundlePath.isEmpty()) {
+        confirmPersistedImageAssets();
+    }
+    return succeeded;
+}
+
 int Document::saveUnsavedImages(const QString& bundlePath)
 {
     if (bundlePath.isEmpty()) {
@@ -3523,6 +3750,7 @@ int Document::saveUnsavedImages(const QString& bundlePath)
     }
     
     int savedCount = 0;
+    bool hadFailure = false;
     
     // CR-O2: Use virtual saveAssets() instead of type-specific code
     // This allows future object types with assets (audio, video, etc.) to work automatically.
@@ -3531,7 +3759,8 @@ int Document::saveUnsavedImages(const QString& bundlePath)
     // We call it for all objects with loaded assets - the virtual method no-ops for
     // objects without external assets (base class returns true immediately).
     auto processPage = [&](Page* page) {
-        if (!page) return;
+        bool imagePathChanged = false;
+        if (!page) return imagePathChanged;
         
         for (auto& obj : page->objects) {
             // Images: data-integrity guard. As long as we still hold the
@@ -3543,9 +3772,12 @@ int Document::saveUnsavedImages(const QString& bundlePath)
             // the file is already present.
             if (auto* img = dynamic_cast<ImageObject*>(obj.get())) {
                 if (img->isLoaded()) {
+                    const QString previousPath = img->imagePath;
                     bool needsWrite = img->imagePath.isEmpty() ||
                         !QFile::exists(img->fullPath(bundlePath));
                     if (img->saveAssets(bundlePath)) {
+                        imagePathChanged = imagePathChanged
+                            || img->imagePath != previousPath;
                         if (needsWrite) {
                             savedCount++;
                             if (!img->imagePath.isEmpty()) {
@@ -3554,6 +3786,7 @@ int Document::saveUnsavedImages(const QString& bundlePath)
                             }
                         }
                     } else {
+                        hadFailure = true;
                         qWarning() << "saveUnsavedImages: Failed to save asset for"
                                    << img->type() << "object" << img->id;
                     }
@@ -3568,6 +3801,7 @@ int Document::saveUnsavedImages(const QString& bundlePath)
                 // saveAssets() handles deduplication internally - safe to call even
                 // if asset was previously saved (just updates imagePath if needed)
                 if (!obj->saveAssets(bundlePath)) {
+                    hadFailure = true;
                     qWarning() << "saveUnsavedImages: Failed to save asset for" 
                                << obj->type() << "object" << obj->id;
                     } else {
@@ -3575,17 +3809,27 @@ int Document::saveUnsavedImages(const QString& bundlePath)
                 }
             }
         }
+        return imagePathChanged;
     };
     
     if (mode == Mode::Edgeless) {
         // Process all loaded tiles
         for (auto& pair : m_tiles) {
-            processPage(pair.second.get());
+            if (processPage(pair.second.get())) {
+                markTileDirty(pair.first);
+            }
         }
     } else {
         // Paged mode: process loaded pages
         for (auto& pair : m_loadedPages) {
-            processPage(pair.second.get());
+            if (processPage(pair.second.get())) {
+                const auto it = std::find(m_pageOrder.begin(), m_pageOrder.end(),
+                                          pair.first);
+                if (it != m_pageOrder.end()) {
+                    markPageDirty(static_cast<int>(
+                        std::distance(m_pageOrder.begin(), it)));
+                }
+            }
         }
     }
     
@@ -3595,7 +3839,7 @@ int Document::saveUnsavedImages(const QString& bundlePath)
         #endif
     }
     
-    return savedCount;
+    return hadFailure ? -1 : savedCount;
 }
 
 // =========================================================================
@@ -3604,6 +3848,8 @@ int Document::saveUnsavedImages(const QString& bundlePath)
 
 void Document::cleanupOrphanedAssets()
 {
+    flushPendingImageWrites();
+
     if (m_bundlePath.isEmpty()) {
         return;  // Unsaved document, nothing on disk
     }
@@ -4188,6 +4434,34 @@ bool Document::saveBundle(const QString& path, bool finalize)
 {
     // Save old bundle path before overwriting - needed for copying evicted tiles/pages
     QString oldBundlePath = m_bundlePath;
+    const bool savingToNewLocation = !oldBundlePath.isEmpty()
+        && QDir::cleanPath(oldBundlePath) != QDir::cleanPath(path);
+    auto copyAtomically = [](const QString& sourcePath, const QString& destPath) {
+        QFile source(sourcePath);
+        if (!source.open(QIODevice::ReadOnly)) return false;
+        if (!QDir().mkpath(QFileInfo(destPath).absolutePath())) return false;
+
+        QSaveFile dest(destPath);
+        dest.setDirectWriteFallback(false);
+        if (!dest.open(QIODevice::WriteOnly)) return false;
+        constexpr qint64 chunkSize = 1024 * 1024;
+        while (!source.atEnd()) {
+            const QByteArray chunk = source.read(chunkSize);
+            if (chunk.isEmpty() && source.error() != QFileDevice::NoError) {
+                dest.cancelWriting();
+                return false;
+            }
+            if (dest.write(chunk) != chunk.size()) {
+                dest.cancelWriting();
+                return false;
+            }
+        }
+        return dest.commit();
+    };
+
+    // Complete writes against the old bundle before Save As changes the path
+    // and before any page/tile JSON is serialized.
+    flushPendingImageWrites();
     m_bundlePath = path;
     
     // Phase P.1.1: Write .snb_marker file to identify this as a SpeedyNote bundle
@@ -4205,6 +4479,30 @@ bool Document::saveBundle(const QString& path, bool finalize)
         qWarning() << "Cannot create assets/images directory" << path;
         return false;
     }
+
+    // Copy existing assets before saveUnsavedImages(). Otherwise every loaded
+    // original-format image appears missing in the new bundle and is needlessly
+    // re-encoded from its pixmap, while evicted pages can retain dangling paths
+    // if the later best-effort copy fails.
+    if (savingToNewLocation) {
+        const QString oldAssetsPath = oldBundlePath + "/assets/images";
+        const QString newAssetsPath = path + "/assets/images";
+        QDir oldAssetsDir(oldAssetsPath);
+        if (oldAssetsDir.exists()) {
+            const QStringList assetFiles = oldAssetsDir.entryList(QDir::Files);
+            for (const QString& fileName : assetFiles) {
+                const QString oldFilePath = oldAssetsPath + "/" + fileName;
+                const QString newFilePath = newAssetsPath + "/" + fileName;
+                if (!QFile::exists(newFilePath)
+                    && !copyAtomically(oldFilePath, newFilePath)) {
+                    qWarning() << "Failed to copy asset" << oldFilePath
+                               << "to" << newFilePath;
+                    m_bundlePath = oldBundlePath;
+                    return false;
+                }
+            }
+        }
+    }
     
     // Phase O2 (BF.2): Save any unsaved images to assets folder BEFORE saving page JSON.
     // 
@@ -4213,7 +4511,10 @@ bool Document::saveBundle(const QString& path, bool finalize)
     // - The image exists only as cachedPixmap with imagePath = ""
     // - Here we finally have a bundle path, so we can save images and set imagePath
     // - Then the serialized page JSON will have the correct imagePath reference
-    saveUnsavedImages(path);
+    if (saveUnsavedImages(path) < 0) {
+        m_bundlePath = oldBundlePath;
+        return false;
+    }
 
     // Plan A2 / Q7.2: drop any PDF source no page references anymore (e.g. after
     // deleting all pages backed by an imported source, or every primary-PDF page).
@@ -4225,29 +4526,6 @@ bool Document::saveBundle(const QString& path, bool finalize)
     // finalization decides that every referenced page is already materialized.
     if (!oldBundlePath.isEmpty()
         && QDir::cleanPath(oldBundlePath) != QDir::cleanPath(path)) {
-        auto copyAtomically = [](const QString& sourcePath, const QString& destPath) {
-            QFile source(sourcePath);
-            if (!source.open(QIODevice::ReadOnly)) return false;
-            if (!QDir().mkpath(QFileInfo(destPath).absolutePath())) return false;
-
-            QSaveFile dest(destPath);
-            dest.setDirectWriteFallback(false);
-            if (!dest.open(QIODevice::WriteOnly)) return false;
-            constexpr qint64 chunkSize = 1024 * 1024;
-            while (!source.atEnd()) {
-                const QByteArray chunk = source.read(chunkSize);
-                if (chunk.isEmpty() && source.error() != QFileDevice::NoError) {
-                    dest.cancelWriting();
-                    return false;
-                }
-                if (dest.write(chunk) != chunk.size()) {
-                    dest.cancelWriting();
-                    return false;
-                }
-            }
-            return dest.commit();
-        };
-
         for (const PdfSource& source : m_pdfSources) {
             if (!source.bundled || source.bundledFile.isEmpty()) continue;
             const QString oldFile =
@@ -4393,40 +4671,20 @@ bool Document::saveBundle(const QString& path, bool finalize)
     
     // Write manifest
     QString manifestPath = path + "/document.json";
-    QFile manifestFile(manifestPath);
+    QSaveFile manifestFile(manifestPath);
+    manifestFile.setDirectWriteFallback(false);
     if (!manifestFile.open(QIODevice::WriteOnly)) {
         qWarning() << "Cannot write manifest" << manifestPath;
+        m_bundlePath = oldBundlePath;
         return false;
     }
-    manifestFile.write(QJsonDocument(manifest).toJson(QJsonDocument::Indented));
-    manifestFile.close();
-    
-    bool savingToNewLocation = !oldBundlePath.isEmpty() && oldBundlePath != path;
-    
-    // ========== COPY ASSETS WHEN SAVING TO NEW LOCATION (Phase O1.6 fix) ==========
-    if (savingToNewLocation) {
-        QString oldAssetsPath = oldBundlePath + "/assets/images";
-        QString newAssetsPath = path + "/assets/images";
-        
-        QDir oldAssetsDir(oldAssetsPath);
-        if (oldAssetsDir.exists()) {
-            QStringList assetFiles = oldAssetsDir.entryList(QDir::Files);
-            for (const QString& fileName : assetFiles) {
-                QString oldFilePath = oldAssetsPath + "/" + fileName;
-                QString newFilePath = newAssetsPath + "/" + fileName;
-                
-                // Skip if already exists (e.g., newly added images saved above)
-                if (!QFile::exists(newFilePath)) {
-                    if (QFile::copy(oldFilePath, newFilePath)) {
-#ifdef SPEEDYNOTE_DEBUG
-                        qDebug() << "Copied asset" << fileName;
-#endif
-                    } else {
-                        qWarning() << "Failed to copy asset" << oldFilePath << "to" << newFilePath;
-                    }
-                }
-            }
-        }
+    const QByteArray manifestData =
+        QJsonDocument(manifest).toJson(QJsonDocument::Indented);
+    if (manifestFile.write(manifestData) != manifestData.size()
+        || !manifestFile.commit()) {
+        qWarning() << "Cannot commit manifest" << manifestPath;
+        m_bundlePath = oldBundlePath;
+        return false;
     }
     
     // ========== MODE-SPECIFIC FILE HANDLING ==========
@@ -4449,12 +4707,14 @@ bool Document::saveBundle(const QString& path, bool finalize)
                 
                 // Copy tile file from old location to new location
                 if (QFile::exists(oldTilePath)) {
-                    if (QFile::copy(oldTilePath, newTilePath)) {
+                    if (copyAtomically(oldTilePath, newTilePath)) {
 #ifdef SPEEDYNOTE_DEBUG
                         qDebug() << "Copied evicted tile" << coord.first << "," << coord.second;
 #endif
                     } else {
                         qWarning() << "Failed to copy tile" << oldTilePath << "to" << newTilePath;
+                        m_bundlePath = oldBundlePath;
+                        return false;
                     }
                 }
                 
@@ -4462,8 +4722,10 @@ bool Document::saveBundle(const QString& path, bool finalize)
                 QString ocrFileName = QString("%1,%2.ocr.json").arg(coord.first).arg(coord.second);
                 QString oldOcrPath = oldBundlePath + "/tiles/" + ocrFileName;
                 QString newOcrPath = path + "/tiles/" + ocrFileName;
-                if (QFile::exists(oldOcrPath)) {
-                    QFile::copy(oldOcrPath, newOcrPath);
+                if (QFile::exists(oldOcrPath)
+                    && !copyAtomically(oldOcrPath, newOcrPath)) {
+                    m_bundlePath = oldBundlePath;
+                    return false;
                 }
             }
         }
@@ -4477,7 +4739,10 @@ bool Document::saveBundle(const QString& path, bool finalize)
                              m_dirtyTiles.count(coord) > 0 || 
                              m_tileIndex.count(coord) == 0;
             if (needsSave) {
-                saveTile(coord);
+                if (!saveTile(coord)) {
+                    m_bundlePath = oldBundlePath;
+                    return false;
+                }
             }
         }
         
@@ -4524,22 +4789,25 @@ bool Document::saveBundle(const QString& path, bool finalize)
                 QString newPagePath = path + "/pages/" + pageFileName;
                 
                 if (QFile::exists(oldPagePath)) {
-                    if (QFile::copy(oldPagePath, newPagePath)) {
+                    if (copyAtomically(oldPagePath, newPagePath)) {
 #ifdef SPEEDYNOTE_DEBUG
                         qDebug() << "Copied evicted page" << uuid;
 #endif
                     } else {
-                        #ifdef SPEEDYNOTE_DEBUG
-                            qDebug() << "Failed to copy page" << oldPagePath << "to" << newPagePath;
-                        #endif
+                        qWarning() << "Failed to copy page" << oldPagePath
+                                   << "to" << newPagePath;
+                        m_bundlePath = oldBundlePath;
+                        return false;
                     }
                 }
                 
                 // Copy OCR sidecar file if it exists
                 QString oldOcrPath = oldBundlePath + "/pages/" + uuid + ".ocr.json";
                 QString newOcrPath = path + "/pages/" + uuid + ".ocr.json";
-                if (QFile::exists(oldOcrPath)) {
-                    QFile::copy(oldOcrPath, newOcrPath);
+                if (QFile::exists(oldOcrPath)
+                    && !copyAtomically(oldOcrPath, newOcrPath)) {
+                    m_bundlePath = oldBundlePath;
+                    return false;
                 }
             }
         }
@@ -4578,18 +4846,20 @@ bool Document::saveBundle(const QString& path, bool finalize)
             bool needsSave = savingToNewLocation || m_dirtyPages.count(uuid) > 0;
             if (needsSave) {
                 QString pagePath = path + "/pages/" + uuid + ".json";
-                QFile file(pagePath);
-                if (file.open(QIODevice::WriteOnly)) {
-                    QJsonDocument doc(pagePtr->toJson());
-                    file.write(doc.toJson(QJsonDocument::Compact));
-                    file.close();
+                QSaveFile file(pagePath);
+                file.setDirectWriteFallback(false);
+                QJsonDocument doc(pagePtr->toJson());
+                const QByteArray pageData = doc.toJson(QJsonDocument::Compact);
+                if (file.open(QIODevice::WriteOnly)
+                    && file.write(pageData) == pageData.size()
+                    && file.commit()) {
 #ifdef SPEEDYNOTE_DEBUG
                     qDebug() << "Saved page" << uuid;
 #endif
                 } else {
-                    #ifdef SPEEDYNOTE_DEBUG
-                        qDebug() << "Failed to save page" << pagePath;
-                    #endif
+                    qWarning() << "Failed to save page" << pagePath;
+                    m_bundlePath = oldBundlePath;
+                    return false;
                 }
             }
         }
@@ -5264,7 +5534,8 @@ bool Document::savePageOcr(const QString& uuid, const Page* page)
 
     QString ocrPath = m_bundlePath + "/pages/" + uuid + ".ocr.json";
 
-    if (page->ocrTextBlocks.isEmpty() && page->suppressedStrokeIds.isEmpty()) {
+    if (page->ocrTextBlocks.isEmpty() && page->suppressedStrokeIds.isEmpty()
+        && page->dismissedOcrBlockKeys.isEmpty()) {
         QFile::remove(ocrPath);
         return true;
     }
@@ -5286,6 +5557,13 @@ bool Document::savePageOcr(const QString& uuid, const Page* page)
         for (const auto& id : page->suppressedStrokeIds)
             suppressed.append(id);
         root["suppressedStrokeIds"] = suppressed;
+    }
+
+    if (!page->dismissedOcrBlockKeys.isEmpty()) {
+        QJsonArray dismissed;
+        for (const auto& key : page->dismissedOcrBlockKeys)
+            dismissed.append(key);
+        root["dismissedBlockKeys"] = dismissed;
     }
 
     QFile file(ocrPath);
@@ -5317,11 +5595,14 @@ bool Document::loadPageOcr(Page* page, const QString& uuid) const
 
     page->ocrTextBlocks.clear();
     page->suppressedStrokeIds.clear();
+    page->dismissedOcrBlockKeys.clear();
 
     for (const auto& val : root["blocks"].toArray())
         page->ocrTextBlocks.append(OcrTextBlock::fromJson(val.toObject()));
     for (const auto& val : root["suppressedStrokeIds"].toArray())
         page->suppressedStrokeIds.insert(val.toString());
+    for (const auto& val : root["dismissedBlockKeys"].toArray())
+        page->dismissedOcrBlockKeys.insert(val.toString());
 
     page->ocrDirty = false;
     return true;
@@ -5340,7 +5621,8 @@ bool Document::saveTileOcr(TileCoord coord)
     QString ocrPath = m_bundlePath + "/tiles/" +
         QString("%1,%2.ocr.json").arg(coord.first).arg(coord.second);
 
-    if (tile->ocrTextBlocks.isEmpty() && tile->suppressedStrokeIds.isEmpty()) {
+    if (tile->ocrTextBlocks.isEmpty() && tile->suppressedStrokeIds.isEmpty()
+        && tile->dismissedOcrBlockKeys.isEmpty()) {
         QFile::remove(ocrPath);
         return true;
     }
@@ -5362,6 +5644,13 @@ bool Document::saveTileOcr(TileCoord coord)
         for (const auto& id : tile->suppressedStrokeIds)
             suppressed.append(id);
         root["suppressedStrokeIds"] = suppressed;
+    }
+
+    if (!tile->dismissedOcrBlockKeys.isEmpty()) {
+        QJsonArray dismissed;
+        for (const auto& key : tile->dismissedOcrBlockKeys)
+            dismissed.append(key);
+        root["dismissedBlockKeys"] = dismissed;
     }
 
     QFile file(ocrPath);
@@ -5395,11 +5684,14 @@ bool Document::loadTileOcr(Page* tile, TileCoord coord) const
 
     tile->ocrTextBlocks.clear();
     tile->suppressedStrokeIds.clear();
+    tile->dismissedOcrBlockKeys.clear();
 
     for (const auto& val : root["blocks"].toArray())
         tile->ocrTextBlocks.append(OcrTextBlock::fromJson(val.toObject()));
     for (const auto& val : root["suppressedStrokeIds"].toArray())
         tile->suppressedStrokeIds.insert(val.toString());
+    for (const auto& val : root["dismissedBlockKeys"].toArray())
+        tile->dismissedOcrBlockKeys.insert(val.toString());
 
     tile->ocrDirty = false;
     return true;
@@ -5446,6 +5738,12 @@ void Document::materializeOcrTextObjects(Page* page) const
 
     for (const auto& block : page->ocrTextBlocks) {
         if (block.dirty || block.text.isEmpty())
+            continue;
+
+        // A sidecar written before a block was dismissed can still hold it;
+        // its strokes are suppressed, so it must not become an overlay again.
+        if (isOcrBlockDismissed(block, page->suppressedStrokeIds,
+                                page->dismissedOcrBlockKeys))
             continue;
 
         // Skip blocks whose strokes are claimed by locked objects
