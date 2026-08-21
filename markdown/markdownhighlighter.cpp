@@ -459,7 +459,13 @@ QTextCharFormat MarkdownHighlighter::formatForState(
     QFont headingFont = format.font();
     headingFont.setPixelSize(qMax(1, qRound(_baseFontPixelSize * ratio)));
     format.setFont(headingFont);
+    // setFont() writes the resolved family, which is the application default
+    // rather than the editor's font. Drop it so headings inherit the widget
+    // font that the inline text box editor configures per object.
     format.clearProperty(QTextFormat::FontFamily);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 13, 0)
+    format.clearProperty(QTextFormat::FontFamilies);
+#endif
     return format;
 }
 

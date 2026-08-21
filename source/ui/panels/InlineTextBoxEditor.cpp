@@ -2,6 +2,7 @@
 
 #include "../../../markdown/qmarkdowntextedit.h"
 
+#include <QApplication>
 #include <QEvent>
 #include <QKeyEvent>
 #include <QPalette>
@@ -52,7 +53,11 @@ InlineTextBoxEditor::InlineTextBoxEditor(QWidget* parent)
 void InlineTextBoxEditor::configure(const TextBoxState& state, qreal zoom,
                                     bool darkMode)
 {
-    QFont font = m_editor->font();
+    // The editor widget is reused across sessions, so resolve the family from
+    // the object state every time. Falling back to the widget's current font
+    // would leak the previous box's family into a box that stores none, which
+    // renders with the application default once the session commits.
+    QFont font = QApplication::font();
     if (!state.fontFamily.isEmpty())
         font.setFamily(state.fontFamily);
     font.setPixelSize(qMax(1, qRound(state.fontSize * qMax<qreal>(zoom, 0.01))));

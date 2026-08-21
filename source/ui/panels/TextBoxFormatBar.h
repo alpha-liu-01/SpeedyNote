@@ -51,6 +51,13 @@ signals:
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
+    // Children such as the colour swatches and labels ignore pointer events.
+    // Swallow whatever reaches the bar so the canvas underneath never treats
+    // an interaction with the bar as an outside click.
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
 
 private:
     void ensureInteractionStarted();

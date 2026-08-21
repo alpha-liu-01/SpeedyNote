@@ -22,14 +22,18 @@
 
 #include <QApplication>
 #include <QBuffer>
+#include <QColorDialog>
 #include <QFile>
 #include <QFileInfo>
 #include <QDoubleSpinBox>
 #include <QFontComboBox>
+#include <QMouseEvent>
 #include <QTemporaryDir>
 #include <QSignalSpy>
 #include <QSlider>
+#include <QTextBlock>
 #include <QTextCursor>
+#include <QTextDocument>
 #include <QToolButton>
 #include <QtNumeric>
 #include <QtMath>
@@ -1736,6 +1740,26 @@ public:
         viewport.undo();
         if (!box->fontFamily.isEmpty())
             return fail("font-family undo did not restore default family");
+
+        // The inline editor widget is reused between sessions. A box that
+        // stores no family must edit in the application font instead of
+        // inheriting the family of the previously edited box, which would
+        // render differently once the session commits.
+        box->fontFamily = alternateFamily;
+        viewport.startInlineTextEdit(box, false);
+        const QString editedFamily =
+            viewport.m_inlineTextBoxEditor->editor()->font().family();
+        viewport.cancelInlineTextEdit();
+        box->fontFamily.clear();
+        viewport.startInlineTextEdit(box, false);
+        const QString fallbackFamily =
+            viewport.m_inlineTextBoxEditor->editor()->font().family();
+        viewport.cancelInlineTextEdit();
+        if (editedFamily.compare(alternateFamily, Qt::CaseInsensitive) != 0
+            || fallbackFamily.compare(QApplication::font().family(),
+                                      Qt::CaseInsensitive) != 0)
+            return fail("inline editor font did not follow the box family");
+
         viewport.m_undoStack.clear();
         viewport.m_redoStack.clear();
         if (!QRect(8, 8, viewport.width() - 16,
@@ -1937,8 +1961,74 @@ public:
         const auto swatches =
             viewport.m_textBoxFormatBar
                 ->findChildren<ColorPresetButton*>();
-        if (swatches.isEmpty())
+        if (swatches.size() != 2)
             return fail("format color controls were missing");
+        auto clickSwatch = [](ColorPresetButton* swatch) {
+            const QPointF local(swatch->rect().center());
+            QMouseEvent press(QEvent::MouseButtonPress, local,
+                              Qt::LeftButton, Qt::LeftButton,
+                              Qt::NoModifier);
+            QMouseEvent release(QEvent::MouseButtonRelease, local,
+                                Qt::LeftButton, Qt::NoButton,
+                                Qt::NoModifier);
+            QApplication::sendEvent(swatch, &press);
+            QApplication::sendEvent(swatch, &release);
+            QApplication::processEvents();
+        };
+
+        const int beforeColorUndo = viewport.m_undoStack.size();
+        const QColor startFontColor = box->fontColor;
+        clickSwatch(swatches.at(0));
+        // A press that leaks to the canvas would clear the selection and
+        // leave the transaction unowned, which silently drops every preview.
+        if (viewport.m_selectedObjects.size() != 1)
+            return fail("swatch click leaked to the canvas selection");
+        auto* fontColorDialog =
+            viewport.m_textBoxFormatBar->findChild<QColorDialog*>();
+        if (!fontColorDialog
+            || !viewport.m_textBoxFormatTransaction.active)
+            return fail("text color swatch click opened no dialog");
+        const QColor pickedFontColor(24, 118, 210);
+        fontColorDialog->setCurrentColor(pickedFontColor);
+        QApplication::processEvents();
+        if (box->fontColor != pickedFontColor)
+            return fail("text color preview never reached the object");
+        fontColorDialog->accept();
+        QApplication::processEvents();
+        if (box->fontColor != pickedFontColor
+            || viewport.m_undoStack.size() != beforeColorUndo + 1
+            || viewport.m_textBoxFormatTransaction.active)
+            return fail("accepted text color was not committed once");
+        const auto coloredLayout =
+            TextBoxObject::buildLayout(box->layoutInput());
+        if (!coloredLayout || !coloredLayout->document
+            || coloredLayout->document->begin().begin().fragment()
+                   .charFormat().foreground().color() != pickedFontColor)
+            return fail("text color did not reach the rendered layout");
+        viewport.undo();
+        if (box->fontColor != startFontColor)
+            return fail("text color undo did not restore the old color");
+        viewport.redo();
+
+        const int beforeBackgroundUndo = viewport.m_undoStack.size();
+        const int keptAlpha = box->backgroundColor.alpha();
+        clickSwatch(swatches.at(1));
+        auto* backgroundDialog =
+            viewport.m_textBoxFormatBar->findChild<QColorDialog*>();
+        if (!backgroundDialog)
+            return fail("background swatch click opened no dialog");
+        const QColor pickedBackground(240, 200, 90);
+        backgroundDialog->setCurrentColor(pickedBackground);
+        QApplication::processEvents();
+        if (box->backgroundColor.rgb() != pickedBackground.rgb()
+            || box->backgroundColor.alpha() != keptAlpha)
+            return fail("background preview lost hue or opacity");
+        backgroundDialog->accept();
+        QApplication::processEvents();
+        if (box->backgroundColor.rgb() != pickedBackground.rgb()
+            || viewport.m_undoStack.size() != beforeBackgroundUndo + 1)
+            return fail("accepted background color was not committed");
+
         QMetaObject::invokeMethod(
             swatches.first(), "editRequested",
             Qt::DirectConnection);

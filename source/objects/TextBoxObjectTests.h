@@ -186,6 +186,31 @@ inline bool testLayoutMeasurementAndCache()
         ok &= require(headingPixels[level] == expected,
                       "heading did not use its versioned ratio");
     }
+
+    // Headings must follow the box family too. QTextCharFormat::font() reports
+    // the application font for fragments that never set one, so a naive
+    // "only fill in an empty family" check leaves headings on the default.
+    headings.fontFamily = QStringLiteral("Courier New");
+    const TextBoxLayoutResult* familyLayout = headings.ensureLayout();
+    bool headingFamiliesMatch = familyLayout && familyLayout->document;
+    int inspectedHeadings = 0;
+    if (familyLayout && familyLayout->document) {
+        for (QTextBlock block = familyLayout->document->begin();
+             block.isValid(); block = block.next()) {
+            const int level =
+                block.blockFormat()
+                    .property(QTextFormat::HeadingLevel).toInt();
+            if (level < 1 || level > 6 || block.begin().atEnd())
+                continue;
+            ++inspectedHeadings;
+            if (block.begin().fragment().charFormat().font().family()
+                    .compare(headings.fontFamily, Qt::CaseInsensitive) != 0) {
+                headingFamiliesMatch = false;
+            }
+        }
+    }
+    ok &= require(headingFamiliesMatch && inspectedHeadings == 6,
+                  "headings ignored the text box font family");
     return ok;
 }
 

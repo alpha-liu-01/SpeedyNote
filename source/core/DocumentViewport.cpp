@@ -3896,6 +3896,14 @@ void DocumentViewport::leaveEvent(QEvent* event)
 
 void DocumentViewport::tabletEvent(QTabletEvent* event)
 {
+    // Stylus events over the inline editor or the formatting bar arrive here
+    // by propagation. Leave them unhandled so Qt synthesizes mouse events for
+    // those widgets instead of treating the pen as a canvas interaction.
+    if (!m_pointerActive && pointerOverTextOverlay(SN_EVENT_POS(event))) {
+        event->ignore();
+        return;
+    }
+
     // Determine event type
     PointerEvent::Type peType;
     switch (event->type()) {
@@ -8732,6 +8740,17 @@ void DocumentViewport::syncTextBoxFormatBar()
     m_textBoxFormatBar->show();
     updateTextBoxFormatBarGeometry();
     m_textBoxFormatBar->raise();
+}
+
+bool DocumentViewport::pointerOverTextOverlay(const QPointF& viewportPos) const
+{
+    const QPoint pos = viewportPos.toPoint();
+    if (m_textBoxFormatBar && m_textBoxFormatBar->isVisible()
+        && m_textBoxFormatBar->geometry().contains(pos)) {
+        return true;
+    }
+    return m_inlineTextBoxEditor && m_inlineTextBoxEditor->isVisible()
+        && m_inlineTextBoxEditor->geometry().contains(pos);
 }
 
 void DocumentViewport::updateTextBoxFormatBarGeometry()

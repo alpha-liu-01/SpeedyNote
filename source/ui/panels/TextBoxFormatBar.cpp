@@ -12,6 +12,8 @@
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QMouseEvent>
+#include <QWheelEvent>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QTimer>
@@ -366,6 +368,26 @@ bool TextBoxFormatBar::eventFilter(QObject* watched, QEvent* event)
         }
     }
     return QWidget::eventFilter(watched, event);
+}
+
+void TextBoxFormatBar::mousePressEvent(QMouseEvent* event)
+{
+    event->accept();
+}
+
+void TextBoxFormatBar::mouseReleaseEvent(QMouseEvent* event)
+{
+    event->accept();
+}
+
+void TextBoxFormatBar::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    event->accept();
+}
+
+void TextBoxFormatBar::wheelEvent(QWheelEvent* event)
+{
+    event->accept();
 }
 
 void TextBoxFormatBar::ensureInteractionStarted()

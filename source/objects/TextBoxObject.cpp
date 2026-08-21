@@ -132,6 +132,18 @@ void applyAlignment(QTextDocument& document, TextAlignment alignment)
     }
 }
 
+// A fragment only carries a deliberate family when the Markdown importer set
+// one (inline code spans). Everything else reports the application default
+// through QTextCharFormat::font(), which must not win over the box family.
+bool hasExplicitFontFamily(const QTextCharFormat& format)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(5, 13, 0)
+    if (format.hasProperty(QTextFormat::FontFamilies))
+        return true;
+#endif
+    return format.hasProperty(QTextFormat::FontFamily);
+}
+
 void applyHeadingSizes(QTextDocument& document, const QFont& baseFont,
                        qreal basePixelSize)
 {
@@ -153,8 +165,10 @@ void applyHeadingSizes(QTextDocument& document, const QFont& baseFont,
             format.clearProperty(QTextFormat::FontPointSize);
 
             QFont font = format.font();
-            if (font.family().isEmpty())
+            if (!hasExplicitFontFamily(format)
+                && !baseFont.family().isEmpty()) {
                 font.setFamily(baseFont.family());
+            }
             font.setPixelSize(pixelSize);
             font.setBold(true);
             format.setFont(font);

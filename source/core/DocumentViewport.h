@@ -1506,6 +1506,15 @@ public:
                              Document::TileCoord& tileCoord) const;
     void ensureTextBoxFormatBar();
     void syncTextBoxFormatBar();
+    /**
+     * @brief Whether a viewport point belongs to a text overlay widget.
+     *
+     * Stylus events are delivered to the deepest child and propagate back up
+     * when that child does not handle them. Consuming those here would make
+     * the canvas react to overlay interactions and would suppress the
+     * synthesized mouse events the overlay widgets rely on.
+     */
+    bool pointerOverTextOverlay(const QPointF& viewportPos) const;
     void updateTextBoxFormatBarGeometry();
     void beginTextBoxFormatInteraction();
     void applyTextBoxFormatPreview(TextBoxFormatChange change,
