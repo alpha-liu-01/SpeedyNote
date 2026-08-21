@@ -449,8 +449,7 @@ std::unique_ptr<OcrTextObject> OcrTextObject::createFromBlock(
     obj->ocrDirty = block.dirty;
     obj->wordSegments = block.wordSegments;
     obj->fontColor = strokeColor;
-    obj->backgroundColor = darkMode ? QColor(40, 40, 40, 180)
-                                    : QColor(255, 255, 255, 180);
+    obj->backgroundColor = TextBoxObject::defaultBackgroundColor(darkMode);
     obj->visible = false;
     return obj;
 }

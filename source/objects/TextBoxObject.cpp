@@ -13,6 +13,7 @@
 #include <QTextOption>
 #include <QPen>
 #include <QTransform>
+#include <QVector>
 #include <QtNumeric>
 #include <qmath.h>
 
@@ -28,6 +29,61 @@ bool isMarkdownText(const QString& value)
         || value.contains(QLatin1Char('['));
 }
 
+// A blank row typed next to one of these lines is Markdown structure rather
+// than empty space: it separates list items, closes a table, quote or HTML
+// block, belongs to an indented code block, or decides whether a run of dashes
+// underlines a heading. Filling such a row in would change what the text means.
+bool blankLineCarriesStructure(const QString& line)
+{
+    if (line.startsWith(QLatin1Char('\t'))
+        || line.startsWith(QLatin1String("    "))) {
+        return true;
+    }
+    if (line.contains(QLatin1Char('|')))
+        return true;
+
+    int indent = 0;
+    while (indent < line.size() && line.at(indent) == QLatin1Char(' '))
+        ++indent;
+    if (indent >= line.size())
+        return false;
+
+    const QChar first = line.at(indent);
+    if (first == QLatin1Char('>') || first == QLatin1Char('<'))
+        return true;
+
+    bool onlyRuleCharacters = true;
+    for (int i = indent; i < line.size() && onlyRuleCharacters; ++i) {
+        const QChar c = line.at(i);
+        onlyRuleCharacters = c == QLatin1Char('-') || c == QLatin1Char('=')
+            || c == QLatin1Char('_') || c == QLatin1Char('*')
+            || c == QLatin1Char(' ');
+    }
+    if (onlyRuleCharacters)
+        return true;
+
+    const auto markerEndsBullet = [&](int markerEnd) {
+        return markerEnd >= line.size()
+            || line.at(markerEnd) == QLatin1Char(' ')
+            || line.at(markerEnd) == QLatin1Char('\t');
+    };
+    if (first == QLatin1Char('-') || first == QLatin1Char('*')
+        || first == QLatin1Char('+')) {
+        return markerEndsBullet(indent + 1);
+    }
+    if (first.isDigit()) {
+        int end = indent;
+        while (end < line.size() && line.at(end).isDigit())
+            ++end;
+        if (end < line.size()
+            && (line.at(end) == QLatin1Char('.')
+                || line.at(end) == QLatin1Char(')'))) {
+            return markerEndsBullet(end + 1);
+        }
+    }
+    return false;
+}
+
 QString markdownWithPreservedSoftBreaks(const QString& source)
 {
     QString normalized = source;
@@ -36,9 +92,6 @@ QString markdownWithPreservedSoftBreaks(const QString& source)
     QStringList lines = normalized.split(
         QLatin1Char('\n'), Qt::KeepEmptyParts);
 
-    bool inFence = false;
-    QChar fenceCharacter;
-    int fenceLength = 0;
     auto fenceAtStart = [](const QString& line, QChar* character,
                            int* length) {
         int offset = 0;
@@ -65,30 +118,69 @@ QString markdownWithPreservedSoftBreaks(const QString& source)
         return true;
     };
 
-    for (int i = 0; i + 1 < lines.size(); ++i) {
-        QString& line = lines[i];
-        QChar marker;
-        int markerLength = 0;
-        const bool fenceLine =
-            fenceAtStart(line, &marker, &markerLength);
-        if (fenceLine) {
-            if (!inFence) {
-                inFence = true;
-                fenceCharacter = marker;
-                fenceLength = markerLength;
-            } else if (marker == fenceCharacter
-                       && markerLength >= fenceLength) {
-                inFence = false;
+    // Flag fenced code up front, delimiters included, so neither pass below
+    // rewrites text the user expects to survive verbatim.
+    QVector<bool> fenced(lines.size(), false);
+    {
+        bool inFence = false;
+        QChar fenceCharacter;
+        int fenceLength = 0;
+        for (int i = 0; i < lines.size(); ++i) {
+            QChar marker;
+            int markerLength = 0;
+            if (fenceAtStart(lines[i], &marker, &markerLength)) {
+                if (!inFence) {
+                    inFence = true;
+                    fenceCharacter = marker;
+                    fenceLength = markerLength;
+                } else if (marker == fenceCharacter
+                           && markerLength >= fenceLength) {
+                    inFence = false;
+                }
+                fenced[i] = true;
+                continue;
             }
+            fenced[i] = inFence;
+        }
+    }
+
+    // Markdown folds any run of blank lines into a single paragraph break, so
+    // the empty rows a user typed between two lines of prose disappear. Park a
+    // non-breaking space on each one and the hard-break pass below turns it
+    // into a real, empty-looking row of the same paragraph.
+    for (int i = 0; i < lines.size(); ++i) {
+        if (fenced[i] || !lines[i].isEmpty())
+            continue;
+
+        int before = i - 1;
+        while (before >= 0 && lines[before].isEmpty())
+            --before;
+        int after = i + 1;
+        while (after < lines.size() && lines[after].isEmpty())
+            ++after;
+        // Blank runs before the first or after the last line of text render as
+        // nothing either way, so leave the source alone.
+        if (before < 0 || after >= lines.size())
+            continue;
+        if (fenced[before] || fenced[after])
+            continue;
+        if (blankLineCarriesStructure(lines[before])
+            || blankLineCarriesStructure(lines[after])) {
             continue;
         }
+        lines[i] = QString(QChar(0x00A0));
+    }
 
+    for (int i = 0; i + 1 < lines.size(); ++i) {
+        if (fenced[i])
+            continue;
+        QString& line = lines[i];
         const bool indentedCode =
             line.startsWith(QLatin1Char('\t'))
             || line.startsWith(QLatin1String("    "));
         const bool nextLineHasContent = !lines[i + 1].isEmpty();
         const bool finalTrailingBreak = i + 1 == lines.size() - 1;
-        if (!inFence && !indentedCode && !line.isEmpty()
+        if (!indentedCode && !line.isEmpty()
             && (nextLineHasContent || finalTrailingBreak)
             && !line.endsWith(QLatin1String("  "))
             && !line.endsWith(QLatin1Char('\\'))
@@ -267,6 +359,11 @@ bool sameLayoutInput(const TextBoxLayoutInput& a, const TextBoxLayoutInput& b)
 TextBoxLayoutResult::TextBoxLayoutResult() = default;
 TextBoxLayoutResult::~TextBoxLayoutResult() = default;
 TextBoxObject::~TextBoxObject() = default;
+
+QColor TextBoxObject::defaultBackgroundColor(bool darkMode)
+{
+    return darkMode ? QColor(40, 40, 40, 180) : QColor(255, 255, 255, 180);
+}
 
 QVector<QRectF> TextBoxLayoutResult::findTextRects(
     const QString& query, bool caseSensitive, bool wholeWord) const

@@ -1493,6 +1493,18 @@ public:
      */
     void createTextBoxAtRect(int pageIndex, const QRectF& rect, const QPointF& viewportPos);
 
+    /**
+     * @brief Backdrop for a new text box, matched to the paper it lands on.
+     * @param page The page or tile receiving the box; null falls back to the
+     *             document's default paper, then to the current theme.
+     *
+     * Paper color is baked from the theme when a notebook is created and then
+     * stays put, so a light notebook opened at night still has white pages and
+     * a dark one opened by day still has dark pages. Reading the page instead
+     * of the live theme keeps the box from becoming a slab on either.
+     */
+    QColor textBackdropForPage(const Page* page) const;
+
     struct InlineTextEditSession {
         Document* document = nullptr;
         QString objectId;

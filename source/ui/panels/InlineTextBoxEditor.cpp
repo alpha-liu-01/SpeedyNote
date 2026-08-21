@@ -8,6 +8,7 @@
 #include <QPalette>
 #include <QTextDocument>
 #include <QTextOption>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QtMath>
 
@@ -34,6 +35,8 @@ InlineTextBoxEditor::InlineTextBoxEditor(QWidget* parent)
     m_editor->setAttribute(Qt::WA_TranslucentBackground, true);
     m_editor->viewport()->setAttribute(Qt::WA_TranslucentBackground, true);
     m_editor->installEventFilter(this);
+    // QAbstractScrollArea routes context menus through the viewport child.
+    m_editor->viewport()->installEventFilter(this);
     layout->addWidget(m_editor);
 
     connect(m_editor->document(), &QTextDocument::contentsChange, this,
@@ -94,6 +97,12 @@ void InlineTextBoxEditor::configure(const TextBoxState& state, qreal zoom,
     if (MarkdownHighlighter* highlighter = m_editor->highlighter()) {
         highlighter->setBaseFontPixelSize(
             state.fontSize * qMax<qreal>(zoom, 0.01));
+        // The editor is transparent, so the syntax colors have to read against
+        // the box's own backdrop rather than the application theme.
+        highlighter->setDarkBackdrop(
+            state.backgroundColor.alpha() > 0
+                ? state.backgroundColor.lightness() < 128
+                : darkMode);
     }
 }
 
@@ -131,8 +140,26 @@ QTextCursor InlineTextBoxEditor::takeCursorBeforeLastChange()
     return cursor;
 }
 
+void InlineTextBoxEditor::suppressNextContextMenu()
+{
+    m_suppressContextMenu = true;
+    // Qt forwards a mouse-triggered context menu synchronously from the same
+    // release that armed this, so anything still pending once the event loop
+    // spins belongs to a later click and must not be swallowed.
+    QTimer::singleShot(0, this, [this]() { m_suppressContextMenu = false; });
+}
+
 bool InlineTextBoxEditor::eventFilter(QObject* watched, QEvent* event)
 {
+    if (event->type() == QEvent::ContextMenu
+        && (watched == m_editor || watched == m_editor->viewport())) {
+        if (m_suppressContextMenu) {
+            m_suppressContextMenu = false;
+            event->accept();
+            return true;
+        }
+    }
+
     if (watched == m_editor && event->type() == QEvent::KeyPress) {
         auto* keyEvent = static_cast<QKeyEvent*>(event);
         if (keyEvent->key() == Qt::Key_Escape) {
