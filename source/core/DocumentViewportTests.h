@@ -24,6 +24,7 @@
 #include <QApplication>
 #include <QBuffer>
 #include <QColorDialog>
+#include <QContextMenuEvent>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -38,6 +39,7 @@
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTextLayout>
 #include <QToolButton>
 #include <QtNumeric>
 #include <QtMath>
@@ -2232,6 +2234,92 @@ public:
      * removes that object or the selection has to tear them down, or the user
      * is left typing into a widget floating over nothing.
      */
+    /**
+     * @brief New text boxes take their backdrop from the paper, not the theme.
+     */
+    static bool testTextBoxThemeDefaults() {
+        printf("  testTextBoxThemeDefaults... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        if (TextBoxObject::defaultBackgroundColor(true).lightness() >= 128
+            || TextBoxObject::defaultBackgroundColor(false).lightness()
+                   < 128) {
+            return fail("shared backdrop pair is not dark/light");
+        }
+
+        auto doc = Document::createNew("Theme defaults");
+        DocumentViewport viewport;
+        viewport.resize(900, 700);
+        viewport.setDocument(doc.get());
+
+        auto backdropForPaper = [&](const QColor& paper) {
+            doc->page(0)->backgroundColor = paper;
+            const QRectF rect = viewport.proposedTextBoxCreationRect(
+                QPointF(200.0, 200.0), QPointF(200.0, 200.0), 0);
+            viewport.createTextBoxAtRect(0, rect, QPointF());
+            Page* page = doc->page(0);
+            auto* box = page && !page->objects.empty()
+                ? dynamic_cast<TextBoxObject*>(page->objects.back().get())
+                : nullptr;
+            const QColor backdrop = box ? box->backgroundColor : QColor();
+            viewport.cancelInlineTextEdit();
+            return backdrop;
+        };
+
+        // Each case runs under the opposite theme, because the paper a
+        // notebook was created with is what the box has to read against.
+        viewport.setDarkMode(false);
+        if (backdropForPaper(QColor("#2b2b2b")).lightness() >= 128)
+            return fail("dark paper got a bright text box backdrop");
+
+        viewport.setDarkMode(true);
+        if (backdropForPaper(Qt::white).lightness() < 128)
+            return fail("white paper got a dark text box backdrop");
+
+        // The inline editor paints straight onto that backdrop, so its
+        // Markdown syntax colors have to lift or headings vanish while typing.
+        auto headingSyntaxLightness = [](const QColor& backdrop) {
+            InlineTextBoxEditor editor;
+            TextBoxObject box;
+            box.textLayoutVersion =
+                TextBoxObject::CURRENT_TEXT_LAYOUT_VERSION;
+            box.fontSize = TextBoxObject::DEFAULT_BASE_FONT_SIZE;
+            box.backgroundColor = backdrop;
+            editor.configure(box.captureState(), 1.0,
+                             backdrop.lightness() < 128);
+            editor.setText(QStringLiteral("# Heading"));
+            QCoreApplication::processEvents();
+
+            const QTextBlock block =
+                editor.editor()->document()->firstBlock();
+            if (!block.isValid() || !block.layout())
+                return -1;
+            // Offset 2 skips the "# " marker, which carries its own format.
+            for (const auto& range : block.layout()->formats()) {
+                if (range.start == 2
+                    && range.format.hasProperty(
+                           QTextFormat::ForegroundBrush)) {
+                    return range.format.foreground().color().lightness();
+                }
+            }
+            return -1;
+        };
+        const int onDark = headingSyntaxLightness(QColor(40, 40, 40, 180));
+        const int onLight = headingSyntaxLightness(QColor(255, 255, 255, 180));
+        if (onDark < 0 || onLight < 0)
+            return fail("heading syntax color was never applied");
+        if (onDark <= onLight)
+            return fail("heading syntax stayed dark on a dark backdrop");
+
+        viewport.setDocument(nullptr);
+        printf("PASSED\n");
+        return true;
+    }
+
     static bool testTextOverlayLifecycle() {
         printf("  testTextOverlayLifecycle... ");
 
@@ -2299,6 +2387,51 @@ public:
             || viewport.m_textBoxFormatTransaction.active)
             return fail("forgetObject left a reference behind");
         doc->page(0)->removeObject(targetId);
+
+        // A right-click in Select mode creates a text box, leaving the new
+        // editor under the cursor just in time to catch the context menu that
+        // Windows raises off that very release. The editor swallows that one
+        // menu and no more.
+        viewport.setObjectActionMode(
+            DocumentViewport::ObjectActionMode::Select);
+        viewport.setObjectInsertMode(
+            DocumentViewport::ObjectInsertMode::Text);
+        const QPointF createAt =
+            viewport.pageToViewport(0, QPointF(120.0, 400.0));
+        QMouseEvent rightPress(QEvent::MouseButtonPress, createAt,
+                               Qt::RightButton, Qt::RightButton,
+                               Qt::NoModifier);
+        QMouseEvent rightRelease(QEvent::MouseButtonRelease, createAt,
+                                 Qt::RightButton, Qt::NoButton,
+                                 Qt::NoModifier);
+        viewport.mousePressEvent(&rightPress);
+        viewport.mouseReleaseEvent(&rightRelease);
+        if (!viewport.hasActiveInlineTextEdit()
+            || !viewport.m_inlineTextBoxEditor)
+            return fail("right-button create did not open the inline editor");
+
+        QMarkdownTextEdit* createdEditor =
+            viewport.m_inlineTextBoxEditor->editor();
+        QWidget* editorSurface = createdEditor->viewport();
+        // Report the menu instead of popping it up, so the test can count the
+        // ones that got through without leaving a stray window behind.
+        createdEditor->setContextMenuPolicy(Qt::CustomContextMenu);
+        QSignalSpy menusRaised(
+            createdEditor, &QWidget::customContextMenuRequested);
+        auto sendContextMenu = [&]() {
+            QContextMenuEvent menuEvent(
+                QContextMenuEvent::Mouse, QPoint(4, 4),
+                editorSurface->mapToGlobal(QPoint(4, 4)));
+            QApplication::sendEvent(editorSurface, &menuEvent);
+        };
+        sendContextMenu();
+        if (menusRaised.size() != 0)
+            return fail("the creating right-click still raised a menu");
+        sendContextMenu();
+        if (menusRaised.size() != 1)
+            return fail("suppression outlived the creating right-click");
+        createdEditor->setContextMenuPolicy(Qt::DefaultContextMenu);
+        viewport.cancelInlineTextEdit();
 
         // Browsing the font list previews every entry it passes over, so a
         // popup dismissed without an explicit choice has to roll the preview
@@ -2678,6 +2811,8 @@ public:
                 "testInlineTextBoxEditing");
         runTest(testTextBoxFormattingBar,
                 "testTextBoxFormattingBar");
+        runTest(testTextBoxThemeDefaults,
+                "testTextBoxThemeDefaults");
         runTest(testTextOverlayLifecycle,
                 "testTextOverlayLifecycle");
         runTest(testOcrTextBoxConversion,

@@ -27,6 +27,16 @@ public:
     QTextCursor takeCursorBeforeLastChange();
     QMarkdownTextEdit* editor() const { return m_editor; }
 
+    /**
+     * @brief Swallow the one context menu that a right-click is about to raise.
+     *
+     * Right-clicking the canvas creates a text box and opens this editor under
+     * the cursor, so Qt hands the editor the context menu belonging to that same
+     * click. The user asked for a text box, not a menu. Later right-clicks
+     * inside the editor still get the normal menu.
+     */
+    void suppressNextContextMenu();
+
 signals:
     void sourceChanged(const QString& source);
     void commitRequested();
@@ -40,4 +50,5 @@ private:
     QTextCursor m_cursorBeforeChange;
     bool m_hasCursorBeforeChange = false;
     bool m_settingText = false;
+    bool m_suppressContextMenu = false;
 };

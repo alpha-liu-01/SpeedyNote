@@ -3572,6 +3572,16 @@ void DocumentViewport::mouseReleaseEvent(QMouseEvent* event)
     
     PointerEvent pe = mouseToPointerEvent(event, PointerEvent::Release);
     handlePointerEvent(pe);
+
+    // The release just placed an inline editor under the cursor, either by
+    // creating a text box or by opening an existing one. Windows raises the
+    // context menu off this same release, so the brand-new editor would answer
+    // it with its own menu.
+    if (objectAlternateButton && m_inlineEditSession.active
+        && m_inlineTextBoxEditor) {
+        m_inlineTextBoxEditor->suppressNextContextMenu();
+    }
+
     event->accept();
 }
 
@@ -9893,6 +9903,26 @@ void DocumentViewport::showObjectGeometryFeedback(
                .toAlignedRect());
 }
 
+QColor DocumentViewport::textBackdropForPage(const Page* page) const
+{
+    // PDF paper is whatever the renderer makes of it, not what the page color
+    // says, so the inversion setting decides for those pages.
+    if (page && page->backgroundType == Page::BackgroundType::PDF)
+        return TextBoxObject::defaultBackgroundColor(
+            m_isDarkMode && m_pdfDarkModeEnabled);
+
+    QColor paper;
+    if (page)
+        paper = page->backgroundColor;
+    else if (m_document)
+        paper = m_document->defaultBackgroundColor;
+
+    const bool darkPaper = paper.isValid() && paper.alpha() > 0
+        ? paper.lightness() < 128
+        : m_isDarkMode;
+    return TextBoxObject::defaultBackgroundColor(darkPaper);
+}
+
 void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, const QPointF& viewportPos)
 {
     if (!m_document) return;
@@ -9908,7 +9938,6 @@ void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, co
     textObj->showBorder = true;
     textObj->visible = true;
     textObj->fontColor = m_penColor;
-    textObj->backgroundColor = QColor(255, 255, 255, 180);
     textObj->reflowToWidth(textObj->size.width());
 
     TextBoxObject* rawPtr = textObj.get();
@@ -9925,6 +9954,7 @@ void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, co
         QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
                            coord.second * Document::EDGELESS_TILE_SIZE);
         textObj->position = rect.topLeft() - tileOrigin;
+        textObj->backgroundColor = textBackdropForPage(targetTile);
 
         int activeLayer = m_edgelessActiveLayerIndex;
         int defaultAffinity = activeLayer - 1;
@@ -9938,6 +9968,7 @@ void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, co
             qWarning() << "createTextBoxAtRect: No page at index" << pageIndex;
             return;
         }
+        textObj->backgroundColor = textBackdropForPage(page);
 
         int activeLayer = page->activeLayerIndex;
         int defaultAffinity = activeLayer - 1;

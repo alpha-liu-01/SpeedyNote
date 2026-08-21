@@ -7186,7 +7186,7 @@ void MainWindow::setOcrTextVisibility(bool visible)
     bool dark = isDarkMode();
     doc->setOcrTextVisible(visible);
     doc->setOcrDarkMode(dark);
-    QColor bg = dark ? QColor(40, 40, 40, 180) : QColor(255, 255, 255, 180);
+    QColor bg = TextBoxObject::defaultBackgroundColor(dark);
 
     bool snapEnabled = doc->ocrSnapToBackground;
     bool cjkGlobal = false;

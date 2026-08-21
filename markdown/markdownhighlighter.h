@@ -79,6 +79,14 @@ class MarkdownHighlighter : public QSyntaxHighlighter {
      */
     void setBaseFontPixelSize(qreal pixelSize);
 
+    /**
+     * Lift the syntax colors of this highlighter instance for an editor drawn
+     * on a dark backdrop, without changing the shared formats used by other
+     * Markdown editors. The stock palette is tuned for paper-white editors,
+     * where headings and list markers are near-black.
+     */
+    void setDarkBackdrop(bool dark);
+
     static inline QColor codeBlockBackgroundColor() {
         const QBrush brush = _formats[CodeBlock].background();
 
@@ -378,5 +386,6 @@ class MarkdownHighlighter : public QSyntaxHighlighter {
 
     int _currentCursorBlockNumber = -1;
     bool _hideFormattingSyntax = false;
+    bool _darkBackdrop = false;
     qreal _baseFontPixelSize = 0.0;
 };

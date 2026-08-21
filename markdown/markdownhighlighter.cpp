@@ -86,6 +86,14 @@ void MarkdownHighlighter::setBaseFontPixelSize(qreal pixelSize) {
     rehighlight();
 }
 
+void MarkdownHighlighter::setDarkBackdrop(bool dark) {
+    if (_darkBackdrop == dark) {
+        return;
+    }
+    _darkBackdrop = dark;
+    rehighlight();
+}
+
 /**
  * Does jobs every second
  */
@@ -441,6 +449,21 @@ QTextCharFormat MarkdownHighlighter::currentMaskedFormat() const {
 QTextCharFormat MarkdownHighlighter::formatForState(
     HighlighterState state) const {
     QTextCharFormat format = _formats[state];
+
+    // Formats that paint their own light background (images, rulers) stay
+    // legible as they are; it is the ones drawn straight onto the editor that
+    // disappear into a dark backdrop.
+    if (_darkBackdrop && format.hasProperty(QTextFormat::ForegroundBrush)
+        && !format.hasProperty(QTextFormat::BackgroundBrush)) {
+        const QColor foreground = format.foreground().color();
+        if (foreground.isValid() && foreground.lightness() < 140) {
+            format.setForeground(
+                QColor::fromHsl(foreground.hslHue(),
+                                foreground.hslSaturation(), 190,
+                                foreground.alpha()));
+        }
+    }
+
     if (_baseFontPixelSize <= 0.0 || !isHeading(state)) {
         return format;
     }
@@ -2195,7 +2218,7 @@ void MarkdownHighlighter::highlightLists(const QString &text) {
              text.at(number) == QLatin1Char(')')) &&
             (text.at(number + 1) == QLatin1Char(' '))) {
             setCurrentBlockState(List);
-            setFormat(curPos, number - curPos + 1, _formats[List]);
+            setFormat(curPos, number - curPos + 1, formatForState(List));
 
             // highlight checkbox if any
             highlightCheckbox(text, number);
@@ -2215,7 +2238,7 @@ void MarkdownHighlighter::highlightLists(const QString &text) {
 
     /* Unordered List */
     setCurrentBlockState(List);
-    setFormat(curPos, 1, _formats[List]);
+    setFormat(curPos, 1, formatForState(List));
 }
 
 /**

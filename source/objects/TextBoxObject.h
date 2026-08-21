@@ -83,6 +83,15 @@ public:
     TextBoxObject() = default;
     ~TextBoxObject() override;
 
+    /**
+     * @brief Backdrop for a text box created under the given theme.
+     *
+     * Pages themselves are created dark in dark mode, so a fixed paper-white
+     * fill would sit on the page as a bright slab. OCR text objects draw the
+     * same kind of backdrop and share this so both stay in step.
+     */
+    static QColor defaultBackgroundColor(bool darkMode);
+
     void render(QPainter& painter, qreal zoom) const override;
     void renderWithTextSuppressed(QPainter& painter, qreal zoom) const;
     QString type() const override { return QStringLiteral("textbox"); }

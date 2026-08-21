@@ -13,6 +13,7 @@
 #include <QTextDocument>
 #include <QTextFragment>
 #include <QTextFormat>
+#include <QTextList>
 #include <QtNumeric>
 
 namespace TextBoxObjectTests {
@@ -135,6 +136,29 @@ inline bool testLayoutMeasurementAndCache()
                   "explicit newline did not grow the text box");
     ok &= require(renderedAsMultipleLines,
                   "Markdown collapsed an explicit newline");
+
+    TextBoxObject blankRow;
+    configureCurrentBox(blankRow, QStringLiteral("Short\n\nNext"));
+    TextBoxObject twoBlankRows;
+    configureCurrentBox(twoBlankRows, QStringLiteral("Short\n\n\nNext"));
+    ok &= require(blankRow.size.height() > explicitBreak.size.height(),
+                  "a blank line did not add an empty row");
+    ok &= require(twoBlankRows.size.height() > blankRow.size.height(),
+                  "a second blank line did not add another empty row");
+
+    TextBoxObject looseList;
+    configureCurrentBox(looseList, QStringLiteral("- alpha\n\n- beta"));
+    const TextBoxLayoutResult* looseListLayout = looseList.ensureLayout();
+    int listBlocks = 0;
+    if (looseListLayout && looseListLayout->document) {
+        for (QTextBlock block = looseListLayout->document->begin();
+             block.isValid(); block = block.next()) {
+            if (block.textList())
+                ++listBlocks;
+        }
+    }
+    ok &= require(listBlocks == 2,
+                  "a blank line between list items broke the list");
 
     const QSizeF beforeRender = box.size;
     QImage image(500, 500, QImage::Format_ARGB32_Premultiplied);
