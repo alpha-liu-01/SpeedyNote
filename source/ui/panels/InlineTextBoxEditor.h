@@ -37,6 +37,15 @@ public:
      */
     void suppressNextContextMenu();
 
+    /**
+     * @brief Pop up the standard text menu for a click the canvas received.
+     *
+     * The editor covers only the text area, so right-clicks on the box's
+     * padding or border reach the viewport instead. Those still belong to the
+     * text being edited, and get the same Cut/Copy/Paste menu.
+     */
+    void showTextContextMenu(const QPoint& globalPos);
+
 signals:
     void sourceChanged(const QString& source);
     void commitRequested();

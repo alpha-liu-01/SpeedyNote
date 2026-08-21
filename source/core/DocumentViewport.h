@@ -1542,6 +1542,24 @@ public:
 
     void startInlineTextEdit(TextBoxObject* textBox, bool newBox);
     TextBoxObject* resolveInlineTextBox() const;
+
+    /**
+     * @brief Does @p viewportPos fall on the text box currently being edited?
+     *
+     * The editor widget only covers the text area, so the box's padding and
+     * border still belong to the canvas. Treating that ring as part of the
+     * editor keeps a right-click anywhere on the box from committing the
+     * session before its context menu can open.
+     */
+    bool inlineEditTargetContains(const QPointF& viewportPos) const;
+
+    /**
+     * @brief Clipboard and delete actions for the object under a right-click.
+     *
+     * Text boxes also offer Edit Text, which is the keyboard-free way back
+     * into an inline session.
+     */
+    void showObjectContextMenu(const QPoint& globalPos);
     QRectF inlineTextEditorRect(TextBoxObject* textBox) const;
     void updateInlineTextEditorGeometry();
     void handleInlineTextSourceChanged(const QString& source);
@@ -2723,6 +2741,15 @@ private:
     InlineTextBoxEditor* m_inlineTextBoxEditor = nullptr;
     InlineTextEditSession m_inlineEditSession;
     bool m_revertingInlineText = false;
+    /// Set on a right-press that landed on the box being edited, so the
+    /// context menu that follows opens the editor's menu instead of the
+    /// canvas one. Creating a box can never set it: at press time the click
+    /// was on bare page.
+    bool m_contextMenuTargetsInlineEditor = false;
+    /// Object the pending right-press landed on, or empty when it landed on
+    /// bare page. Pressing bare page creates an object, which must not be
+    /// accompanied by a menu.
+    QString m_contextMenuObjectId;
     TextBoxFormatBar* m_textBoxFormatBar = nullptr;
     TextBoxFormatTransaction m_textBoxFormatTransaction;
     

@@ -97,6 +97,7 @@ static void initEraserJni()
 #include <QAbstractTextDocumentLayout>
 #include <QRegularExpression>
 #include <QMenu>             // For addLinkToSlot menu (Phase C.5.3 - temporary)
+#include "../ui/ThemeColors.h"
 #include <QInputDialog>      // For URL input dialog (Phase C.5.3 - temporary)
 
 // ===== Constants =====
@@ -3424,6 +3425,22 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
 
 void DocumentViewport::mousePressEvent(QMouseEvent* event)
 {
+    m_contextMenuObjectId.clear();
+
+    // A right-press on the box being edited is asking for that editor's text
+    // menu. It has to be recognised before the outside-click commit below,
+    // which would otherwise dismiss the editor the menu belongs to. The editor
+    // widget covers only the text area, so these are the presses that land on
+    // the box's padding ring or border.
+    m_contextMenuTargetsInlineEditor =
+        m_currentTool == ToolType::ObjectSelect
+        && event->button() == Qt::RightButton
+        && inlineEditTargetContains(SN_MOUSE_POS(event));
+    if (m_contextMenuTargetsInlineEditor) {
+        event->accept();
+        return;
+    }
+
     // Child-widget presses stay in the editor. Any press delivered to the
     // canvas is an explicit outside click and commits the current session.
     if (m_inlineEditSession.active)
@@ -3473,7 +3490,7 @@ void DocumentViewport::mousePressEvent(QMouseEvent* event)
         event->accept();
         return;
     }
-    
+
     PointerEvent pe = mouseToPointerEvent(event, PointerEvent::Press);
     handlePointerEvent(pe);
     event->accept();
@@ -3507,7 +3524,8 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
     // Process move if we have an active pointer or for hover
     const bool objectRightDrag =
         m_currentTool == ToolType::ObjectSelect
-        && (event->buttons() & Qt::RightButton);
+        && (event->buttons() & Qt::RightButton)
+        && !m_contextMenuTargetsInlineEditor;
     if (m_pointerActive || (event->buttons() & Qt::LeftButton) || objectRightDrag) {
         PointerEvent pe = mouseToPointerEvent(event, PointerEvent::Move);
         handlePointerEvent(pe);
@@ -3570,6 +3588,13 @@ void DocumentViewport::mouseReleaseEvent(QMouseEvent* event)
         return;
     }
     
+    // The matching press was claimed for the inline editor; this release only
+    // exists to carry the context menu that follows it.
+    if (objectAlternateButton && m_contextMenuTargetsInlineEditor) {
+        event->accept();
+        return;
+    }
+
     PointerEvent pe = mouseToPointerEvent(event, PointerEvent::Release);
     handlePointerEvent(pe);
 
@@ -3587,11 +3612,71 @@ void DocumentViewport::mouseReleaseEvent(QMouseEvent* event)
 
 void DocumentViewport::contextMenuEvent(QContextMenuEvent* event)
 {
+    if (m_contextMenuTargetsInlineEditor) {
+        m_contextMenuTargetsInlineEditor = false;
+        if (m_inlineTextBoxEditor && m_inlineEditSession.active) {
+            m_inlineTextBoxEditor->showTextContextMenu(event->globalPos());
+            event->accept();
+            return;
+        }
+    }
     if (m_currentTool == ToolType::ObjectSelect) {
+        const QString target = m_contextMenuObjectId;
+        m_contextMenuObjectId.clear();
+        // Only a right-press that landed on an object opens a menu. Pressing
+        // bare page is how a new object gets created, and that must not be
+        // interrupted by one.
+        if (!target.isEmpty() && objectById(target))
+            showObjectContextMenu(event->globalPos());
         event->accept();
         return;
     }
     QWidget::contextMenuEvent(event);
+}
+
+void DocumentViewport::showObjectContextMenu(const QPoint& globalPos)
+{
+    QMenu menu(this);
+    ThemeColors::styleMenu(&menu, m_isDarkMode);
+
+    const bool hasSelection = !m_selectedObjects.isEmpty();
+
+    QAction* cutAction = menu.addAction(tr("Cut"));
+    cutAction->setEnabled(hasSelection);
+    connect(cutAction, &QAction::triggered, this, [this]() {
+        copySelectedObjects();
+        deleteSelectedObjects();
+    });
+
+    QAction* copyAction = menu.addAction(tr("Copy"));
+    copyAction->setEnabled(hasSelection);
+    connect(copyAction, &QAction::triggered,
+            this, &DocumentViewport::copySelectedObjects);
+
+    QAction* pasteAction = menu.addAction(tr("Paste"));
+    connect(pasteAction, &QAction::triggered,
+            this, &DocumentViewport::pasteForObjectSelect);
+
+    menu.addSeparator();
+
+    if (m_selectedObjects.size() == 1
+        && m_selectedObjects.first()->type() == QLatin1String("textbox")) {
+        const QString textBoxId = m_selectedObjects.first()->id;
+        QAction* editAction = menu.addAction(tr("Edit Text"));
+        connect(editAction, &QAction::triggered, this, [this, textBoxId]() {
+            InsertedObject* object = objectById(textBoxId);
+            if (object && object->type() == QLatin1String("textbox"))
+                startInlineTextEdit(static_cast<TextBoxObject*>(object), false);
+        });
+        menu.addSeparator();
+    }
+
+    QAction* deleteAction = menu.addAction(tr("Delete"));
+    deleteAction->setEnabled(hasSelection);
+    connect(deleteAction, &QAction::triggered,
+            this, &DocumentViewport::deleteSelectedObjects);
+
+    menu.exec(globalPos);
 }
 
 void DocumentViewport::wheelEvent(QWheelEvent* event)
@@ -6512,10 +6597,22 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
     if (!m_document) return;
 
     beginObjectPointerGesture(pe);
-    
+
+    // The right button is a quick inverse of the persistent mode, so a
+    // right-press that lands on an object means "act on this one" rather than
+    // "stack a new one on top of it". The left button in Create mode still
+    // inserts wherever it is pressed.
+    InsertedObject* const alternateTarget =
+        (pe.source == PointerEvent::Mouse
+         && m_objectGestureButton == Qt::RightButton)
+        ? objectAtPoint(viewportToDocument(pe.viewportPos))
+        : nullptr;
+    m_contextMenuObjectId = alternateTarget ? alternateTarget->id : QString();
+
     // The right mouse button temporarily uses the opposite action mode without
     // changing the persistent action-bar state.
-    if (m_objectGestureActionMode == ObjectActionMode::Create) {
+    if (m_objectGestureActionMode == ObjectActionMode::Create
+        && !alternateTarget) {
         PageHit hit = viewportToPage(pe.viewportPos);
         if (hit.pageIndex < 0) {
             // Click not on any page - ignore in paged mode
@@ -8928,6 +9025,21 @@ void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& 
 bool DocumentViewport::hasActiveInlineTextEdit() const
 {
     return m_inlineEditSession.active;
+}
+
+bool DocumentViewport::inlineEditTargetContains(
+    const QPointF& viewportPos) const
+{
+    if (!m_inlineEditSession.active || !m_inlineTextBoxEditor)
+        return false;
+    if (m_inlineTextBoxEditor->isVisible()
+        && m_inlineTextBoxEditor->geometry().contains(
+               viewportPos.toPoint())) {
+        return true;
+    }
+    TextBoxObject* textBox = resolveInlineTextBox();
+    return textBox
+        && objectBoundsInViewport(textBox).contains(viewportPos);
 }
 
 bool DocumentViewport::inlineTextEditorHasFocus() const

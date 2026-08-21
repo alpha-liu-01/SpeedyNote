@@ -25,6 +25,7 @@
 #include <QBuffer>
 #include <QColorDialog>
 #include <QContextMenuEvent>
+#include <QMenu>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -2409,6 +2410,8 @@ public:
         if (!viewport.hasActiveInlineTextEdit()
             || !viewport.m_inlineTextBoxEditor)
             return fail("right-button create did not open the inline editor");
+        if (!viewport.m_contextMenuObjectId.isEmpty())
+            return fail("creating a box armed an object menu");
 
         QMarkdownTextEdit* createdEditor =
             viewport.m_inlineTextBoxEditor->editor();
@@ -2431,7 +2434,74 @@ public:
         if (menusRaised.size() != 1)
             return fail("suppression outlived the creating right-click");
         createdEditor->setContextMenuPolicy(Qt::DefaultContextMenu);
+
+        auto textBoxCount = [&]() {
+            int count = 0;
+            for (const auto& object : doc->page(0)->objects) {
+                if (object && object->type() == QLatin1String("textbox"))
+                    ++count;
+            }
+            return count;
+        };
+        auto rightClickAt = [&](const QPointF& pos) {
+            QMouseEvent press(QEvent::MouseButtonPress, pos, Qt::RightButton,
+                              Qt::RightButton, Qt::NoModifier);
+            QMouseEvent release(QEvent::MouseButtonRelease, pos,
+                                Qt::RightButton, Qt::NoButton,
+                                Qt::NoModifier);
+            viewport.mousePressEvent(&press);
+            viewport.mouseReleaseEvent(&release);
+        };
+
+        // The editor covers only the text area, so a right-click on the box's
+        // padding ring lands on the canvas. It still belongs to the text being
+        // edited: it must raise that editor's menu rather than stack a second
+        // box on top of the first.
+        TextBoxObject* createdBox = viewport.resolveInlineTextBox();
+        if (!createdBox)
+            return fail("the created box could not be resolved");
+        viewport.handleInlineTextSourceChanged(QStringLiteral("Typed"));
+        const int whileEditing = textBoxCount();
+        const QRectF editedBounds =
+            viewport.objectBoundsInViewport(createdBox);
+        const QPointF onRing(editedBounds.left() + 2.0,
+                             editedBounds.center().y());
+        rightClickAt(onRing);
+        if (!viewport.hasActiveInlineTextEdit())
+            return fail("right-click on the edited box ended the session");
+        if (textBoxCount() != whileEditing)
+            return fail("right-click on the edited box created another one");
+        if (!viewport.m_contextMenuTargetsInlineEditor)
+            return fail("right-click on the edited box missed the editor");
+
+        QContextMenuEvent ringMenu(
+            QContextMenuEvent::Mouse, onRing.toPoint(),
+            viewport.mapToGlobal(onRing.toPoint()));
+        viewport.contextMenuEvent(&ringMenu);
+        QMenu* raised = createdEditor->findChild<QMenu*>();
+        if (!raised)
+            return fail("right-click on the edited box raised no text menu");
+        raised->close();
+        QCoreApplication::processEvents();
+
+        // A box that is not being edited has no text menu to offer, but a
+        // right-click still must not stack a new box onto it.
+        viewport.commitInlineTextEdit();
+        if (viewport.hasActiveInlineTextEdit())
+            return fail("commit left the inline editor open");
+        const int committed = textBoxCount();
+        viewport.deselectAllObjects();
+        rightClickAt(viewport.objectBoundsInViewport(createdBox).center());
+        if (textBoxCount() != committed)
+            return fail("right-click on an existing box created another one");
+        if (viewport.m_selectedObjects.size() != 1)
+            return fail("right-click on an existing box did not select it");
+        // The menu itself is modal, so assert the target the context menu
+        // event would act on rather than popping it up.
+        if (viewport.m_contextMenuObjectId != createdBox->id)
+            return fail("right-click on an existing box armed no object menu");
         viewport.cancelInlineTextEdit();
+        viewport.deselectAllObjects();
 
         // Browsing the font list previews every entry it passes over, so a
         // popup dismissed without an explicit choice has to roll the preview
