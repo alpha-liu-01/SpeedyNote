@@ -79,6 +79,29 @@
 
 
   <releases type="embedded">
+    <release version="1.5.2" date="2026-08-21">
+      <description>
+        <p>New Features:</p>
+        <ul>
+          <li>Completely redesigned text box feature with WYSIWYG editing, markdown support, and OCR conversion.</li>
+          <li>New multi-source PDF relinking/management feature to handle multiple PDFs in a single document.</li>   
+        </ul>
+        <p>Bug Fixes and Improvements:</p>
+        <ul>
+          <li>Vastly improved picture inserting performance.</li>
+          <li>Made each scroll bar hide and show ondemand.</li>
+          <li>Combined the export to PDF and .snbx features into a single export dialog.</li>
+          <li>3 Separate buttons for text box, link object and image object insertion.</li>
+          <li>Fixed the problem that a starred document in the launcher lost its star after a name change.</li>
+          <li>Updated the Object insertion UX to be more consistent and intuitive (right click to create and left click to select, with an alternate mapping toggle) </li>
+          <li>Automatically resize the inserted images to fit within a page / tile on insertion.</li>
+          <li>Made the page wheel picker support wheel input.</li>
+          <li>Fixed the problem that the onnxruntime model download script always downloaded the amd64 version of the models on ARM64 systems.</li>
+          <li>Removed obsolete SDL2 and DocumentConverter code from the codebase.</li>
+          <li>Fixed the problem that InsertedObjects could be moved outside a page and could never be selected again.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.5.1" date="2026-07-18">
       <description>
         <p>New Features:</p>
