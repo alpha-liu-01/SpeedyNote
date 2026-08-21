@@ -5,6 +5,7 @@
 #include <QApplication>
 #include <QEvent>
 #include <QKeyEvent>
+#include <QMenu>
 #include <QPalette>
 #include <QTextDocument>
 #include <QTextOption>
@@ -147,6 +148,17 @@ void InlineTextBoxEditor::suppressNextContextMenu()
     // release that armed this, so anything still pending once the event loop
     // spins belongs to a later click and must not be swallowed.
     QTimer::singleShot(0, this, [this]() { m_suppressContextMenu = false; });
+}
+
+void InlineTextBoxEditor::showTextContextMenu(const QPoint& globalPos)
+{
+    if (!m_editor)
+        return;
+    QMenu* menu = m_editor->createStandardContextMenu();
+    if (!menu)
+        return;
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    menu->popup(globalPos);
 }
 
 bool InlineTextBoxEditor::eventFilter(QObject* watched, QEvent* event)
