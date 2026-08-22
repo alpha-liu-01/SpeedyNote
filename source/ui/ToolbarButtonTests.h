@@ -2,10 +2,14 @@
 #define TOOLBARBUTTONTESTS_H
 
 #include <QObject>
+#include <QCoreApplication>
+#include <QResizeEvent>
 #include <QTest>
 #include <QSignalSpy>
 #include <QButtonGroup>
 #include "ToolbarButtons.h"
+#include "Toolbar.h"
+#include "widgets/ExpandableToolButton.h"
 
 /**
  * Unit tests for ToolbarButton classes.
@@ -157,6 +161,112 @@ private slots:
         
         // They should be different (different colors)
         QVERIFY(lightStyle != darkStyle);
+    }
+
+    // Overflow paging: the trailing button group moves to a second page when
+    // the row no longer fits, and comes back when it does.
+    void testToolbarPagination() {
+        // Parented, as MainWindow hosts it. A parentless Toolbar would be a
+        // window, and QLayout pins a window's minimum size to the full row
+        // width, so it could never be resized narrow enough to page.
+        QWidget host;
+        Toolbar toolbar(&host);
+        QVERIFY(!toolbar.m_page1Widgets.isEmpty());
+        QVERIFY(!toolbar.m_page2Widgets.isEmpty());
+
+        const int natural = toolbar.naturalContentWidth();
+        QVERIFY(natural > 0);
+
+        // A widget that has never been shown is not created yet, so resize()
+        // only assigns the geometry and never generates an event. Deliver one
+        // so the real resizeEvent path still gets exercised.
+        auto resizeTo = [&toolbar](int width) {
+            const QSize before = toolbar.size();
+            toolbar.resize(width, 44);
+            QResizeEvent event(toolbar.size(), before);
+            QCoreApplication::sendEvent(&toolbar, &event);
+        };
+
+        // The toolbar must not report the whole row as its floor, or the
+        // window could never shrink far enough to page in the first place.
+        QVERIFY(toolbar.minimumSizeHint().width() < natural);
+
+        resizeTo(natural + 200);
+        QVERIFY(!toolbar.m_paged);
+        QVERIFY(!toolbar.m_pagerNextButton->isVisibleTo(&toolbar));
+        QVERIFY(!toolbar.m_pagerBackButton->isVisibleTo(&toolbar));
+        for (QWidget* widget : toolbar.m_page2Widgets)
+            QVERIFY(widget->isVisibleTo(&toolbar));
+
+        resizeTo(natural / 2);
+        QVERIFY(toolbar.m_paged);
+        QCOMPARE(toolbar.m_currentPage, 0);
+        QVERIFY(toolbar.m_pagerNextButton->isVisibleTo(&toolbar));
+        QVERIFY(!toolbar.m_pagerBackButton->isVisibleTo(&toolbar));
+        for (QWidget* widget : toolbar.m_page1Widgets)
+            QVERIFY(widget->isVisibleTo(&toolbar));
+        for (QWidget* widget : toolbar.m_page2Widgets)
+            QVERIFY(!widget->isVisibleTo(&toolbar));
+
+        // Forward on the right, back on the left.
+        toolbar.m_pagerNextButton->click();
+        QCOMPARE(toolbar.m_currentPage, 1);
+        QVERIFY(toolbar.m_pagerBackButton->isVisibleTo(&toolbar));
+        QVERIFY(!toolbar.m_pagerNextButton->isVisibleTo(&toolbar));
+        for (QWidget* widget : toolbar.m_page1Widgets)
+            QVERIFY(!widget->isVisibleTo(&toolbar));
+        for (QWidget* widget : toolbar.m_page2Widgets)
+            QVERIFY(widget->isVisibleTo(&toolbar));
+
+        // Pan lives on page 2, so selecting it from page 1 has to follow it
+        // over rather than check a button nobody can see.
+        toolbar.m_pagerBackButton->click();
+        QCOMPARE(toolbar.m_currentPage, 0);
+        toolbar.setCurrentTool(ToolType::Pan);
+        QCOMPARE(toolbar.m_currentPage, 1);
+        QVERIFY(toolbar.m_panButton->isVisibleTo(&toolbar));
+
+        // Widening restores the single row and drops both pagers.
+        resizeTo(natural + 200);
+        QVERIFY(!toolbar.m_paged);
+        QCOMPARE(toolbar.m_currentPage, 0);
+        QVERIFY(!toolbar.m_pagerNextButton->isVisibleTo(&toolbar));
+        QVERIFY(!toolbar.m_pagerBackButton->isVisibleTo(&toolbar));
+        for (QWidget* widget : toolbar.m_page1Widgets)
+            QVERIFY(widget->isVisibleTo(&toolbar));
+        for (QWidget* widget : toolbar.m_page2Widgets)
+            QVERIFY(widget->isVisibleTo(&toolbar));
+    }
+
+    // An expanded subtoolbar must keep its width while its page is hidden,
+    // otherwise the measurement driving paging collapses and the strip comes
+    // back a sliver wide.
+    void testExpandedWidthSurvivesHiding() {
+        QWidget host;
+        Toolbar toolbar(&host);
+
+        toolbar.setCurrentTool(ToolType::Pen);
+        ExpandableToolButton* pen = toolbar.m_penExpandable;
+        QVERIFY(pen->isExpanded());
+        const int expandedWidth = pen->sizeHint().width();
+        QVERIFY(expandedWidth > 36);
+
+        pen->hide();
+        QCOMPARE(pen->sizeHint().width(), expandedWidth);
+
+        pen->show();
+        QCOMPARE(pen->sizeHint().width(), expandedWidth);
+
+        // Selecting a tool with no subtoolbar and coming straight back must
+        // restore the full strip width rather than the bare icon.
+        toolbar.setObjectInsertMode(DocumentViewport::ObjectInsertMode::Image);
+        toolbar.setCurrentTool(ToolType::ObjectSelect);
+        QVERIFY(!pen->isExpanded());
+        QCOMPARE(pen->sizeHint().width(), 36);
+
+        toolbar.setCurrentTool(ToolType::Pen);
+        QVERIFY(pen->isExpanded());
+        QCOMPARE(pen->sizeHint().width(), expandedWidth);
     }
 };
 
