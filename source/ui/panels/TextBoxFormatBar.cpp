@@ -40,7 +40,7 @@ TextBoxFormatBar::TextBoxFormatBar(QWidget* parent)
     m_fontSize->setRange(6.0, 144.0);
     m_fontSize->setDecimals(1);
     m_fontSize->setSingleStep(1.0);
-    m_fontSize->setFixedWidth(68);
+    m_fontSize->setFixedWidth(80);
     m_fontSize->setMinimumHeight(34);
     m_fontSize->setToolTip(tr("Base font size"));
     m_fontSize->setAccessibleName(tr("Base font size"));
@@ -107,21 +107,23 @@ TextBoxFormatBar::TextBoxFormatBar(QWidget* parent)
 
     auto* opacityLabel = new QLabel(tr("Opacity"), this);
     opacityLabel->setAccessibleName(tr("Background opacity label"));
-    layout->addWidget(opacityLabel);
+    opacityLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    opacityLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    layout->addWidget(opacityLabel, 0, Qt::AlignVCenter);
 
     m_backgroundOpacity = new QSlider(Qt::Horizontal, this);
     m_backgroundOpacity->setRange(0, 255);
     m_backgroundOpacity->setFixedWidth(78);
-    m_backgroundOpacity->setMinimumHeight(34);
+    m_backgroundOpacity->setFixedHeight(22);
+    m_backgroundOpacity->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     m_backgroundOpacity->setToolTip(tr("Background opacity"));
     m_backgroundOpacity->setAccessibleName(tr("Background opacity"));
     m_backgroundOpacity->installEventFilter(this);
-    layout->addWidget(m_backgroundOpacity);
+    layout->addWidget(m_backgroundOpacity, 0, Qt::AlignVCenter);
 
     m_border = new QToolButton(this);
     m_border->setCheckable(true);
     m_border->setFixedSize(34, 34);
-    m_border->setText(QStringLiteral("□"));
     m_border->setToolTip(tr("Show border"));
     m_border->setAccessibleName(tr("Show border"));
     m_border->installEventFilter(this);
@@ -511,6 +513,8 @@ void TextBoxFormatBar::updateAlignmentIcons()
         QStringLiteral(":/resources/icons/aligncenter%1.png").arg(suffix)));
     m_alignRight->setIcon(QIcon(
         QStringLiteral(":/resources/icons/alignright%1.png").arg(suffix)));
+    m_border->setIcon(QIcon(
+        QStringLiteral(":/resources/icons/borders%1.png").arg(suffix)));
 }
 
 void TextBoxFormatBar::updateSwatches()
