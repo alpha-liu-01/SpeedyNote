@@ -954,11 +954,32 @@ public:
         QString runtimeArch;    ///< Architecture actually executing
         qreal memcpyMs = 0.0;   ///< Raw memcpy of the same byte count
         qreal fillRectMs = 0.0; ///< QPainter::fillRect over the whole surface
-        qreal blitMs = 0.0;     ///< drawPixmap from a platform-format source
-        qreal blitOpaqueMs = 0.0; ///< drawPixmap from an alpha-free source
         qreal megapixels = 0.0; ///< Surface size each timing covers
-        bool sourceHasAlpha = false;       ///< Whether the platform source carried alpha
-        bool opaqueSourceHasAlpha = false; ///< True means the alpha-free source was voided
+
+        /// @brief One source-to-destination format pairing and what it cost.
+        struct BlitCase {
+            QString label;   ///< Short "src>dst" tag for the HUD
+            qreal ms = 0.0;  ///< Median time for a full-surface blit
+        };
+
+        /**
+         * @brief Blit cost per format pairing, in the order declared below.
+         *
+         * The earlier suite only varied the source and always wrote into a
+         * QPixmap, but the pan path writes into the widget's backing store,
+         * which need not share QPixmap's format. If that store is byte-ordered
+         * for GL texture upload while QPixmap is native-endian, a native-endian
+         * opaque source still needs a per-pixel swizzle to reach it and Qt will
+         * not memcpy - which would explain an opaque source buying nothing in
+         * the real path despite winning 7x in the synthetic one. Whichever
+         * pairing here matches the observed Pan paint cost identifies the
+         * store's real format, and the fastest opaque pairing is the one the
+         * snapshot should be captured in.
+         */
+        QVector<BlitCase> blits;
+
+        bool snapshotHasAlpha = false;   ///< Did the last real grabOpaqueViewport() carry alpha
+        bool snapshotValid = false;      ///< Whether a real snapshot has been taken yet
 
         /// @brief Throughput in megapixels per second, comparable to the Fill line.
         qreal mpixPerSec(qreal ms) const
@@ -3188,6 +3209,10 @@ private:
     // Remove along with runRasterBenchmark() and the HUD lines once resolved.
     // See the RasterBenchmark docs above for what this is asking and why.
     RasterBenchmark m_rasterBenchmark;
+    // Latched from the real snapshot path, since the cached frame is released at
+    // gesture end and would read as null by the time the HUD refreshes.
+    bool m_lastSnapshotHadAlpha = false;
+    bool m_lastSnapshotValid = false;
     
     /**
      * @brief Measure memcpy, fillRect and drawPixmap over one viewport of pixels.

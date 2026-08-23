@@ -267,7 +267,10 @@ QSize DebugOverlay::perfModeSize() const
         "Fill:    99999 Mpix/s | 99.99 MP/frame\n"
         "Arch:    build wwwwwwww | runtime wwwwwwww | 99.99 MP surface\n"
         "Raster:  memcpy 999.99ms 99999Mp/s | fill 999.99ms 99999Mp/s\n"
-        "Blit:    alpha src 999.99ms 99999Mp/s | opaque src 999.99ms 99999Mp/s | 99.99x VOID: opaque src has alpha\n"
+        "Snap:    - (pan once to capture a snapshot)\n"
+        "Blit:    wwwwwwwww 999.99ms 99999Mp/s   wwwwwwwww 999.99ms 99999Mp/s\n"
+        "Blit:    wwwwwwwww 999.99ms 99999Mp/s   wwwwwwwww 999.99ms 99999Mp/s\n"
+        "Blit:    wwwwwwwww 999.99ms 99999Mp/s   wwwwwwwww 999.99ms 99999Mp/s\n"
         "Verdict: PRESENT-BOUND - paint 9999.9 of 9999.9ms, residual 9999.9ms\n"
         "Surface: 99999x99999 phys @9.99dpr | vp 99999x99999 | 999.9Hz | tier Capped");
     
@@ -359,17 +362,28 @@ QString DebugOverlay::generatePerfInfo() const
                      .arg(rb.mpixPerSec(rb.memcpyMs), 0, 'f', 0)
                      .arg(rb.fillRectMs, 0, 'f', 2)
                      .arg(rb.mpixPerSec(rb.fillRectMs), 0, 'f', 0);
-        // Alpha state is reported because it decides which blend function Qt
-        // picks, and because an opaque source that came back with alpha means
-        // fromImage() converted it and the comparison is void.
-        lines << QStringLiteral("Blit:    alpha src %1ms %2Mp/s | opaque src %3ms %4Mp/s | %5x%6")
-                     .arg(rb.blitMs, 0, 'f', 2)
-                     .arg(rb.mpixPerSec(rb.blitMs), 0, 'f', 0)
-                     .arg(rb.blitOpaqueMs, 0, 'f', 2)
-                     .arg(rb.mpixPerSec(rb.blitOpaqueMs), 0, 'f', 0)
-                     .arg(rb.blitOpaqueMs > 0.0 ? rb.blitMs / rb.blitOpaqueMs : 0.0, 0, 'f', 2)
-                     .arg(rb.opaqueSourceHasAlpha ? QStringLiteral(" VOID: opaque src has alpha")
-                          : (rb.sourceHasAlpha ? QString() : QStringLiteral(" (platform src opaque)")));
+        // Whether the real snapshot came out opaque decides whether the fix is
+        // even in effect; fromImage() is free to convert back to platform format.
+        lines << QStringLiteral("Snap:    %1")
+                     .arg(!rb.snapshotValid
+                              ? QStringLiteral("- (pan once to capture a snapshot)")
+                              : (rb.snapshotHasAlpha
+                                     ? QStringLiteral("HAS ALPHA - fix not in effect")
+                                     : QStringLiteral("opaque - fix in effect")));
+        
+        // Two pairings per line to stay inside a phone-width overlay. The pairing
+        // whose cost matches the live Pan paint identifies the backing store's
+        // real format; the cheapest opaque pairing is what to capture in.
+        for (int i = 0; i < rb.blits.size(); i += 2) {
+            QString line = QStringLiteral("Blit:  ");
+            for (int j = i; j < qMin(i + 2, rb.blits.size()); ++j) {
+                line += QStringLiteral("  %1 %2ms %3Mp/s")
+                            .arg(rb.blits[j].label, -9)
+                            .arg(rb.blits[j].ms, 0, 'f', 2)
+                            .arg(rb.mpixPerSec(rb.blits[j].ms), 0, 'f', 0);
+            }
+            lines << line;
+        }
     }
     
     // Physical viewport pixels are what the rasterizer actually fills, and the

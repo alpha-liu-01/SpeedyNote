@@ -15168,6 +15168,12 @@ QPixmap DocumentViewport::grabOpaqueViewport()
     QPixmap snapshot = QPixmap::fromImage(std::move(frame));
     // fromImage() may or may not carry the ratio across; callers scale by it.
     snapshot.setDevicePixelRatio(dpr);
+    
+    // DIAGNOSTIC: fromImage() is free to convert back to the platform format,
+    // which would hand back the alpha channel and silently undo this.
+    m_lastSnapshotHadAlpha = snapshot.hasAlphaChannel();
+    m_lastSnapshotValid = true;
+    
     return snapshot;
 }
 
@@ -16960,45 +16966,46 @@ DocumentViewport::RasterBenchmark DocumentViewport::runRasterBenchmark() const
     // aligned, full-surface. Painters are built outside the timed region so
     // their setup and teardown stay out of the number.
     {
-        // Destination stays a platform-format QPixmap throughout, matching the
-        // real backing store; only the source format varies.
-        QPixmap target(surface);
-        target.fill(Qt::white);
-        
-        auto timeBlit = [&](const QPixmap& source) {
+        // QImage on both sides, because QPixmap's format is chosen by the
+        // platform and the whole question here is which format pairing is in
+        // play. drawImage and drawPixmap resolve to the same blend functions.
+        auto timePair = [&](QImage::Format srcFormat, QImage::Format dstFormat) {
+            QImage source(surface, srcFormat);
+            source.fill(QColor(40, 90, 160));
+            QImage target(surface, dstFormat);
+            target.fill(Qt::white);
+            
             std::vector<qreal> samples;
             for (int i = 0; i < kSamples; ++i) {
                 QPainter painter(&target);
                 painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
                 timer.start();
-                painter.drawPixmap(0, 0, source);
+                painter.drawImage(0, 0, source);
                 samples.push_back(timer.nsecsElapsed() / 1e6);
             }
             return median(samples);
         };
         
-        // What the pan path does today: a pixmap straight from grab(), so
-        // whatever format the platform prefers.
-        QPixmap platformSource(surface);
-        platformSource.fill(QColor(40, 90, 160));
-        result.blitMs = timeBlit(platformSource);
-        result.sourceHasAlpha = platformSource.hasAlphaChannel();
+        // Native-endian is what QPixmap uses; byte-ordered RGBA is what a
+        // GL-backed backing store wants for texture upload. Each pairing is
+        // labelled src>dst, with x marking an opaque (alpha-free) format.
+        const struct { const char* label; QImage::Format src; QImage::Format dst; } cases[] = {
+            {"argb>argb", QImage::Format_ARGB32_Premultiplied,   QImage::Format_ARGB32_Premultiplied},
+            {"rgbx>argb", QImage::Format_RGB32,                  QImage::Format_ARGB32_Premultiplied},
+            {"gl>gl",     QImage::Format_RGBA8888_Premultiplied, QImage::Format_RGBA8888_Premultiplied},
+            {"glx>gl",    QImage::Format_RGBX8888,               QImage::Format_RGBA8888_Premultiplied},
+            {"rgbx>gl",   QImage::Format_RGB32,                  QImage::Format_RGBA8888_Premultiplied},
+            {"argb>gl",   QImage::Format_ARGB32_Premultiplied,   QImage::Format_RGBA8888_Premultiplied},
+        };
         
-        // The candidate fix. Qt selects its blend function from the source and
-        // destination formats: an alpha-free source makes an unscaled SourceOver
-        // blit provably a plain copy, which Qt can do with memcpy per scanline,
-        // whereas an alpha-carrying source goes through the per-pixel
-        // argb32-on-argb32 blend. That blend has hand-written SIMD for x86 and
-        // for 32-bit ARM but not for aarch64, where it falls back to scalar C.
-        QImage opaqueImage(surface, QImage::Format_RGB32);
-        opaqueImage.fill(QColor(40, 90, 160));
-        QPixmap opaqueSource = QPixmap::fromImage(std::move(opaqueImage));
-        result.blitOpaqueMs = timeBlit(opaqueSource);
-        // fromImage() is free to convert to the platform format, which would
-        // hand back the alpha channel and quietly void the comparison.
-        result.opaqueSourceHasAlpha = opaqueSource.hasAlphaChannel();
+        result.blits.reserve(int(std::size(cases)));
+        for (const auto& c : cases) {
+            result.blits.append({QString::fromLatin1(c.label), timePair(c.src, c.dst)});
+        }
     }
     
+    result.snapshotHasAlpha = m_lastSnapshotHadAlpha;
+    result.snapshotValid = m_lastSnapshotValid;
     result.valid = true;
     return result;
 }
