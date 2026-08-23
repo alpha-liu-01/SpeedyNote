@@ -6,7 +6,7 @@ buildscript {
 
     dependencies {
         //noinspection AndroidGradlePluginVersion
-        classpath 'com.android.tools.build:gradle:8.8.0'
+        classpath 'com.android.tools.build:gradle:9.0.0'
     }
 }
 
@@ -20,16 +20,19 @@ apply plugin: qtGradlePluginType
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'])
     //noinspection GradleDependency
-    implementation 'androidx.core:core:1.16.0'
+    implementation 'androidx.core:core:1.17.0'
     implementation 'com.google.mlkit:digital-ink-recognition:19.0.0'
 }
 
-// Kotlin 1.8+ merged jdk7/jdk8 into kotlin-stdlib; force a single version
-// to avoid duplicate-class errors with older transitive deps from ML Kit.
+// Kotlin 1.8 merged jdk7/jdk8 into kotlin-stdlib, so align the 1.x requests
+// that ML Kit drags in transitively and would otherwise collide as duplicate
+// classes. Restricted to 1.x deliberately: Qt 6.11 ships Kotlin sources of its
+// own, and forcing every kotlin-stdlib down to 1.8.22 would downgrade those.
 configurations.all {
     resolutionStrategy.eachDependency { details ->
         if (details.requested.group == 'org.jetbrains.kotlin'
-                && details.requested.name.startsWith('kotlin-stdlib')) {
+                && details.requested.name.startsWith('kotlin-stdlib')
+                && details.requested.version.startsWith('1.')) {
             details.useVersion '1.8.22'
         }
     }
@@ -59,6 +62,7 @@ android {
         main {
             manifest.srcFile 'AndroidManifest.xml'
             java.srcDirs = [qtAndroidDir + '/src', 'src', 'java']
+            kotlin.srcDirs = [qtAndroidDir + '/src', 'src', 'kotlin']
             aidl.srcDirs = [qtAndroidDir + '/src', 'src', 'aidl']
             res.srcDirs = [qtAndroidDir + '/res', 'res']
             resources.srcDirs = ['resources']
@@ -70,11 +74,12 @@ android {
 
     tasks.withType(JavaCompile) {
         options.incremental = true
+        options.compilerArgs += ['-Xlint:all']
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 
     lintOptions {
@@ -84,6 +89,12 @@ android {
     aaptOptions {
         // Do not compress Qt binary resources file
         noCompress 'rcc'
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = legacyPackaging.toBoolean()
+        }
     }
 
     defaultConfig {

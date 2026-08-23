@@ -139,9 +139,9 @@ WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="${SCRIPT_DIR}/build-app"
 
 # Qt and Android paths
-QT_ANDROID="${QT_ANDROID:-/opt/qt/6.9.3/android_arm64_v8a}"
-QT_ANDROID_ARMV7="${QT_ANDROID_ARMV7:-/opt/qt/6.9.3/android_armv7}"
-QT_HOST="${QT_HOST:-/opt/qt/6.9.3/gcc_64}"
+QT_ANDROID="${QT_ANDROID:-/opt/qt/6.11.2/android_arm64_v8a}"
+QT_ANDROID_ARMV7="${QT_ANDROID_ARMV7:-/opt/qt/6.11.2/android_armv7}"
+QT_HOST="${QT_HOST:-/opt/qt/6.11.2/gcc_64}"
 ANDROID_SDK="${ANDROID_SDK_ROOT:-/opt/android-sdk}"
 ANDROID_NDK="${ANDROID_NDK_ROOT:-/opt/android-sdk/ndk/27.2.12479018}"
 
@@ -234,7 +234,8 @@ else
     ABI_CMAKE_ARGS=""
 fi
 
-# Note: NDK r27 supports API 35 natively
+# ANDROID_PLATFORM is the minimum API the native code is compiled against, not
+# the compile SDK (that is QT_ANDROID_COMPILE_SDK_VERSION in CMakeLists.txt).
 cmake \
     -DCMAKE_TOOLCHAIN_FILE="${CMAKE_TOOLCHAIN}" \
     -DCMAKE_BUILD_TYPE=Release \
@@ -330,11 +331,11 @@ if [ "$BUILD_APK" = true ]; then
     echo "=== Creating APK ==="
     
     # Create APK with androiddeployqt
-    # Note: Qt 6.10+ requires android-35 or higher (androidx.core:core:1.16.0 dependency)
+    # Note: Qt 6.11 builds against android-36 (androidx.core:core:1.17.0 dependency)
     "${QT_HOST}/bin/androiddeployqt" \
         --input "${DEPLOY_SETTINGS}" \
         --output "${BUILD_DIR}/android-build" \
-        --android-platform android-35 \
+        --android-platform android-36 \
         --gradle \
         --release \
         --sign "${SIGN_KEYSTORE}" "${SIGN_KEY_ALIAS}" \
@@ -376,7 +377,7 @@ if [ "$BUILD_AAB" = true ]; then
     "${QT_HOST}/bin/androiddeployqt" \
         --input "${DEPLOY_SETTINGS}" \
         --output "${BUILD_DIR}/android-build" \
-        --android-platform android-35 \
+        --android-platform android-36 \
         --gradle \
         --release \
         --aab \

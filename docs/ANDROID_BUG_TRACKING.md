@@ -5,8 +5,8 @@
 | Property | Value |
 |----------|-------|
 | Build Type | Release |
-| Qt Version | 6.9.3 ✅ (6.10.x has OpenGL deadlock, 6.7.x has keyboard crash) |
-| Target API | 35 |
+| Qt Version | 6.11.2 ⏳ unverified on device (6.10.x has OpenGL deadlock, 6.7.x has keyboard crash; 6.9.3 was the last known-good) |
+| Target API | 36 |
 | Min API | 26 |
 | ABI | arm64-v8a |
 | NDK Version | r27 (27.2.12479018) |
