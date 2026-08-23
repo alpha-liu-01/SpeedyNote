@@ -33,9 +33,6 @@
         android:smallScreens="true"
         android:xlargeScreens="true"/>
 
-    <!-- enableOnBackInvokedCallback=false opts out of Android 15+ Predictive Back.
-         Without it, a back key Qt has already accepted still backgrounds the
-         app (QTBUG-143558). -->
     <application
         android:name="org.qtproject.qt.android.bindings.QtApplication"
         android:hardwareAccelerated="true"
@@ -44,7 +41,6 @@
         android:allowBackup="true"
         android:fullBackupOnly="false"
         android:supportsRtl="true"
-        android:enableOnBackInvokedCallback="false"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 
         <!-- Main activity - custom class to handle PDF picker results -->

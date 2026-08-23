@@ -174,22 +174,7 @@ adopting it means rewriting the render path, not configuring it.
 
 ### Qt version upgrades
 6.7 was abysmal; 6.9 substantially better; 6.10 unusable (OpenGL threading
-deadlock).
-
-The Android toolchain has since been moved to Qt 6.11.2 (JDK 21, AGP 9.0.0,
-compile/target SDK 36, NDK r27 unchanged). **The on-device result is not yet
-recorded.** The prior is no change: nothing in 6.11 is known to touch the
-`QRhiBackingStore` present path, which is where 75-90 percent of a pan frame
-goes. Judge it on `residual`, not fps, against these 6.9.3 baselines:
-
-| Device | Paint | Frame | Residual |
-|--------|-------|-------|----------|
-| Sony Xperia XZ2 Compact (SD845) | 4.1 ms | 16.1 ms | 12.0 ms |
-| Galaxy Tab A6 (Exynos 7870) | 5 ms | 40 ms | 35 ms |
-
-Also unresolved: the 6.10 deadlock reports (QTBUG-141579 family) extend to 6.11,
-and one upstream stack trace is `QRhi::beginFrame` in a QWidgets app, which is
-this exact code path. If that reproduces, revert rather than patch qtbase.
+deadlock). Currently on 6.9.3 with NDK r27. 6.11 untested on Android.
 
 ---
 
