@@ -4270,7 +4270,7 @@ void DocumentViewport::beginZoomGesture(QPointF centerPoint)
     m_gesture.initialCentroidSet = true;
     
     // Capture current viewport as cached frame for fast scaling
-    m_gesture.cachedFrame = grab();
+    m_gesture.cachedFrame = grabOpaqueViewport();
     // Store device pixel ratio for correct scaling on high-DPI displays
     m_gesture.frameDevicePixelRatio = m_gesture.cachedFrame.devicePixelRatio();
     
@@ -4405,7 +4405,7 @@ void DocumentViewport::beginPanGesture()
     m_gesture.targetPan = m_panOffset;
     
     // Capture current viewport as cached frame for fast shifting
-    m_gesture.cachedFrame = grab();
+    m_gesture.cachedFrame = grabOpaqueViewport();
     // Store device pixel ratio for correct positioning on high-DPI displays
     m_gesture.frameDevicePixelRatio = m_gesture.cachedFrame.devicePixelRatio();
     
@@ -11312,7 +11312,7 @@ void DocumentViewport::captureSelectionBackground()
     m_skipSelectionRendering = true;
     
     // Capture the viewport (this triggers a paint without selection)
-    m_selectionBackgroundSnapshot = grab();
+    m_selectionBackgroundSnapshot = grabOpaqueViewport();
     m_backgroundSnapshotDpr = m_selectionBackgroundSnapshot.devicePixelRatio();
     
     // Re-enable selection rendering
@@ -11340,7 +11340,7 @@ void DocumentViewport::captureObjectDragBackground()
     m_skipSelectedObjectRendering = true;
     
     // Capture the viewport (this triggers a paint without selected objects)
-    m_objectDragBackgroundSnapshot = grab();
+    m_objectDragBackgroundSnapshot = grabOpaqueViewport();
     m_objectDragSnapshotDpr = m_objectDragBackgroundSnapshot.devicePixelRatio();
     
     // Re-enable selected object rendering
@@ -15143,6 +15143,32 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
                           eraserRadius * 2, eraserRadius * 2);
         update(QRegion(dirtyRectF.toAlignedRect(), QRegion::Ellipse));
     }
+}
+
+QPixmap DocumentViewport::grabOpaqueViewport()
+{
+    if (width() <= 0 || height() <= 0) {
+        return QPixmap();
+    }
+    
+    // Mirrors what grab() does, differing only in the format it renders into.
+    const qreal dpr = devicePixelRatioF();
+    QImage frame(QSize(qRound(width() * dpr), qRound(height() * dpr)),
+                 QImage::Format_RGB32);
+    if (frame.isNull()) {
+        return grab();  // Allocation failed; the slower snapshot beats none at all.
+    }
+    frame.setDevicePixelRatio(dpr);
+    
+    // RGB32 has no transparency to start from, so any pixel render() leaves
+    // untouched would show uninitialized memory rather than blank canvas.
+    frame.fill(m_backgroundColor);
+    render(&frame);
+    
+    QPixmap snapshot = QPixmap::fromImage(std::move(frame));
+    // fromImage() may or may not carry the ratio across; callers scale by it.
+    snapshot.setDevicePixelRatio(dpr);
+    return snapshot;
 }
 
 void DocumentViewport::fillBackgroundAround(QPainter& painter, const QRectF& coveredLogical)

@@ -3287,6 +3287,26 @@ private:
     void clampPanOffset();
     
     /**
+     * @brief Snapshot the viewport into a pixmap with no alpha channel.
+     * @return Viewport contents at device pixel ratio, or a null pixmap if the
+     *         widget has no size yet.
+     *
+     * Use this instead of grab() for any snapshot that will be blitted back
+     * repeatedly during an interaction. grab() allocates in the platform's
+     * preferred format, which carries an alpha channel wherever the backing
+     * store does - as it does on Android. An alpha-carrying source sends every
+     * blit of the snapshot through Qt's per-pixel argb32-on-argb32 blend, which
+     * has hand-written SIMD on x86 and on 32-bit ARM but falls back to scalar C
+     * on aarch64. An alpha-free source makes an unscaled SourceOver blit
+     * provably a copy, which Qt does with memcpy per scanline.
+     *
+     * Measured full-viewport blit, alpha source against alpha-free source:
+     * 229 vs 1698 Mpix/s on a Snapdragon 845, and 110 vs 428 on an Exynos 7870.
+     * These snapshots are fully opaque regardless, so the channel is pure cost.
+     */
+    QPixmap grabOpaqueViewport();
+    
+    /**
      * @brief Update the current page index based on pan position.
      */
     void updateCurrentPageIndex();
