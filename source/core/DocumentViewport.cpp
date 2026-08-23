@@ -1225,33 +1225,11 @@ void DocumentViewport::onScrollActivity(bool steppedScroll)
     if (m_scrollSettleTimer) {
         m_scrollSettleTimer->start();
     }
-
-    // Same reasoning as updatePanGesture(): the debounce restarts on every
-    // event, so a continuous scroll would not start rendering a newly visible
-    // page until it stopped, and the settle repaint would then rasterize it on
-    // the UI thread. Kick the render off as the page comes into view instead.
-    //
-    // Only for routes that paint cache-only, which on Qt6 is all of them. The
-    // Qt5 stepped-wheel branch above opts into synchronous rendering; putting a
-    // render in flight would divert it to the cache-only branch and bring back
-    // the per-notch blank flash that branch exists to avoid.
-    //
-    // Gated, so a scroll-bar drag - which crosses pages far faster than they
-    // can be rendered - keeps the SP1 behaviour of deferring everything to the
-    // settle handler.
-    if (m_scrollActive) {
-        preloadForMotion();
-    }
 }
 
 void DocumentViewport::onScrollSettled()
 {
     m_scrollActive = false;
-    
-    // Motion is over, so the next one starts with no travel rate to judge and
-    // preloads from its first event.
-    m_motionPreloadFirstPage = -1;
-    
     if (!m_document) {
         return;
     }
@@ -4440,13 +4418,11 @@ void DocumentViewport::updatePanGesture(QPointF panDelta)
     // Restart timeout timer (each event resets the timeout)
     m_gestureTimeoutTimer->start(GESTURE_TIMEOUT_MS);
 
-    // Start rendering pages the gesture is heading towards, rather than
-    // restarting the debounce: it is reset by every event, so during continuous
-    // panning it would not elapse until the pan stopped - exactly when the page
-    // is needed and too late to render off the UI thread. Idempotent and cheap
-    // once a page is resident or already in flight, and it stands down by
-    // itself if the pan is crossing pages too fast to render usefully.
-    preloadForMotion();
+    // Keep the PDF cache moving with the gesture so the exposed strip has pages
+    // to draw once the pan crosses a page boundary. This only restarts a
+    // debounce timer, so it is free to call per event; the preload itself aims
+    // at the gesture target (see doAsyncPdfPreload).
+    preloadPdfCache();
 
     // Trigger repaint (will use fast cached frame shifting)
     update();
@@ -4467,10 +4443,6 @@ void DocumentViewport::endPanGesture()
     // Clear gesture state BEFORE applying pan (to avoid recursion in paintEvent)
     m_gesture.reset();
     
-    // Motion is over, so the next one starts with no travel rate to judge and
-    // preloads from its first event.
-    m_motionPreloadFirstPage = -1;
-    
     // Apply final pan
     m_panOffset = finalPan;
     
@@ -4481,24 +4453,15 @@ void DocumentViewport::endPanGesture()
     emit panChanged(m_panOffset);
     emitScrollFractions();
     
-    // Update PDF cache capacity (visible pages may have changed)
-    updatePdfCacheCapacity();
-
-    // Ahead of the repaint, not after it. Any page the pan landed on that is
-    // not resident gets handed to a worker first, so the repaint below sees it
-    // as in flight and skips the inline rasterization that used to freeze the
-    // UI for the length of a page render.
-    doAsyncPdfPreload();
-
     // Trigger full re-render
     update();
-
-    // Backstop for the page the pan actually landed on. The eager call above
-    // launches nothing if the concurrent-render budget is already spent on
-    // pages crossed during the pan; this fires once motion has settled, by
-    // which time those have finished and freed it.
+    
+    // Update PDF cache capacity (visible pages may have changed)
+    updatePdfCacheCapacity();
+    
+    // Preload PDF cache for new viewport position
     preloadPdfCache();
-
+    
     // Evict distant tiles if in edgeless mode
     if (m_document && m_document->isEdgeless()) {
         evictDistantTiles();
@@ -4669,35 +4632,6 @@ QPixmap DocumentViewport::lookupCachedPdfPage(const QString& sourceId, int pageI
     return QPixmap();  // Miss - caller decides whether to render synchronously
 }
 
-bool DocumentViewport::isPdfRenderInFlight(const QString& sourceId, int pageIndex, qreal dpi) const
-{
-    for (const PdfRenderKey& key : m_pdfRendersInFlight) {
-        if (key.matches(sourceId, pageIndex, dpi)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-void DocumentViewport::markPdfRenderInFlight(const QString& sourceId, int pageIndex, qreal dpi)
-{
-    if (isPdfRenderInFlight(sourceId, pageIndex, dpi)) {
-        return;
-    }
-    m_pdfRendersInFlight.append(PdfRenderKey{sourceId, pageIndex, dpi});
-}
-
-void DocumentViewport::clearPdfRenderInFlight(const QString& sourceId, int pageIndex, qreal dpi)
-{
-    m_pdfRendersInFlight.erase(
-        std::remove_if(m_pdfRendersInFlight.begin(), m_pdfRendersInFlight.end(),
-                       [&](const PdfRenderKey& key) {
-                           return key.matches(sourceId, pageIndex, dpi);
-                       }),
-        m_pdfRendersInFlight.end()
-    );
-}
-
 QPixmap DocumentViewport::getCachedPdfPage(const QString& sourceId, int pageIndex, qreal dpi)
 {
     if (!m_document) {
@@ -4794,69 +4728,6 @@ void DocumentViewport::preloadPdfCache()
     }
 }
 
-bool DocumentViewport::isPdfPageVisible(const QString& sourceId, int pdfPageNum)
-{
-    if (!m_document) {
-        return false;
-    }
-    
-    // Against the gesture target while panning, for the same reason the paint
-    // path uses it: that is where the pixels go. Judging by m_panOffset would
-    // miss a page entering through the exposed strip, and a finger held still
-    // produces no further repaints to correct it.
-    ScopedValue<QPointF> panAtTarget(
-        m_panOffset,
-        m_gesture.activeType == ViewportGestureState::Pan ? m_gesture.targetPan
-                                                          : m_panOffset);
-    
-    // By source and PDF page rather than document page index, since the same
-    // PDF page can back more than one page of the document.
-    const QVector<int> visible = visiblePages();
-    for (int index : visible) {
-        Page* page = m_document->page(index);
-        if (page && page->pdfPageNumber == pdfPageNum && page->pdfSourceId == sourceId) {
-            return true;
-        }
-    }
-    return false;
-}
-
-void DocumentViewport::preloadForMotion()
-{
-    if (!m_document) {
-        return;
-    }
-    
-    // Measured against the pages doAsyncPdfPreload would target, which during a
-    // pan gesture is the gesture target rather than m_panOffset - the latter
-    // stays where the gesture began, so it would report zero travel throughout.
-    ScopedValue<QPointF> panAtTarget(
-        m_panOffset,
-        m_gesture.activeType == ViewportGestureState::Pan ? m_gesture.targetPan
-                                                          : m_panOffset);
-    
-    const QVector<int> visible = visiblePages();
-    if (visible.isEmpty()) {
-        return;
-    }
-    
-    const int first = visible.first();
-    const int previous = m_motionPreloadFirstPage;
-    m_motionPreloadFirstPage = first;
-    
-    // A scroll-bar drag crosses several pages per event, so nothing started now
-    // is still on screen when it lands, and queueing it only takes worker time
-    // away from the page eventually stopped on - that case is the settle
-    // handler's (SP1). A pan at reading speed moves a page occasionally, and
-    // there rendering now is the whole point: deferring to the settle spends
-    // the entire motion idle and then blocks the repaint on the render.
-    if (previous >= 0 && qAbs(first - previous) > MOTION_PRELOAD_MAX_PAGE_STEP) {
-        return;
-    }
-    
-    doAsyncPdfPreload();
-}
-
 void DocumentViewport::doAsyncPdfPreload()
 {
     if (!m_document) {
@@ -4933,22 +4804,8 @@ void DocumentViewport::doAsyncPdfPreload()
         return;  // All pages already cached
     }
     
-    // Cap how many renders may be outstanding. This now fires as pages come
-    // into view rather than once motion settles, so a long fast pan would
-    // otherwise queue a render per page crossed - a backlog that is stale
-    // before it finishes and that the page actually landed on has to wait
-    // behind. Pages skipped here are picked up by the next call, by which time
-    // the window reflects where the view really is.
-    int renderBudget = MAX_CONCURRENT_PDF_RENDERS - static_cast<int>(m_pdfRendersInFlight.size());
-    if (renderBudget <= 0) {
-        return;
-    }
-    
     // Launch async render for each page that needs caching
     for (const PreloadItem& item : pagesToPreload) {
-        if (renderBudget-- <= 0) {
-            break;
-        }
         const QString sourceId = item.sourceId;
         const int pdfPageNum = item.pdfPageNum;
         const int renderPageNum = item.renderPageNum;
@@ -4958,11 +4815,6 @@ void DocumentViewport::doAsyncPdfPreload()
         // Track watcher for cleanup
         m_activePdfWatchers.append(watcher);
         
-        // Tell the paint path this page is on its way, so it waits for the
-        // worker instead of rasterizing the same page inline, and so a repeated
-        // preload request does not queue the work a second time.
-        markPdfRenderInFlight(sourceId, pdfPageNum, dpi);
-        
         // THREAD SAFETY FIX: QPixmap must only be created on the main thread.
         // The background thread returns QImage, and we convert to QPixmap here
         // in the finished handler which runs on the main thread.
@@ -4970,11 +4822,6 @@ void DocumentViewport::doAsyncPdfPreload()
             // BUG-A006 FIX: Check if watcher was cancelled (e.g., by invalidatePdfCache)
             // This happens when document/page changes while render is in progress
             m_activePdfWatchers.removeOne(watcher);
-            
-            // Unconditionally, ahead of every early return below. A cancelled
-            // or failed render that stayed marked in flight would suppress
-            // inline rasterization of that page for good, leaving it blank.
-            clearPdfRenderInFlight(sourceId, pdfPageNum, dpi);
             
             bool wasCancelled = watcher->isCanceled();
             QImage pdfImage;
@@ -5009,10 +4856,6 @@ void DocumentViewport::doAsyncPdfPreload()
             // SAFE: QPixmap::fromImage on main thread
             QPixmap pixmap = QPixmap::fromImage(pdfImage);
             
-            // Resolved before the cache lock, both to keep the critical section
-            // tight and because the answer decides only whether to repaint.
-            const bool stillVisible = isPdfPageVisible(sourceId, pdfPageNum);
-            
             // Add to cache (thread-safe access to shared cache)
             QMutexLocker locker(&m_pdfCacheMutex);
             
@@ -5046,13 +4889,8 @@ void DocumentViewport::doAsyncPdfPreload()
             m_pdfCache.append(entry);
             m_cachedDpi = dpi;
             
-            // Repaint only for a page still on screen. Keeping the pixmap is
-            // always worth it, but a render that landed after its page scrolled
-            // away would otherwise force a full repaint for nothing - once per
-            // completion, right when a fast scroll can least afford it.
-            if (stillVisible) {
-                update();
-            }
+            // Trigger repaint to show newly cached page
+            update();
         });
         
         // Background thread: render PDF to QImage (thread-safe)
@@ -5108,12 +4946,7 @@ void DocumentViewport::invalidatePdfCache()
     for (QFutureWatcher<QImage>* watcher : m_activePdfWatchers) {
         watcher->cancel();
     }
-
-    // Those renders are no longer wanted, so nothing should wait on them. Their
-    // finished handlers clear their own entries too; this covers the case where
-    // one never arrives, which would otherwise blank the page permanently.
-    m_pdfRendersInFlight.clear();
-
+    
     // Thread-safe cache clear
     QMutexLocker locker(&m_pdfCacheMutex);
 #ifdef SPEEDYNOTE_DEBUG
@@ -17193,14 +17026,7 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
                     // cached pixmap if present, else fall back to the page
                     // background (already filled above). The settle handler
                     // renders the final visible pages once scrolling stops.
-                    //
-                    // Likewise once a worker already holds this page: blocking
-                    // here would redo work that is on its way, for the length of
-                    // a whole page render. Its completion handler repaints, so
-                    // the page appears as soon as it is ready.
-                    const bool renderPending =
-                        isPdfRenderInFlight(page->pdfSourceId, page->pdfPageNumber, dpi);
-                    QPixmap pdfPixmap = (isScrolling() || renderPending)
+                    QPixmap pdfPixmap = isScrolling()
                         ? lookupCachedPdfPage(page->pdfSourceId, page->pdfPageNumber, dpi)
                         : getCachedPdfPage(page->pdfSourceId, page->pdfPageNumber, dpi);
                     
