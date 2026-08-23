@@ -2995,7 +2995,7 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     // ========== EDGELESS MODE ==========
     // Edgeless uses tiled rendering instead of page-based rendering
     if (m_document->isEdgeless()) {
-        renderEdgelessMode(painter);
+        renderEdgelessMode(painter, dirtyRect);
         
         // Draw eraser cursor
         if (!m_isDrawing || !isPartialUpdate) {
@@ -17123,12 +17123,21 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
 
 // ===== Edgeless Mode Rendering (Phase E2) =====
 
-void DocumentViewport::renderEdgelessMode(QPainter& painter)
+void DocumentViewport::renderEdgelessMode(QPainter& painter, const QRect& dirtyRect)
 {
     if (!m_document || !m_document->isEdgeless()) return;
     
-    // Get visible rect in document coordinates
-    QRectF viewRect = visibleRect();
+    // Confine the tile walk to the damaged area. Qt clips the rasterization
+    // either way, but every visible tile's background pattern, stroke layers and
+    // objects were still being walked and issued each frame - so a live stroke,
+    // whose dirty rect is a few pixels across, paid for the whole viewport.
+    // Widened slightly so rounding cannot drop a tile that just reaches in.
+    const QRectF dirtyF(dirtyRect);
+    const qreal slack = 2.0 / m_zoomLevel;
+    const QRectF dirtyDoc = QRectF(viewportToDocument(dirtyF.topLeft()),
+                                   viewportToDocument(dirtyF.bottomRight()))
+                                .adjusted(-slack, -slack, slack, slack);
+    const QRectF viewRect = visibleRect().intersected(dirtyDoc);
     
     // ========== TILE RENDERING STRATEGY ==========
     // With stroke splitting, cross-tile strokes are stored as separate segments in each tile.
@@ -17146,8 +17155,14 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
     
     // CR-5: Single tilesInRect() call - use total margin for all tiles
     // Background pass will filter to viewRect bounds
-    QRectF strokeRect = viewRect.adjusted(-totalMargin, -totalMargin, totalMargin, totalMargin);
-    QVector<Document::TileCoord> allTiles = m_document->tilesInRect(strokeRect);
+    // An empty viewRect means nothing damaged intersects the canvas; leaving the
+    // tile list empty skips every tile pass below while the overlays and the
+    // in-progress stroke at the end of this function still run.
+    QVector<Document::TileCoord> allTiles;
+    if (!viewRect.isEmpty()) {
+        QRectF strokeRect = viewRect.adjusted(-totalMargin, -totalMargin, totalMargin, totalMargin);
+        allTiles = m_document->tilesInRect(strokeRect);
+    }
     
     // Pre-calculate visible tile range for background filtering
     int tileSize = Document::EDGELESS_TILE_SIZE;

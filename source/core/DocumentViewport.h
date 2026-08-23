@@ -4104,7 +4104,13 @@ private:
      * @brief Render the edgeless canvas (tiled architecture).
      * @param painter The QPainter to render to.
      */
-    void renderEdgelessMode(QPainter& painter);
+    /**
+     * @brief Render the edgeless (tiled) canvas.
+     * @param painter Viewport painter, untransformed.
+     * @param dirtyRect Damaged region in viewport coordinates; the tile walk is
+     *        confined to the tiles it touches.
+     */
+    void renderEdgelessMode(QPainter& painter, const QRect& dirtyRect);
 
     /**
      * @brief Pick a render tier for one page or tile in the current paint.
