@@ -954,8 +954,11 @@ public:
         QString runtimeArch;    ///< Architecture actually executing
         qreal memcpyMs = 0.0;   ///< Raw memcpy of the same byte count
         qreal fillRectMs = 0.0; ///< QPainter::fillRect over the whole surface
-        qreal blitMs = 0.0;     ///< QPainter::drawPixmap of a full-size pixmap
+        qreal blitMs = 0.0;     ///< drawPixmap from a platform-format source
+        qreal blitOpaqueMs = 0.0; ///< drawPixmap from an alpha-free source
         qreal megapixels = 0.0; ///< Surface size each timing covers
+        bool sourceHasAlpha = false;       ///< Whether the platform source carried alpha
+        bool opaqueSourceHasAlpha = false; ///< True means the alpha-free source was voided
 
         /// @brief Throughput in megapixels per second, comparable to the Fill line.
         qreal mpixPerSec(qreal ms) const

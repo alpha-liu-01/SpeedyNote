@@ -266,7 +266,8 @@ QSize DebugOverlay::perfModeSize() const
         "Partial: 9999.9 fps | paint 9999.9ms avg, 9999.9 p95, 9999.9 max (99s ago)\n"
         "Fill:    99999 Mpix/s | 99.99 MP/frame\n"
         "Arch:    build wwwwwwww | runtime wwwwwwww | 99.99 MP surface\n"
-        "Raster:  memcpy 999.99ms 99999Mp/s | fill 999.99ms 99999Mp/s | blit 999.99ms 99999Mp/s\n"
+        "Raster:  memcpy 999.99ms 99999Mp/s | fill 999.99ms 99999Mp/s\n"
+        "Blit:    alpha src 999.99ms 99999Mp/s | opaque src 999.99ms 99999Mp/s | 99.99x VOID: opaque src has alpha\n"
         "Verdict: PRESENT-BOUND - paint 9999.9 of 9999.9ms, residual 9999.9ms\n"
         "Surface: 99999x99999 phys @9.99dpr | vp 99999x99999 | 999.9Hz | tier Capped");
     
@@ -353,13 +354,22 @@ QString DebugOverlay::generatePerfInfo() const
         lines << QStringLiteral("Arch:    build %1 | runtime %2 | %3 MP surface")
                      .arg(rb.buildArch, rb.runtimeArch)
                      .arg(rb.megapixels, 0, 'f', 2);
-        lines << QStringLiteral("Raster:  memcpy %1ms %2Mp/s | fill %3ms %4Mp/s | blit %5ms %6Mp/s")
+        lines << QStringLiteral("Raster:  memcpy %1ms %2Mp/s | fill %3ms %4Mp/s")
                      .arg(rb.memcpyMs, 0, 'f', 2)
                      .arg(rb.mpixPerSec(rb.memcpyMs), 0, 'f', 0)
                      .arg(rb.fillRectMs, 0, 'f', 2)
-                     .arg(rb.mpixPerSec(rb.fillRectMs), 0, 'f', 0)
+                     .arg(rb.mpixPerSec(rb.fillRectMs), 0, 'f', 0);
+        // Alpha state is reported because it decides which blend function Qt
+        // picks, and because an opaque source that came back with alpha means
+        // fromImage() converted it and the comparison is void.
+        lines << QStringLiteral("Blit:    alpha src %1ms %2Mp/s | opaque src %3ms %4Mp/s | %5x%6")
                      .arg(rb.blitMs, 0, 'f', 2)
-                     .arg(rb.mpixPerSec(rb.blitMs), 0, 'f', 0);
+                     .arg(rb.mpixPerSec(rb.blitMs), 0, 'f', 0)
+                     .arg(rb.blitOpaqueMs, 0, 'f', 2)
+                     .arg(rb.mpixPerSec(rb.blitOpaqueMs), 0, 'f', 0)
+                     .arg(rb.blitOpaqueMs > 0.0 ? rb.blitMs / rb.blitOpaqueMs : 0.0, 0, 'f', 2)
+                     .arg(rb.opaqueSourceHasAlpha ? QStringLiteral(" VOID: opaque src has alpha")
+                          : (rb.sourceHasAlpha ? QString() : QStringLiteral(" (platform src opaque)")));
     }
     
     // Physical viewport pixels are what the rasterizer actually fills, and the

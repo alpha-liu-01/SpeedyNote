@@ -16902,11 +16902,17 @@ DocumentViewport::RasterBenchmark DocumentViewport::runRasterBenchmark() const
         std::vector<quint8> src(size_t(bytes), 0x5a);
         std::vector<quint8> dst(size_t(bytes), 0x00);
         std::vector<qreal> samples;
+        // Nothing else reads dst, so the copy is dead code the optimizer will
+        // delete outright. Sampling a byte into a volatile after each timing
+        // keeps the buffer live without adding to the measurement.
+        volatile quint8 sink = 0;
         for (int i = 0; i < kSamples; ++i) {
             timer.start();
             std::memcpy(dst.data(), src.data(), size_t(bytes));
             samples.push_back(timer.nsecsElapsed() / 1e6);
+            sink = dst[size_t(i) % size_t(bytes)];
         }
+        Q_UNUSED(sink);
         result.memcpyMs = median(samples);
     }
     
@@ -16928,19 +16934,43 @@ DocumentViewport::RasterBenchmark DocumentViewport::runRasterBenchmark() const
     // aligned, full-surface. Painters are built outside the timed region so
     // their setup and teardown stay out of the number.
     {
-        QPixmap source(surface);
-        source.fill(QColor(40, 90, 160));
+        // Destination stays a platform-format QPixmap throughout, matching the
+        // real backing store; only the source format varies.
         QPixmap target(surface);
         target.fill(Qt::white);
-        std::vector<qreal> samples;
-        for (int i = 0; i < kSamples; ++i) {
-            QPainter painter(&target);
-            painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
-            timer.start();
-            painter.drawPixmap(0, 0, source);
-            samples.push_back(timer.nsecsElapsed() / 1e6);
-        }
-        result.blitMs = median(samples);
+        
+        auto timeBlit = [&](const QPixmap& source) {
+            std::vector<qreal> samples;
+            for (int i = 0; i < kSamples; ++i) {
+                QPainter painter(&target);
+                painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+                timer.start();
+                painter.drawPixmap(0, 0, source);
+                samples.push_back(timer.nsecsElapsed() / 1e6);
+            }
+            return median(samples);
+        };
+        
+        // What the pan path does today: a pixmap straight from grab(), so
+        // whatever format the platform prefers.
+        QPixmap platformSource(surface);
+        platformSource.fill(QColor(40, 90, 160));
+        result.blitMs = timeBlit(platformSource);
+        result.sourceHasAlpha = platformSource.hasAlphaChannel();
+        
+        // The candidate fix. Qt selects its blend function from the source and
+        // destination formats: an alpha-free source makes an unscaled SourceOver
+        // blit provably a plain copy, which Qt can do with memcpy per scanline,
+        // whereas an alpha-carrying source goes through the per-pixel
+        // argb32-on-argb32 blend. That blend has hand-written SIMD for x86 and
+        // for 32-bit ARM but not for aarch64, where it falls back to scalar C.
+        QImage opaqueImage(surface, QImage::Format_RGB32);
+        opaqueImage.fill(QColor(40, 90, 160));
+        QPixmap opaqueSource = QPixmap::fromImage(std::move(opaqueImage));
+        result.blitOpaqueMs = timeBlit(opaqueSource);
+        // fromImage() is free to convert to the platform format, which would
+        // hand back the alpha channel and quietly void the comparison.
+        result.opaqueSourceHasAlpha = opaqueSource.hasAlphaChannel();
     }
     
     result.valid = true;
