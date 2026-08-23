@@ -109,6 +109,8 @@
     <file>resources/icons/url_reversed.png</file>
     <file>resources/icons/select.png</file>
     <file>resources/icons/select_reversed.png</file>
+    <file>resources/icons/borders.png</file>
+    <file>resources/icons/borders_reversed.png</file>
     <file>resources/icons/linkicon.png</file>
     <file>resources/icons/linkicon_reversed.png</file>
     <file>resources/icons/cut.png</file>

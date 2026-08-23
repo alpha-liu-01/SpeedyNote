@@ -28,6 +28,7 @@ enum class TouchGestureMode {
 #include "Document.h"
 #include "Page.h"
 #include "ToolType.h"
+#include "ViewportPerfMonitor.h"
 #include "../objects/TextBoxObject.h"
 #include "../strokes/VectorStroke.h"
 #include "../pdf/PdfProvider.h"
@@ -209,8 +210,6 @@ struct UndoAction {
 #include <QTimer>
 #include <QMutex>
 #include <QFutureWatcher>
-#include <deque>
-
 // Forward declarations
 class QPaintEvent;
 class QResizeEvent;
@@ -880,31 +879,63 @@ public:
      */
     int edgelessActiveLayerIndex() const { return m_edgelessActiveLayerIndex; }
     
-    // ===== Benchmark (Task 2.6) =====
+    // ===== Performance Instrumentation =====
     
     /**
-     * @brief Start measuring paint refresh rate.
-     * 
-     * Call this to begin tracking how often paintEvent is called.
-     * Use getPaintRate() to retrieve the current rate.
+     * @brief Start collecting per-frame paint statistics.
+     *
+     * Overhead is two clock reads and one ring-buffer write per frame, so this
+     * is safe to enable in release builds without distorting the measurement.
      */
     void startBenchmark();
     
     /**
-     * @brief Stop measuring paint refresh rate.
+     * @brief Stop collecting paint statistics and discard the samples.
      */
     void stopBenchmark();
     
     /**
-     * @brief Get the current paint refresh rate.
-     * @return Paints per second (based on last 1 second of data).
+     * @brief Get the overall repaint rate.
+     * @return Paints per second across all frame kinds, 0 when not measuring.
+     *
+     * Prefer perfStats() for anything diagnostic: this figure mixes cheap
+     * partial stroke updates with expensive full-viewport frames and so is
+     * only useful as a coarse "is anything repainting" indicator.
      */
     int getPaintRate() const;
     
     /**
-     * @brief Check if benchmarking is currently active.
+     * @brief Check if performance instrumentation is currently active.
      */
-    bool isBenchmarking() const { return m_benchmarking; }
+    bool isBenchmarking() const { return m_perf.isEnabled(); }
+    
+    /**
+     * @brief Get rolling paint statistics for one class of frames.
+     */
+    ViewportPerfMonitor::Stats perfStats(ViewportPerfMonitor::Bucket bucket) const
+    {
+        return m_perf.stats(bucket);
+    }
+    
+    /**
+     * @brief Context needed to interpret the paint statistics.
+     */
+    struct PerfContext {
+        QSize viewportLogical;      ///< Widget size in logical pixels
+        QSize viewportPhysical;     ///< Widget size in device pixels
+        qreal devicePixelRatio = 1.0;
+        qreal screenRefreshRate = 0.0;  ///< Panel refresh rate in Hz, 0 if unknown
+        QString strokeCacheTier;    ///< Capped / Focus / Direct for the visible page
+    };
+    
+    /**
+     * @brief Collect the display and render-tier context for the perf HUD.
+     *
+     * The stroke cache tier matters because it depends on
+     * zoom * devicePixelRatio, so a high-DPR tablet drops out of the cheap
+     * cached tier at roughly half the zoom level a desktop monitor would.
+     */
+    PerfContext perfContext() const;
     
     /**
      * @brief Check if the hardware eraser (stylus eraser end) is active.
@@ -3091,6 +3122,16 @@ private:
     qreal m_cacheZoom = 1.0;                  ///< Zoom level when cache was built
     QPointF m_cachePan;                       ///< Pan offset when cache was built
     
+    /// Trailing points whose rendered shape can still change as the stroke grows.
+    /// Catmull-Rom reads a four-point window and the outline tangent at each vertex
+    /// reads its neighbours, so appending a point disturbs the last four segments.
+    /// Everything before that is final and stays in the cache untouched.
+    static constexpr int STROKE_TAIL_VOLATILE_POINTS = 6;
+    
+    /// Points prepended to a tail redraw purely to supply curve context, so the
+    /// redrawn geometry comes out identical to what a full-stroke render produces.
+    static constexpr int STROKE_TAIL_CONTEXT_POINTS = 4;
+    
     // ===== Undo/Redo State (unified) =====
     QStack<UndoAction> m_undoStack;   ///< Global undo stack (both paged and edgeless)
     QStack<UndoAction> m_redoStack;   ///< Global redo stack (both paged and edgeless)
@@ -3114,11 +3155,8 @@ private:
      */
     void pushPositionHistory();
     
-    // ===== Benchmark State (Task 2.6) =====
-    bool m_benchmarking = false;                      ///< Whether benchmarking is active
-    QElapsedTimer m_benchmarkTimer;                   ///< Timer for measuring intervals
-    mutable std::deque<qint64> m_paintTimestamps;     ///< Timestamps of recent paints (mutable for const getPaintRate)
-    QTimer m_benchmarkDisplayTimer;                   ///< Timer for periodic display updates
+    // ===== Performance Instrumentation State =====
+    ViewportPerfMonitor m_perf;                       ///< Per-frame paint statistics
     
     // ===== Deferred Viewport Gesture State (Task 2.3 - Zoom/Pan Optimization) =====
     /**
@@ -3885,6 +3923,28 @@ private:
     void resetCurrentStrokeCache();
     
     /**
+     * @brief Cache pixels that a tail redraw starting at @p fromIndex may touch.
+     * @param fromIndex First point of the volatile tail.
+     * @param toCache Transform from stroke coordinates to cache (viewport) coordinates.
+     * @return Clipped to the viewport; empty when the tail is entirely off-screen.
+     */
+    QRect currentStrokeTailRect(int fromIndex, const QTransform& toCache) const;
+    
+    /**
+     * @brief Point ranges of the current stroke whose geometry can reach @p cacheRect.
+     * @param cacheRect Region about to be cleared and repainted, in cache coordinates.
+     * @param toCache Transform from stroke coordinates to cache (viewport) coordinates.
+     * @return Inclusive [first, last] index ranges, already padded with curve context
+     *         and merged, ordered by first index.
+     *
+     * Where a stroke crosses itself, clearing the tail region also destroys older
+     * settled geometry passing through it, so redrawing the tail alone leaves a
+     * hole. Every range this returns has to be repainted to restore the region.
+     */
+    QVector<QPair<int, int>> currentStrokeRangesTouching(const QRect& cacheRect,
+                                                         const QTransform& toCache) const;
+    
+    /**
      * @brief Render the in-progress stroke to the viewport.
      * @param painter The QPainter to render to (viewport painter, unmodified transform).
      * 
@@ -3919,6 +3979,20 @@ private:
      * @param painter The QPainter to render to (viewport coordinates).
      */
     void drawEraserCursor(QPainter& painter);
+    
+    /**
+     * @brief Fill the background in the bands around an already-covered rect.
+     * @param painter The QPainter to render to (viewport coordinates).
+     * @param coveredLogical Region a subsequent draw will overwrite, in logical
+     *        viewport coordinates.
+     *
+     * The gesture pan path shifts a viewport-sized cached frame, so everything
+     * except an L-shaped strip is about to be overdrawn. Clearing only that
+     * strip removes a full-surface write per frame. Fills at most four bands
+     * and allocates nothing. Rounds @p coveredLogical inward, so a fractional
+     * edge is filled rather than left as a seam.
+     */
+    void fillBackgroundAround(QPainter& painter, const QRectF& coveredLogical);
 
     /**
      * @brief Finalize the eraser lasso gesture: delete all strokes inside the
@@ -4004,11 +4078,6 @@ private:
      */
     qreal effectivePdfDpi() const;
     
-    /**
-     * @brief Whether to show debug overlay.
-     */
-    bool m_showDebugOverlay = true;
-    
     // ===== Edgeless Mode State (Phase E2/E3) =====
     
     /**
@@ -4035,7 +4104,13 @@ private:
      * @brief Render the edgeless canvas (tiled architecture).
      * @param painter The QPainter to render to.
      */
-    void renderEdgelessMode(QPainter& painter);
+    /**
+     * @brief Render the edgeless (tiled) canvas.
+     * @param painter Viewport painter, untransformed.
+     * @param dirtyRect Damaged region in viewport coordinates; the tile walk is
+     *        confined to the tiles it touches.
+     */
+    void renderEdgelessMode(QPainter& painter, const QRect& dirtyRect);
 
     /**
      * @brief Pick a render tier for one page or tile in the current paint.

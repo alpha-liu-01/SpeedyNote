@@ -701,6 +701,11 @@ private:
     class DebugOverlay* m_debugOverlay = nullptr;  // Floating debug info panel
     void toggleDebugOverlay();                      // Toggle debug overlay visibility
     
+    // Paint performance HUD (available in release builds; see ViewportPerfMonitor)
+    bool m_perfHudEnabled = false;                  // Whether instrumentation is on
+    void togglePerfHud();                           // Toggle paint instrumentation
+    void applyPerfHudToViewport(DocumentViewport* viewport);  // Carry state across tabs
+    
     // Two-column layout toggle (Ctrl+2)
     void toggleAutoLayout();                        // Toggle auto 1/2 column layout mode
     // REMOVED MW7.4: bookmarks QMap removed - bookmark implementation deleted

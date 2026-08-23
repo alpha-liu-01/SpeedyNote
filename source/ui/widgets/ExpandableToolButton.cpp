@@ -84,7 +84,11 @@ void ExpandableToolButton::setDarkMode(bool darkMode)
 QSize ExpandableToolButton::sizeHint() const
 {
     int w = 36;
-    if (m_expanded && m_contentWidget && m_contentWidget->isVisible()) {
+    // Deliberately not m_contentWidget->isVisible(): while this button sits on
+    // the toolbar's off-screen page every ancestor is hidden, and reporting an
+    // expanded button as collapsed would make the width that drives paging
+    // oscillate. m_expanded already tracks the state on its own.
+    if (m_expanded && m_contentWidget) {
         w += CONTENT_SPACING + m_contentWidget->sizeHint().width();
     }
     return QSize(w, 36);

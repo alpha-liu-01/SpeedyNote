@@ -10,7 +10,7 @@
 #include "ui/sidebars/OutlinePanel.h" // Phase E.2: PDF outline panel
 #include "ui/sidebars/LeftSidebarContainer.h" // Phase S3: Left sidebar container
 #include "ui/sidebars/PagePanel.h" // Page Panel: Task 5.1
-#include "ui/DebugOverlay.h"        // Debug overlay (toggle with D key)
+#include "ui/DebugOverlay.h"        // Debug overlay (toggle with F12)
 #include "ui/StyleLoader.h"         // QSS stylesheet loader
 // Phase D: Subtoolbar includes
 #include "ui/subtoolbars/PenSubToolbar.h"
@@ -402,6 +402,7 @@ MainWindow::MainWindow(QWidget *parent)
         if (m_debugOverlay) {
             m_debugOverlay->setViewport(vp);
         }
+        applyPerfHudToViewport(vp);
         
         // REMOVED E.1: straightLineToggleButton moved to Toolbar - no longer need to sync button state
         
@@ -1075,7 +1076,8 @@ void MainWindow::setupUi() {
     // Debug Overlay (development tool)
     // ========================================
     // Create the debug overlay as a child of canvasContainer so it floats above the viewport.
-    // Toggle with 'D' key (defined in shortcuts below). Hidden by default in production.
+    // Toggle with F12 ("view.debug_overlay"); F10 ("view.perf_hud") turns on the
+    // paint statistics and shows this overlay. Hidden by default in production.
     m_debugOverlay = new DebugOverlay(canvasContainer);
     m_debugOverlay->move(10, 10);  // Position at top-left
 #ifdef SPEEDYNOTE_DEBUG
@@ -1365,6 +1367,7 @@ void MainWindow::setupUi() {
         if (m_debugOverlay) {
             m_debugOverlay->setViewport(currentViewport());
         }
+        applyPerfHudToViewport(currentViewport());
 
         // MAC.1: Establish initial document scope for the first tab. The
         // activeViewportChanged signal may have fired before ShortcutManager
@@ -1806,6 +1809,7 @@ void MainWindow::wireQActionDispatchers()
     // registry id). The macOS *menu item* is the only thing gated on
     // SPEEDYNOTE_DEBUG, in MacMenuBar::populateViewMenu (per QA Q4.3.a).
     wire("view.debug_overlay", [](MainWindow* w){ w->toggleDebugOverlay(); });
+    wire("view.perf_hud",      [](MainWindow* w){ w->togglePerfHud(); });
 
     // ----- OCR (MAC.6) -----
     // Each handler delegates to OcrSubToolbar's keyboard-shortcut entry points
@@ -2152,6 +2156,7 @@ void MainWindow::setupManagedShortcuts()
     bindAction("view.focus_right_pane");
     bindAction("view.fullscreen");
     bindAction("view.debug_overlay");
+    bindAction("view.perf_hud");
     // MAC.6: ocr.* + tab navigation bindings
     bindAction("ocr.scan_page");
     bindAction("ocr.scan_all");
@@ -8712,6 +8717,29 @@ void MainWindow::toggleDebugOverlay() {
     // Connect to current viewport if shown
     if (m_debugOverlay->isOverlayVisible()) {
         m_debugOverlay->setViewport(currentViewport());
+    }
+}
+
+void MainWindow::togglePerfHud() {
+    m_perfHudEnabled = !m_perfHudEnabled;
+    applyPerfHudToViewport(currentViewport());
+    
+    // There is no point collecting statistics the user cannot see.
+    if (m_perfHudEnabled && m_debugOverlay && !m_debugOverlay->isOverlayVisible()) {
+        m_debugOverlay->setViewport(currentViewport());
+        m_debugOverlay->show();
+    }
+}
+
+void MainWindow::applyPerfHudToViewport(DocumentViewport* viewport) {
+    if (!viewport) return;
+    
+    // Instrumentation lives on the viewport, so switching tabs or panes has to
+    // carry the setting across or the HUD would silently go blank.
+    if (m_perfHudEnabled) {
+        viewport->startBenchmark();
+    } else {
+        viewport->stopBenchmark();
     }
 }
 

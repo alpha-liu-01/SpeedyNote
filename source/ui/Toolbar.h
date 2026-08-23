@@ -4,6 +4,8 @@
 #include <QWidget>
 #include <QButtonGroup>
 #include <QColor>
+#include <QPoint>
+#include <QVector>
 #include "ToolbarButtons.h"
 #include "../core/ToolType.h"
 #include "../core/DocumentViewport.h"
@@ -30,6 +32,9 @@ class OcrSubToolbar;
 class Toolbar : public QWidget {
     Q_OBJECT
 
+    // Allow test class to access private members
+    friend class ToolbarButtonTests;
+
 public:
     explicit Toolbar(QWidget *parent = nullptr);
 
@@ -55,6 +60,14 @@ public:
 
     void setOcrAvailable(bool available);
 
+    /**
+     * @brief The wider single page plus one pager, not the whole row.
+     *
+     * Reporting the whole row would keep the window too wide to ever reach
+     * the width where paging takes over.
+     */
+    QSize minimumSizeHint() const override;
+
 signals:
     void toolSelected(ToolType tool);
     void objectInsertModeSelected(DocumentViewport::ObjectInsertMode mode);
@@ -65,6 +78,9 @@ signals:
 
 protected:
     void paintEvent(QPaintEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+    bool event(QEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private slots:
     void onOcrExpanded(bool expanded);
@@ -76,6 +92,35 @@ private:
     void collapseAllToolButtons();
 
     ExpandableToolButton* expandableForTool(ToolType tool) const;
+
+    QWidget* createGapWidget(int width);
+
+    int groupWidth(const QVector<QWidget*>& widgets) const;
+
+    /**
+     * @brief Width the button row wants right now, ignoring page visibility.
+     *
+     * Measured from size hints, so an expanded subtoolbar counts: picking a
+     * tool with a wide preset strip can be what tips the row into paging.
+     */
+    int naturalContentWidth() const;
+
+    /**
+     * @brief Enter or leave paged mode based on the current width.
+     */
+    void updatePagination();
+
+    void applyPageVisibility();
+    void setToolbarPage(int page);
+
+    /**
+     * @brief Switch to the page owning @p widget, if paging is active.
+     *
+     * Keeps a tool selected by shortcut from checking a button nobody can see.
+     */
+    void revealWidget(QWidget* widget);
+
+    void installSwipeFilter(QWidget* root);
 
     // Expandable tool buttons (own subtoolbar content)
     ExpandableToolButton *m_penExpandable;
@@ -101,6 +146,12 @@ private:
     // Tab-specific mode
     ThreeStateButton *m_touchGestureButton;
 
+    // Overflow paging
+    ActionButton *m_pagerBackButton = nullptr;
+    ActionButton *m_pagerNextButton = nullptr;
+    QVector<QWidget*> m_page1Widgets;
+    QVector<QWidget*> m_page2Widgets;
+
     // Tool group for exclusive selection
     QButtonGroup *m_toolGroup;
 
@@ -114,10 +165,20 @@ private:
 
     // State
     bool m_darkMode = false;
+    bool m_paged = false;
+    int m_currentPage = 0;
+    bool m_updatingPagination = false;
+    QPoint m_swipeStart;
+    bool m_swipeTracking = false;
+    bool m_swipeConsumed = false;
     QColor m_borderColor;
     ToolType m_currentTool = ToolType::Pen;
     DocumentViewport::ObjectInsertMode m_objectInsertMode =
         DocumentViewport::ObjectInsertMode::Image;
+
+    static constexpr int TOOLBAR_HEIGHT = 44;
+    static constexpr int PAGING_HYSTERESIS = 12;
+    static constexpr int SWIPE_THRESHOLD = 48;
 };
 
 #endif // TOOLBAR_H

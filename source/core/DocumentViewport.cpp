@@ -46,6 +46,7 @@
 #include <QSet>       // For efficient ID lookup in eraseAt
 #include <QClipboard>     // For clipboard access (O2.4)
 #include <QGuiApplication> // For clipboard access (O2.4)
+#include <QScreen>         // For refresh rate in the perf HUD context
 #include <QApplication>    // For focusWidget() - text input focus check
 #include <QLineEdit>       // For text input focus check
 #include <QTextEdit>       // For text input focus check
@@ -181,16 +182,6 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     setAttribute(Qt::WA_OpaquePaintEvent, true);
     setAttribute(Qt::WA_NoSystemBackground, true);
     setAutoFillBackground(false);
-    
-    // Benchmark display timer - triggers repaint to update paint rate counter
-    // Note: Debug overlay is now handled by DebugOverlay widget (source/ui/DebugOverlay.cpp)
-    connect(&m_benchmarkDisplayTimer, &QTimer::timeout, this, [this]() {
-        if (m_benchmarking) {
-            // DebugOverlay widget handles its own updates, but we may want
-            // to trigger viewport repaints for accurate paint rate measurement
-            // during benchmarking (disabled for now to avoid unnecessary repaints)
-        }
-    });
     
     // PDF preload timer - debounces preload requests during rapid scrolling
     m_pdfPreloadTimer = new QTimer(this);
@@ -2840,10 +2831,12 @@ QVector<int> DocumentViewport::visiblePages() const
 
 void DocumentViewport::paintEvent(QPaintEvent* event)
 {
-    // Benchmark: track paint timestamps (Task 2.6)
-    if (m_benchmarking) {
-        m_paintTimestamps.push_back(m_benchmarkTimer.elapsed());
-    }
+    // Perf instrumentation. Declared before the QPainter on purpose: the
+    // painter must be destroyed (and its work flushed) before the sampler's
+    // destructor takes the end timestamp. Recording from a destructor also
+    // means the early returns in the fast paths below are all measured.
+    ViewportPerfMonitor::FrameSampler perfSample(m_perf, event->rect(), size(),
+                                                 devicePixelRatioF());
     
     QPainter painter(this);
     // Note: Antialiasing is deferred until after gesture fast paths.
@@ -2855,8 +2848,10 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     if (m_gesture.isActive() && !m_gesture.cachedFrame.isNull() 
         && m_gesture.startZoom > 0) {  // Guard against division by zero
         
-        // Fill background (for areas outside transformed frame)
-        painter.fillRect(rect(), m_backgroundColor);
+        // Background is filled per branch below, not here: the pan path only
+        // needs the strip its shifted frame leaves exposed, whereas a scaled
+        // frame can leave a border of any shape. Nothing pre-clears for us,
+        // since WA_OpaquePaintEvent is set.
         
         // Calculate frame size in LOGICAL pixels (not physical)
         // grab() returns a pixmap at device pixel ratio, so we must divide by DPR
@@ -2869,6 +2864,9 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         painter.setRenderHint(QPainter::SmoothPixmapTransform, false);  // Speed over quality
         
         if (m_gesture.activeType == ViewportGestureState::Zoom) {
+            perfSample.setPath(ViewportPerfMonitor::FramePath::GestureZoom);
+            // A scaled frame can expose a border on any side, so clear it all.
+            painter.fillRect(rect(), m_backgroundColor);
             // ZOOM + PAN: Scale the cached frame around zoom center, with pan offset
             qreal relativeScale = m_gesture.targetZoom / m_gesture.startZoom;
             QSizeF scaledSize = logicalSize * relativeScale;
@@ -2893,12 +2891,27 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
             painter.drawPixmap(QRectF(scaledOrigin, scaledSize), m_gesture.cachedFrame, 
                               m_gesture.cachedFrame.rect());
         } else if (m_gesture.activeType == ViewportGestureState::Pan) {
+            perfSample.setPath(ViewportPerfMonitor::FramePath::GesturePan);
             // PAN: Shift the cached frame by pan delta
             // Pan delta in document coords → convert to viewport pixels
             QPointF panDeltaDoc = m_gesture.targetPan - m_gesture.startPan;
             QPointF panDeltaPixels = panDeltaDoc * m_gesture.startZoom * -1.0;  // Negate: pan offset increase = viewport moves opposite
             
+            // Note: no need to snap panDeltaPixels to whole device pixels. With
+            // SmoothPixmapTransform off, QRasterPaintEngine already quantises a
+            // pure-translate drawPixmap to the device pixel grid - verified by
+            // byte-comparing renders at fractional and integral offsets, which
+            // come out identical at both DPR 1 and DPR 2.
+            
+            // Clear only what the shifted frame won't cover.
+            fillBackgroundAround(painter, QRectF(panDeltaPixels, logicalSize));
+            
             painter.drawPixmap(panDeltaPixels, m_gesture.cachedFrame);
+        } else {
+            // Defensive: ViewportGestureState::ZoomAndPan is declared but never
+            // assigned. If that changes, clear rather than present a stale
+            // backing store.
+            painter.fillRect(rect(), m_backgroundColor);
         }
         
         // Skip normal rendering during gesture
@@ -2910,6 +2923,8 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     // This avoids re-rendering all tiles/pages, providing smooth transform performance.
     if (m_isTransformingSelection && !m_selectionBackgroundSnapshot.isNull() 
         && m_lassoSelection.isValid() && !m_skipSelectionRendering) {
+        
+        perfSample.setPath(ViewportPerfMonitor::FramePath::SelectionTransform);
         
         // Draw the cached background (viewport without selection)
         qreal dpr = m_backgroundSnapshotDpr;
@@ -2935,6 +2950,8 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     if ((m_isDraggingObjects || m_isResizingObject) 
         && !m_objectDragBackgroundSnapshot.isNull()
         && !m_skipSelectedObjectRendering) {
+        
+        perfSample.setPath(ViewportPerfMonitor::FramePath::ObjectDrag);
         
         // Draw the cached background (viewport without selected objects)
         qreal dpr = m_objectDragSnapshotDpr;
@@ -2978,7 +2995,7 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     // ========== EDGELESS MODE ==========
     // Edgeless uses tiled rendering instead of page-based rendering
     if (m_document->isEdgeless()) {
-        renderEdgelessMode(painter);
+        renderEdgelessMode(painter, dirtyRect);
         
         // Draw eraser cursor
         if (!m_isDrawing || !isPartialUpdate) {
@@ -3793,20 +3810,10 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
     // are now handled by MainWindow's QShortcut system so they work 
     // regardless of which widget has focus.
     
-    // ===== Debug Shortcut (kept as hardcoded - development only) =====
-#ifdef SPEEDYNOTE_DEBUG
-    // F10 = Toggle benchmark (debug builds only, conflicts with tool.pen in release)
-    if (event->key() == Qt::Key_F10) {
-        if (m_benchmarking) {
-            stopBenchmark();
-        } else {
-            startBenchmark();
-        }
-        update();
-        event->accept();
-        return;
-    }
-#endif
+    // ===== Note: perf HUD toggle moved to MainWindow =====
+    // The paint instrumentation toggle is registered as "view.perf_hud" in
+    // ShortcutManager so it works in release builds, is remappable, and does
+    // not require the viewport to hold keyboard focus.
     
     // Pass unhandled keys to parent
     QWidget::keyPressEvent(event);
@@ -14713,14 +14720,97 @@ void DocumentViewport::resetCurrentStrokeCache()
     m_cachePan = m_panOffset;
 }
 
+QRect DocumentViewport::currentStrokeTailRect(int fromIndex, const QTransform& toCache) const
+{
+    const int n = static_cast<int>(m_currentStroke.points.size());
+    if (fromIndex < 0 || fromIndex >= n) {
+        return QRect();
+    }
+    
+    qreal minX = m_currentStroke.points[fromIndex].pos.x();
+    qreal maxX = minX;
+    qreal minY = m_currentStroke.points[fromIndex].pos.y();
+    qreal maxY = minY;
+    for (int i = fromIndex + 1; i < n; ++i) {
+        const QPointF& pos = m_currentStroke.points[i].pos;
+        minX = qMin(minX, pos.x());
+        maxX = qMax(maxX, pos.x());
+        minY = qMin(minY, pos.y());
+        maxY = qMax(maxY, pos.y());
+    }
+    
+    // A full thickness of padding: half covers the outline's own half-width at
+    // maximum pressure, the rest absorbs the Catmull-Rom curve bowing outside the
+    // control points it was built from.
+    const qreal pad = m_currentStroke.baseThickness + 2.0;
+    const QRectF bounds(minX - pad, minY - pad,
+                        (maxX - minX) + pad * 2.0, (maxY - minY) + pad * 2.0);
+    
+    // Two more pixels after mapping for the antialiased fringe.
+    return toCache.mapRect(bounds).toAlignedRect().adjusted(-2, -2, 2, 2)
+        .intersected(QRect(0, 0, width(), height()));
+}
+
+QVector<QPair<int, int>> DocumentViewport::currentStrokeRangesTouching(
+    const QRect& cacheRect, const QTransform& toCache) const
+{
+    QVector<QPair<int, int>> runs;
+    const int n = static_cast<int>(m_currentStroke.points.size());
+    if (n < 2) {
+        return runs;
+    }
+    
+    // Same padding the target region was built with, so a segment is only
+    // discarded when its outline cannot reach the region.
+    const qreal pad = m_currentStroke.baseThickness + 2.0;
+    const QRectF target(cacheRect);
+    
+    // Testing segments rather than points keeps a long segment that merely
+    // passes through the region from being missed.
+    int runStart = -1;
+    for (int i = 0; i + 1 < n; ++i) {
+        const QPointF& a = m_currentStroke.points[i].pos;
+        const QPointF& b = m_currentStroke.points[i + 1].pos;
+        const QRectF box(QPointF(qMin(a.x(), b.x()) - pad, qMin(a.y(), b.y()) - pad),
+                         QPointF(qMax(a.x(), b.x()) + pad, qMax(a.y(), b.y()) + pad));
+        
+        if (toCache.mapRect(box).intersects(target)) {
+            if (runStart < 0) {
+                runStart = i;
+            }
+        } else if (runStart >= 0) {
+            runs.append({runStart, i});
+            runStart = -1;
+        }
+    }
+    if (runStart >= 0) {
+        runs.append({runStart, n - 1});
+    }
+    
+    // Widen each run with curve context and merge the runs that meet, so every
+    // repainted segment sees the neighbours a full-stroke render would give it.
+    QVector<QPair<int, int>> merged;
+    merged.reserve(runs.size());
+    for (const QPair<int, int>& run : runs) {
+        const int first = qMax(0, run.first - STROKE_TAIL_CONTEXT_POINTS);
+        const int last = qMin(n - 1, run.second + STROKE_TAIL_CONTEXT_POINTS);
+        if (!merged.isEmpty() && first <= merged.last().second + 1) {
+            merged.last().second = qMax(merged.last().second, last);
+        } else {
+            merged.append({first, last});
+        }
+    }
+    return merged;
+}
+
 void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
 {
     // ========== In-Progress Stroke Rendering ==========
     // Renders the current stroke to m_currentStrokeCache using the same
     // VectorLayer::renderStroke() path as finalized strokes, giving it
-    // Catmull-Rom smoothed curves. The cache is re-rendered when new
-    // points arrive (tracked via m_lastRenderedPointIndex) and reused
-    // for repaints where no new points were added.
+    // Catmull-Rom smoothed curves. New points rewrite only the tail of the
+    // cache (tracked via m_lastRenderedPointIndex); repaints that added no
+    // points reuse it as-is.
     
     const int n = static_cast<int>(m_currentStroke.points.size());
     if (n < 1) return;
@@ -14779,40 +14869,75 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
     int strokeAlpha = m_currentStroke.color.alpha();
     bool hasSemiTransparency = (strokeAlpha < 255);
     
-    // Re-render the full stroke to cache when new points arrive.
-    // Uses VectorLayer::renderStroke() for Catmull-Rom smoothed curves,
-    // giving the in-progress stroke the same visual quality as finalized strokes.
-    // Performance: a single stroke with ~100-300 points renders in <1ms.
+    // Update the cache when new points arrive, rewriting only the tail whose
+    // shape can still change and leaving the settled prefix in place. Redrawing
+    // the whole stroke per point costs O(n) each frame and O(n^2) across the
+    // stroke, which is what drags a long stroke below 1 fps on slower tablets.
     if (n > m_lastRenderedPointIndex && n >= 2) {
-        m_currentStrokeCache.fill(Qt::transparent);
-        
-        QPainter cachePainter(&m_currentStrokeCache);
-        cachePainter.setRenderHint(QPainter::Antialiasing, true);
-        
-        // Snap page/tile origin to integer physical pixel (see comment above)
-        cachePainter.translate(snapTxLogical, snapTyLogical);
-        
-        // Apply transform to convert coords to viewport coords
-        // The cache is in viewport coordinates (widget pixels)
-        cachePainter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
-        cachePainter.scale(m_zoomLevel, m_zoomLevel);
-        
-        // For paged mode, translate to page position
-        // For edgeless, stroke points are already in document coords - no extra translate
+        // Same mapping the cache was rasterized with, kept as a QTransform so the
+        // tail bounds can be carried into cache pixels by exactly that mapping.
+        QTransform toCache;
+        toCache.translate(snapTxLogical, snapTyLogical);
+        toCache.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
+        toCache.scale(m_zoomLevel, m_zoomLevel);
         if (!isEdgeless) {
-            cachePainter.translate(snapOrigin);
+            toCache.translate(snapOrigin.x(), snapOrigin.y());
         }
         
-        // Render using the same path as finalized strokes (Catmull-Rom smoothing).
-        // For semi-transparent strokes, create a copy with full opacity (alpha
-        // is applied during the blit step below). For opaque strokes, render
-        // directly to avoid copying the stroke's point vector.
-        if (hasSemiTransparency) {
-            VectorStroke drawStroke = m_currentStroke;
-            drawStroke.color.setAlpha(255);
-            VectorLayer::renderStroke(cachePainter, drawStroke);
+        // Everything drawn into the cache is fully opaque; the stroke's own alpha
+        // is applied once at blit time, so overlapping ranges, caps and joints
+        // cannot compound and repainting a region twice is harmless.
+        auto renderRange = [&](QPainter& cachePainter, int first, int last) {
+            // Copying the stroke shares its point vector, so slicing a range out
+            // of the copy costs only that range.
+            VectorStroke segment = m_currentStroke;
+            segment.points = m_currentStroke.points.mid(first, last - first + 1);
+            if (hasSemiTransparency) {
+                segment.color.setAlpha(255);
+            }
+            VectorLayer::renderStroke(cachePainter, segment);
+        };
+        
+        // A reset cache holds nothing, so there is no settled content to preserve.
+        if (m_lastRenderedPointIndex <= 0) {
+            m_currentStrokeCache.fill(Qt::transparent);
+            
+            QPainter cachePainter(&m_currentStrokeCache);
+            cachePainter.setRenderHint(QPainter::Antialiasing, true);
+            cachePainter.setWorldTransform(toCache);
+            renderRange(cachePainter, 0, n - 1);
         } else {
-            VectorLayer::renderStroke(cachePainter, m_currentStroke);
+            // Whatever the previous render left volatile has to be redone, along
+            // with every point added since.
+            const int redrawFrom =
+                qBound(0, m_lastRenderedPointIndex - 1 - STROKE_TAIL_VOLATILE_POINTS, n - 1);
+            const QRect tailRect = currentStrokeTailRect(redrawFrom, toCache);
+            
+            // An empty rect means the new points are off-screen; the cache only
+            // spans the viewport, so there is nothing to repaint.
+            if (!tailRect.isEmpty()) {
+                // Clearing the region also removes any older part of the stroke
+                // that crosses it, so the repaint covers every range reaching in,
+                // not just the tail.
+                const QVector<QPair<int, int>> ranges =
+                    currentStrokeRangesTouching(tailRect, toCache);
+                
+                QPainter cachePainter(&m_currentStrokeCache);
+                cachePainter.setCompositionMode(QPainter::CompositionMode_Clear);
+                cachePainter.fillRect(tailRect, Qt::transparent);
+                cachePainter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+                
+                // A hard-edged clip keeps settled pixels outside the region
+                // untouched, and the context points make the geometry inside it
+                // identical to a full render, so the two meet without a seam.
+                cachePainter.setClipRect(tailRect);
+                cachePainter.setRenderHint(QPainter::Antialiasing, true);
+                cachePainter.setWorldTransform(toCache);
+                
+                for (const QPair<int, int>& range : ranges) {
+                    renderRange(cachePainter, range.first, range.second);
+                }
+            }
         }
         
         m_lastRenderedPointIndex = n;
@@ -14995,6 +15120,49 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
         QRectF dirtyRectF(viewportPos.x() - eraserRadius, viewportPos.y() - eraserRadius,
                           eraserRadius * 2, eraserRadius * 2);
         update(QRegion(dirtyRectF.toAlignedRect(), QRegion::Ellipse));
+    }
+}
+
+void DocumentViewport::fillBackgroundAround(QPainter& painter, const QRectF& coveredLogical)
+{
+    const QRect vp = rect();
+    
+    // Round inward: only pixels certain to be overdrawn may be skipped, so a
+    // fractional edge ends up in a band instead of becoming an unfilled seam.
+    const int left = static_cast<int>(std::ceil(coveredLogical.left()));
+    const int top = static_cast<int>(std::ceil(coveredLogical.top()));
+    const int right = static_cast<int>(std::floor(coveredLogical.left() + coveredLogical.width()));
+    const int bottom = static_cast<int>(std::floor(coveredLogical.top() + coveredLogical.height()));
+    const QRect covered = QRect(left, top, std::max(0, right - left),
+                                std::max(0, bottom - top)).intersected(vp);
+    
+    if (covered.isEmpty()) {
+        // Panned further than a full viewport: nothing survives, clear it all.
+        painter.fillRect(vp, m_backgroundColor);
+        return;
+    }
+    
+    // Top and bottom bands span the full width; the side bands cover only the
+    // remaining vertical extent. Together with `covered` these tile the
+    // viewport exactly - no overlap, no gap.
+    if (covered.top() > vp.top()) {
+        painter.fillRect(QRect(vp.left(), vp.top(), vp.width(), covered.top() - vp.top()),
+                         m_backgroundColor);
+    }
+    if (covered.bottom() < vp.bottom()) {
+        painter.fillRect(QRect(vp.left(), covered.bottom() + 1, vp.width(),
+                               vp.bottom() - covered.bottom()),
+                         m_backgroundColor);
+    }
+    if (covered.left() > vp.left()) {
+        painter.fillRect(QRect(vp.left(), covered.top(), covered.left() - vp.left(),
+                               covered.height()),
+                         m_backgroundColor);
+    }
+    if (covered.right() < vp.right()) {
+        painter.fillRect(QRect(covered.right() + 1, covered.top(),
+                               vp.right() - covered.right(), covered.height()),
+                         m_backgroundColor);
     }
 }
 
@@ -16665,36 +16833,75 @@ int DocumentViewport::getMaxAffinity() const
     }
 }
 
-// ===== Benchmark (Task 2.6) =====
+// ===== Performance Instrumentation =====
 
 void DocumentViewport::startBenchmark()
 {
-    m_benchmarking = true;
-    m_paintTimestamps.clear();
-    m_benchmarkTimer.start();
-    
-    // Start periodic display updates (1000ms = 1 update/sec)
-    m_benchmarkDisplayTimer.start(1000);
+    m_perf.setEnabled(true);
 }
 
 void DocumentViewport::stopBenchmark()
 {
-    m_benchmarking = false;
-    m_benchmarkDisplayTimer.stop();
+    m_perf.setEnabled(false);
 }
 
 int DocumentViewport::getPaintRate() const
 {
-    if (!m_benchmarking) return 0;
+    return m_perf.stats(ViewportPerfMonitor::Bucket::All).frames;
+}
+
+DocumentViewport::PerfContext DocumentViewport::perfContext() const
+{
+    PerfContext ctx;
     
-    qint64 now = m_benchmarkTimer.elapsed();
+    const qreal dpr = devicePixelRatioF();
+    ctx.viewportLogical = size();
+    ctx.viewportPhysical = QSize(qRound(width() * dpr), qRound(height() * dpr));
+    ctx.devicePixelRatio = dpr;
     
-    // Remove timestamps older than 1 second
-    while (!m_paintTimestamps.empty() && now - m_paintTimestamps.front() > 1000) {
-        m_paintTimestamps.pop_front();
+    if (const QScreen* s = screen()) {
+        ctx.screenRefreshRate = s->refreshRate();
     }
     
-    return static_cast<int>(m_paintTimestamps.size());
+    ctx.strokeCacheTier = QStringLiteral("n/a");
+    if (!m_document) {
+        return ctx;
+    }
+    
+    // Reproduce what renderPage/dispatchTileLayer would pick for the content
+    // the user is currently looking at.
+    QSizeF tileSize;
+    QPointF tileOrigin;
+    bool haveTile = false;
+    
+    if (m_document->isEdgeless()) {
+        const int tilePx = Document::EDGELESS_TILE_SIZE;
+        const QPointF center = visibleRect().center();
+        tileOrigin = QPointF(std::floor(center.x() / tilePx) * tilePx,
+                             std::floor(center.y() / tilePx) * tilePx);
+        tileSize = QSizeF(tilePx, tilePx);
+        haveTile = true;
+    } else if (Page* page = m_document->page(currentPageIndex())) {
+        tileOrigin = pagePosition(currentPageIndex());
+        tileSize = page->size;
+        haveTile = true;
+    }
+    
+    if (haveTile) {
+        switch (chooseRenderTier(tileSize, visibleRect().translated(-tileOrigin), nullptr)) {
+        case VectorLayer::RenderTier::Capped:
+            ctx.strokeCacheTier = QStringLiteral("Capped");
+            break;
+        case VectorLayer::RenderTier::Focus:
+            ctx.strokeCacheTier = QStringLiteral("Focus");
+            break;
+        case VectorLayer::RenderTier::Direct:
+            ctx.strokeCacheTier = QStringLiteral("Direct");
+            break;
+        }
+    }
+    
+    return ctx;
 }
 
 // ===== Rendering Helpers (Task 1.3.3) =====
@@ -16916,12 +17123,21 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
 
 // ===== Edgeless Mode Rendering (Phase E2) =====
 
-void DocumentViewport::renderEdgelessMode(QPainter& painter)
+void DocumentViewport::renderEdgelessMode(QPainter& painter, const QRect& dirtyRect)
 {
     if (!m_document || !m_document->isEdgeless()) return;
     
-    // Get visible rect in document coordinates
-    QRectF viewRect = visibleRect();
+    // Confine the tile walk to the damaged area. Qt clips the rasterization
+    // either way, but every visible tile's background pattern, stroke layers and
+    // objects were still being walked and issued each frame - so a live stroke,
+    // whose dirty rect is a few pixels across, paid for the whole viewport.
+    // Widened slightly so rounding cannot drop a tile that just reaches in.
+    const QRectF dirtyF(dirtyRect);
+    const qreal slack = 2.0 / m_zoomLevel;
+    const QRectF dirtyDoc = QRectF(viewportToDocument(dirtyF.topLeft()),
+                                   viewportToDocument(dirtyF.bottomRight()))
+                                .adjusted(-slack, -slack, slack, slack);
+    const QRectF viewRect = visibleRect().intersected(dirtyDoc);
     
     // ========== TILE RENDERING STRATEGY ==========
     // With stroke splitting, cross-tile strokes are stored as separate segments in each tile.
@@ -16939,8 +17155,14 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
     
     // CR-5: Single tilesInRect() call - use total margin for all tiles
     // Background pass will filter to viewRect bounds
-    QRectF strokeRect = viewRect.adjusted(-totalMargin, -totalMargin, totalMargin, totalMargin);
-    QVector<Document::TileCoord> allTiles = m_document->tilesInRect(strokeRect);
+    // An empty viewRect means nothing damaged intersects the canvas; leaving the
+    // tile list empty skips every tile pass below while the overlays and the
+    // in-progress stroke at the end of this function still run.
+    QVector<Document::TileCoord> allTiles;
+    if (!viewRect.isEmpty()) {
+        QRectF strokeRect = viewRect.adjusted(-totalMargin, -totalMargin, totalMargin, totalMargin);
+        allTiles = m_document->tilesInRect(strokeRect);
+    }
     
     // Pre-calculate visible tile range for background filtering
     int tileSize = Document::EDGELESS_TILE_SIZE;
