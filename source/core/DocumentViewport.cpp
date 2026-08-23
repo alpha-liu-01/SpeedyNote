@@ -2906,7 +2906,15 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
             // Clear only what the shifted frame won't cover.
             fillBackgroundAround(painter, QRectF(panDeltaPixels, logicalSize));
             
-            painter.drawPixmap(panDeltaPixels, m_gesture.cachedFrame);
+            // DIAGNOSTIC (see BlitProbe): while benchmarking, time this blit
+            // against the same one into heap memory. It doubles the blit work,
+            // so the Pan bucket's own timings are inflated whenever the perf HUD
+            // is on - read the Blit line, not Pan, when interpreting this.
+            if (m_perf.isEnabled()) {
+                runBlitProbe(painter, panDeltaPixels);
+            } else {
+                painter.drawPixmap(panDeltaPixels, m_gesture.cachedFrame);
+            }
         } else {
             // Defensive: ViewportGestureState::ZoomAndPan is declared but never
             // assigned. If that changes, clear rather than present a stale
@@ -15142,6 +15150,56 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
     }
 }
 
+void DocumentViewport::runBlitProbe(QPainter& painter, const QPointF& offset)
+{
+    if (m_gesture.cachedFrame.isNull()) {
+        return;
+    }
+    
+    // A QPixmap matches the backing store's pixel format on the raster platform,
+    // so the only variable left between the two blits is which memory is written.
+    if (m_blitProbeTarget.size() != m_gesture.cachedFrame.size()) {
+        m_blitProbeTarget = QPixmap(m_gesture.cachedFrame.size());
+        m_blitProbeTarget.setDevicePixelRatio(m_gesture.cachedFrame.devicePixelRatio());
+        m_blitProbeTarget.fill(Qt::white);
+    }
+    
+    QElapsedTimer timer;
+    qreal storeMs = 0.0;
+    qreal heapMs = 0.0;
+    
+    auto blitToStore = [&]() {
+        timer.start();
+        painter.drawPixmap(offset, m_gesture.cachedFrame);
+        storeMs = timer.nsecsElapsed() / 1e6;
+    };
+    
+    auto blitToHeap = [&]() {
+        QPainter heapPainter(&m_blitProbeTarget);
+        heapPainter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        // Constructed before the clock starts and destroyed after it stops, so
+        // painter setup and teardown stay out of the measurement.
+        timer.start();
+        heapPainter.drawPixmap(offset, m_gesture.cachedFrame);
+        heapMs = timer.nsecsElapsed() / 1e6;
+    };
+    
+    if (m_blitProbeHeapFirst) {
+        blitToHeap();
+        blitToStore();
+    } else {
+        blitToStore();
+        blitToHeap();
+    }
+    m_blitProbeHeapFirst = !m_blitProbeHeapFirst;
+    
+    // Cumulative mean, so a sustained pan converges rather than tracking the
+    // most recent frame.
+    ++m_blitProbe.frames;
+    m_blitProbe.storeMs += (storeMs - m_blitProbe.storeMs) / m_blitProbe.frames;
+    m_blitProbe.heapMs += (heapMs - m_blitProbe.heapMs) / m_blitProbe.frames;
+}
+
 void DocumentViewport::fillBackgroundAround(QPainter& painter, const QRectF& coveredLogical)
 {
     const QRect vp = rect();
@@ -16870,11 +16928,16 @@ int DocumentViewport::getMaxAffinity() const
 void DocumentViewport::startBenchmark()
 {
     m_perf.setEnabled(true);
+    m_blitProbe = BlitProbe{};
 }
 
 void DocumentViewport::stopBenchmark()
 {
     m_perf.setEnabled(false);
+    // Release the probe's viewport-sized scratch pixmap; it is only wanted while
+    // measuring, and on a small tablet it is several megabytes.
+    m_blitProbe = BlitProbe{};
+    m_blitProbeTarget = QPixmap();
 }
 
 int DocumentViewport::getPaintRate() const

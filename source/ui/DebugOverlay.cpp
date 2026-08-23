@@ -265,6 +265,7 @@ QSize DebugOverlay::perfModeSize() const
         "Compose: 9999.9 fps | paint 9999.9ms avg, 9999.9 p95, 9999.9 max (99s ago)\n"
         "Partial: 9999.9 fps | paint 9999.9ms avg, 9999.9 p95, 9999.9 max (99s ago)\n"
         "Fill:    99999 Mpix/s | 99.99 MP/frame\n"
+        "Blit:    store 999.99ms | heap 999.99ms | 999.99x | 99999 frames\n"
         "Verdict: PRESENT-BOUND - paint 9999.9 of 9999.9ms, residual 9999.9ms\n"
         "Surface: 99999x99999 phys @9.99dpr | vp 99999x99999 | 999.9Hz | tier Capped");
     
@@ -340,6 +341,20 @@ QString DebugOverlay::generatePerfInfo() const
                      .arg(s.residualMs, 0, 'f', 1);
     } else {
         lines << QStringLiteral("Fill:    - (pan or scroll to collect samples)");
+    }
+    
+    // DIAGNOSTIC (see DocumentViewport::BlitProbe): the same cached-frame blit
+    // timed into the backing store and into heap memory. A large ratio means the
+    // backing store's memory is what costs, not the rasterizer.
+    const DocumentViewport::BlitProbe blit = m_viewport->blitProbe();
+    if (blit.frames > 0) {
+        lines << QStringLiteral("Blit:    store %1ms | heap %2ms | %3x | %4 frames")
+                     .arg(blit.storeMs, 0, 'f', 2)
+                     .arg(blit.heapMs, 0, 'f', 2)
+                     .arg(blit.heapMs > 0.0 ? blit.storeMs / blit.heapMs : 0.0, 0, 'f', 2)
+                     .arg(blit.frames);
+    } else {
+        lines << QStringLiteral("Blit:    - (touch-pan to collect samples)");
     }
     
     // Physical viewport pixels are what the rasterizer actually fills, and the

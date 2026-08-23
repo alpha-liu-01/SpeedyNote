@@ -927,6 +927,29 @@ public:
         qreal screenRefreshRate = 0.0;  ///< Panel refresh rate in Hz, 0 if unknown
         QString strokeCacheTier;    ///< Capped / Focus / Direct for the visible page
     };
+
+    /**
+     * @brief Result of the backing-store versus heap blit comparison.
+     *
+     * DIAGNOSTIC - remove once the question below is answered.
+     *
+     * The gesture-pan blit costs about 0.9 ms per megapixel on Windows and
+     * 4.6 on Android running the same Snapdragon silicon, and only improves
+     * from 7.3 to 4.6 across the five-year gap from a Cortex-A9 to a
+     * Cortex-A75. A cost that barely tracks CPU generation is not CPU
+     * throughput, which leaves the memory being written or a scalar code path.
+     * Timing the identical blit into the widget's backing store and into a
+     * heap pixmap separates those: a large ratio indicts the backing store's
+     * memory, and near-parity indicts Qt's ARM raster build.
+     */
+    struct BlitProbe {
+        qreal storeMs = 0.0;  ///< Mean ms blitting the cached frame to the backing store
+        qreal heapMs = 0.0;   ///< Mean ms for the same blit into heap memory
+        int frames = 0;       ///< Frames accumulated; 0 means nothing sampled yet
+    };
+
+    /// @brief Blit comparison collected during gesture pans while benchmarking.
+    BlitProbe blitProbe() const { return m_blitProbe; }
     
     /**
      * @brief Collect the display and render-tier context for the perf HUD.
@@ -3141,6 +3164,26 @@ private:
      * region by this much, or it will miss strokes bulging in from a neighbour.
      */
     static constexpr int EDGELESS_STROKE_MARGIN = 100;
+    
+    // ===== DIAGNOSTIC: backing store versus heap blit cost =====
+    // Remove along with runBlitProbe() and the HUD line once resolved.
+    // See the BlitProbe docs above for what this is asking and why.
+    QPixmap m_blitProbeTarget;        ///< Heap-resident destination, cached-frame sized
+    BlitProbe m_blitProbe;            ///< Running means, reset when benchmarking toggles
+    bool m_blitProbeHeapFirst = false; ///< Alternates so neither side always finds a warm source
+    
+    /**
+     * @brief Time the cached-frame blit into the backing store and into heap memory.
+     * @param painter The viewport painter, positioned as the pan branch left it.
+     * @param offset Where the cached frame is being drawn, in logical pixels.
+     *
+     * Performs the real blit, so the pan still renders correctly, plus one
+     * throwaway blit into @ref m_blitProbeTarget. Only the ratio is meaningful,
+     * so both are timed identically and the order alternates per frame: two
+     * back-to-back blits of an 8 MB source would otherwise leave it cached for
+     * whichever ran second and manufacture the difference we are looking for.
+     */
+    void runBlitProbe(QPainter& painter, const QPointF& offset);
     
     // ===== Undo/Redo State (unified) =====
     QStack<UndoAction> m_undoStack;   ///< Global undo stack (both paged and edgeless)
