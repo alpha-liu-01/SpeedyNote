@@ -244,6 +244,22 @@ struct PageHit {
 };
 
 /**
+ * @brief Whether two PDF page identities denote the same rendered image.
+ *
+ * Shared by the render cache and the in-flight registry, so a hit in one can
+ * never disagree with a miss in the other.
+ */
+inline bool samePdfPage(const QString& sourceA, int pageA, qreal dpiA,
+                        const QString& sourceB, int pageB, qreal dpiB)
+{
+    // Note: qFuzzyCompare doesn't work well near 0, so use relative comparison
+    if (sourceA != sourceB) return false;
+    if (pageA != pageB) return false;
+    if (dpiA == 0 || dpiB == 0) return dpiA == dpiB;
+    return qFuzzyCompare(dpiA, dpiB);
+}
+
+/**
  * @brief Cache entry for a rendered PDF page (Task 1.3.6).
  */
 struct PdfCacheEntry {
@@ -254,11 +270,24 @@ struct PdfCacheEntry {
     
     bool isValid() const { return pageIndex >= 0 && !pixmap.isNull(); }
     bool matches(const QString& source, int page, qreal targetDpi) const {
-        // Note: qFuzzyCompare doesn't work well near 0, so use relative comparison
-        if (sourceId != source) return false;
-        if (pageIndex != page) return false;
-        if (dpi == 0 || targetDpi == 0) return dpi == targetDpi;
-        return qFuzzyCompare(dpi, targetDpi);
+        return samePdfPage(sourceId, pageIndex, dpi, source, page, targetDpi);
+    }
+};
+
+/**
+ * @brief A PDF page render currently running on a worker thread.
+ *
+ * Lets the paint path tell "not cached" apart from "not cached yet, but
+ * already being produced", so it can wait for the worker instead of
+ * rasterizing the same page inline and blocking the UI.
+ */
+struct PdfRenderKey {
+    QString sourceId;       ///< PDF source id (empty = primary source)
+    int pageIndex = -1;     ///< Which page is being rendered
+    qreal dpi = 0;          ///< DPI it was requested at
+    
+    bool matches(const QString& source, int page, qreal targetDpi) const {
+        return samePdfPage(sourceId, pageIndex, dpi, source, page, targetDpi);
     }
 };
 
@@ -3071,6 +3100,46 @@ private:
     QList<QFutureWatcher<QImage>*> m_activePdfWatchers;  ///< Active async render operations (returns QImage for thread safety)
     static constexpr int PDF_PRELOAD_DELAY_MS = 150;   ///< Debounce delay (ms) before preloading
 
+    /**
+     * @brief Ceiling on page renders outstanding at once.
+     *
+     * Enough to cover the visible pages and their neighbours, low enough that a
+     * fast pan cannot bury the page being landed on under a queue of renders
+     * for pages already scrolled past.
+     */
+    static constexpr int MAX_CONCURRENT_PDF_RENDERS = 4;
+
+    /**
+     * @brief Page renders handed to a worker thread and not yet finished.
+     *
+     * Main-thread only - every site that touches it (doAsyncPdfPreload, the
+     * watcher's finished handler, invalidatePdfCache and the paint path) runs
+     * there, so it needs no mutex of its own. Holds a handful of entries at
+     * most, hence the linear scan, matching how m_pdfCache is searched.
+     *
+     * An entry that is never removed makes its page permanently unrenderable,
+     * so removal is unconditional; see the finished handler.
+     */
+    QVector<PdfRenderKey> m_pdfRendersInFlight;
+
+    /**
+     * @brief Page-index jump per input event above which motion counts as fast.
+     *
+     * A pan or wheel scroll moves in document units, so it crosses no pages on
+     * most events and one occasionally. A scroll-bar drag maps the whole
+     * document onto a few hundred pixels, so on a long document even a gentle
+     * drag jumps several pages an event. Two cleanly separates them.
+     */
+    static constexpr int MOTION_PRELOAD_MAX_PAGE_STEP = 2;
+
+    /**
+     * @brief First visible page at the previous preloadForMotion() call.
+     *
+     * -1 means no motion is in progress, so the next call has no travel rate to
+     * judge and goes ahead.
+     */
+    int m_motionPreloadFirstPage = -1;
+
     // ===== Scroll-activity gate (SP1) =====
     // The immediate-pan route (wheel/touchpad/scroll-bar) marks itself active on
     // every event and restarts m_scrollSettleTimer; when it fires we run the
@@ -3261,6 +3330,25 @@ private:
      * it is safe to call on the paint path while scrolling (see isScrolling()).
      */
     QPixmap lookupCachedPdfPage(const QString& sourceId, int pageIndex, qreal dpi) const;
+
+    /**
+     * @brief Whether a worker is already rendering this page.
+     *
+     * The paint path uses this to avoid rasterizing inline something that is
+     * about to arrive anyway; the render's completion handler repaints.
+     */
+    bool isPdfRenderInFlight(const QString& sourceId, int pageIndex, qreal dpi) const;
+
+    /// Note a render handed to a worker. Pairs with clearPdfRenderInFlight().
+    void markPdfRenderInFlight(const QString& sourceId, int pageIndex, qreal dpi);
+
+    /**
+     * @brief Forget a render, whether it succeeded, failed or was cancelled.
+     *
+     * Must be called on every exit path of the render's completion handler: a
+     * stale entry permanently suppresses inline rasterization of that page.
+     */
+    void clearPdfRenderInFlight(const QString& sourceId, int pageIndex, qreal dpi);
     
     /**
      * @brief Request PDF preload (debounced).
@@ -3273,6 +3361,29 @@ private:
      * Called by timer after debounce delay. Runs in background threads.
      */
     void doAsyncPdfPreload();
+
+    /**
+     * @brief Preload while the view is moving, unless it is moving too fast.
+     *
+     * Starts renders for pages coming into view so they are resident before the
+     * repaint that needs them, which is what keeps a pan from freezing on a
+     * page render when it stops. Declines when the view is travelling faster
+     * than MOTION_PRELOAD_MAX_PAGE_STEP pages an event, because nothing started
+     * then is still on screen by the time it finishes - that case belongs to
+     * the SP1 settle handler. Call from motion, not from settle handlers.
+     */
+    void preloadForMotion();
+
+    /**
+     * @brief Whether a PDF page currently intersects the viewport.
+     * @param sourceId PDF source the page belongs to.
+     * @param pdfPageNum Page number within that source.
+     *
+     * Matched by source and page number, not document page index, because one
+     * PDF page can back several document pages. While a pan gesture is running
+     * this answers for the gesture target, which is what gets painted.
+     */
+    bool isPdfPageVisible(const QString& sourceId, int pdfPageNum);
 
     /**
      * @brief Mark the immediate-pan route as actively scrolling (SP1).
