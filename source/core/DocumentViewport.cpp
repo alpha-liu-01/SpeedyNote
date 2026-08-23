@@ -2167,28 +2167,28 @@ InsertedObject* DocumentViewport::objectAtPoint(const QPointF& docPoint) const
         // Edgeless mode: use viewport-level active layer index
         affinityFilter = m_edgelessActiveLayerIndex - 1;
         
-        // Edgeless mode: check all loaded tiles
-        // Objects are stored with tile-local coordinates
-        for (const auto& coord : m_document->allLoadedTileCoords()) {
-            Page* tile = m_document->getTile(coord.first, coord.second);
-            if (!tile) continue;
-            
-            // Convert document coords to tile-local coords
-            QPointF tileLocal = docPoint - QPointF(
-                coord.first * Document::EDGELESS_TILE_SIZE,
-                coord.second * Document::EDGELESS_TILE_SIZE
-            );
-            
-            // Check if point is within tile bounds (optimization)
-            if (tileLocal.x() < 0 || tileLocal.y() < 0 ||
-                tileLocal.x() > Document::EDGELESS_TILE_SIZE ||
-                tileLocal.y() > Document::EDGELESS_TILE_SIZE) {
-                // Point not in this tile, but object might extend beyond tile
-                // Still check - Page::objectAtPoint handles this
-            }
-            
-            if (InsertedObject* obj = tile->objectAtPoint(tileLocal, affinityFilter)) {
-                return obj;
+        // Objects are anchored in tile-local coordinates but may extend past
+        // their own tile, so a point can be covered by an object anchored up to
+        // maxObjectExtent away - and only by those. Walking every loaded tile
+        // made hit-testing proportional to canvas size on every pointer move,
+        // which the object tools do while merely hovering.
+        const int tileSize = Document::EDGELESS_TILE_SIZE;
+        const qreal reach = m_document->maxObjectExtent();
+        const int minTx = static_cast<int>(std::floor((docPoint.x() - reach) / tileSize));
+        const int maxTx = static_cast<int>(std::floor((docPoint.x() + reach) / tileSize));
+        const int minTy = static_cast<int>(std::floor((docPoint.y() - reach) / tileSize));
+        const int maxTy = static_cast<int>(std::floor((docPoint.y() + reach) / tileSize));
+        
+        for (int tx = minTx; tx <= maxTx; ++tx) {
+            for (int ty = minTy; ty <= maxTy; ++ty) {
+                Page* tile = m_document->getTile(tx, ty);
+                if (!tile) continue;
+                
+                const QPointF tileLocal =
+                    docPoint - QPointF(tx * tileSize, ty * tileSize);
+                if (InsertedObject* obj = tile->objectAtPoint(tileLocal, affinityFilter)) {
+                    return obj;
+                }
             }
         }
     } else {
@@ -11125,8 +11125,14 @@ void DocumentViewport::finalizeLassoSelection()
         
         m_lassoSelection.sourceLayerIndex = m_edgelessActiveLayerIndex;
         
-        // Get all loaded tiles
-        auto tiles = m_document->allLoadedTileCoords();
+        // Only tiles the lasso reaches can contribute, and within those, a stroke
+        // whose bounds miss the lasso cannot intersect it. Both rejections come
+        // before the per-point copy below, which used to be paid for every stroke
+        // on the canvas no matter how small the lasso was.
+        const QRectF lassoBounds = m_lassoPath.boundingRect();
+        const QVector<Document::TileCoord> tiles = m_document->tilesInRect(
+            lassoBounds.adjusted(-EDGELESS_STROKE_MARGIN, -EDGELESS_STROKE_MARGIN,
+                                 EDGELESS_STROKE_MARGIN, EDGELESS_STROKE_MARGIN));
         
         for (const auto& coord : tiles) {
             Page* tile = m_document->getTile(coord.first, coord.second);
@@ -11142,6 +11148,10 @@ void DocumentViewport::finalizeLassoSelection()
             const auto& strokes = layer->strokes();
             for (int i = 0; i < strokes.size(); ++i) {
                 const VectorStroke& stroke = strokes[i];
+                
+                if (!stroke.boundingBox.translated(tileOrigin).intersects(lassoBounds)) {
+                    continue;
+                }
                 
                 // Transform stroke to document coordinates for hit test
                 // We create a temporary copy with document coords
@@ -11189,9 +11199,14 @@ void DocumentViewport::finalizeLassoSelection()
         
         m_lassoSelection.sourceLayerIndex = page->activeLayerIndex;
         
+        // Bounds rejection first: strokeIntersectsLasso() tests every point of the
+        // stroke against the polygon, and each of those tests walks the polygon.
+        const QRectF lassoBounds = m_lassoPath.boundingRect();
         const auto& strokes = layer->strokes();
         for (int i = 0; i < strokes.size(); ++i) {
             const VectorStroke& stroke = strokes[i];
+            
+            if (!stroke.boundingBox.intersects(lassoBounds)) continue;
             
             if (strokeIntersectsLasso(stroke, m_lassoPath)) {
                 m_lassoSelection.selectedStrokes.append(stroke);
@@ -15066,19 +15081,23 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
     // Convert viewport position to document coordinates
     QPointF docPt = viewportToDocument(viewportPos);
     
-    // Get center tile coordinate
-    Document::TileCoord centerTile = m_document->tileCoordForPoint(docPt);
     int tileSize = Document::EDGELESS_TILE_SIZE;
     
     UndoAction undoAction;
     undoAction.type = UndoAction::RemoveStroke;
     undoAction.layerIndex = m_edgelessActiveLayerIndex;
 
-    for (int dx = -1; dx <= 1; ++dx) {
-        for (int dy = -1; dy <= 1; ++dy) {
-            int tx = centerTile.first + dx;
-            int ty = centerTile.second + dy;
+    // Scan only the tiles the eraser disc can actually reach. A fixed 3x3
+    // neighbourhood scanned nine tiles' worth of strokes on every pointer move,
+    // and at a 1024-unit tile size an ordinary eraser touches one.
+    const qreal reach = m_eraserSize + EDGELESS_STROKE_MARGIN;
+    const int minTx = static_cast<int>(std::floor((docPt.x() - reach) / tileSize));
+    const int maxTx = static_cast<int>(std::floor((docPt.x() + reach) / tileSize));
+    const int minTy = static_cast<int>(std::floor((docPt.y() - reach) / tileSize));
+    const int maxTy = static_cast<int>(std::floor((docPt.y() + reach) / tileSize));
 
+    for (int tx = minTx; tx <= maxTx; ++tx) {
+        for (int ty = minTy; ty <= maxTy; ++ty) {
             Page* tile = m_document->getTile(tx, ty);
             if (!tile) continue;
             if (m_edgelessActiveLayerIndex >= tile->layerCount()) continue;
@@ -15215,7 +15234,12 @@ void DocumentViewport::finalizeEraserLasso()
 
         const QRectF lassoBounds = m_lassoPath.boundingRect();
 
-        auto tiles = m_document->allLoadedTileCoords();
+        // Only tiles the lasso reaches can hold strokes it selects, so scanning
+        // every loaded tile made this proportional to canvas size rather than to
+        // the gesture.
+        const QVector<Document::TileCoord> tiles = m_document->tilesInRect(
+            lassoBounds.adjusted(-EDGELESS_STROKE_MARGIN, -EDGELESS_STROKE_MARGIN,
+                                 EDGELESS_STROKE_MARGIN, EDGELESS_STROKE_MARGIN));
         for (const auto& coord : tiles) {
             Page* tile = m_document->getTile(coord.first, coord.second);
             if (!tile || layerIdx >= tile->layerCount()) continue;
@@ -15253,7 +15277,10 @@ void DocumentViewport::finalizeEraserLasso()
                     layerStrokes.removeAt(i);
                 }
             }
-            layer->invalidateStrokeCache();
+            // Every removal was inside the lasso, so repairing that region is
+            // enough. Invalidating instead threw away a cache the next paint
+            // then had to rebuild at full tile size.
+            layer->patchCacheAfterRemovals(lassoBounds.translated(-tileOrigin));
             m_document->markTileDirty(coord);
         }
     } else {
@@ -15265,8 +15292,13 @@ void DocumentViewport::finalizeEraserLasso()
 
         undoAction.layerIndex = page->activeLayerIndex;
 
+        // Bounds rejection before the per-point polygon test, matching the
+        // edgeless branch above.
+        const QRectF lassoBounds = m_lassoPath.boundingRect();
+
         QSet<QString> idsToRemove;
         for (const VectorStroke& stroke : layer->strokes()) {
+            if (!stroke.boundingBox.intersects(lassoBounds)) continue;
             if (strokeIntersectsLasso(stroke, m_lassoPath)) {
                 idsToRemove.insert(stroke.id);
             }
@@ -15283,7 +15315,7 @@ void DocumentViewport::finalizeEraserLasso()
                     layerStrokes.removeAt(i);
                 }
             }
-            layer->invalidateStrokeCache();
+            layer->patchCacheAfterRemovals(lassoBounds);
             m_document->markPageDirty(m_eraserLassoPageIndex);
         }
     }
@@ -17143,15 +17175,14 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter, const QRect& dirtyR
     // With stroke splitting, cross-tile strokes are stored as separate segments in each tile.
     // Each segment is rendered when its tile is rendered - no margin needed for cross-tile!
     // Small margin handles thick strokes extending slightly beyond tile boundary.
-    // CR-9: STROKE_MARGIN is max expected stroke width + anti-aliasing buffer
-    constexpr int STROKE_MARGIN = 100;
+    // CR-9: EDGELESS_STROKE_MARGIN is max expected stroke width + anti-aliasing buffer
     
     // Phase O1.5: Object margin - objects can extend beyond tile boundaries
     // Calculate extra margin based on largest object in document
     int objectMargin = m_document->maxObjectExtent();
     
     // Total margin is max of stroke margin and object margin
-    int totalMargin = qMax(STROKE_MARGIN, objectMargin);
+    int totalMargin = qMax(EDGELESS_STROKE_MARGIN, objectMargin);
     
     // CR-5: Single tilesInRect() call - use total margin for all tiles
     // Background pass will filter to viewRect bounds

@@ -3132,6 +3132,16 @@ private:
     /// redrawn geometry comes out identical to what a full-stroke render produces.
     static constexpr int STROKE_TAIL_CONTEXT_POINTS = 4;
     
+    /**
+     * @brief Document units a stroke can reach past the tile that stores it.
+     *
+     * Stroke splitting keeps a segment's points inside its own tile, so only the
+     * rendered thickness and its anti-aliasing overhang cross the boundary. Any
+     * search that maps a document region to candidate tiles has to grow the
+     * region by this much, or it will miss strokes bulging in from a neighbour.
+     */
+    static constexpr int EDGELESS_STROKE_MARGIN = 100;
+    
     // ===== Undo/Redo State (unified) =====
     QStack<UndoAction> m_undoStack;   ///< Global undo stack (both paged and edgeless)
     QStack<UndoAction> m_redoStack;   ///< Global redo stack (both paged and edgeless)
