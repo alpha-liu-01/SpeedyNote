@@ -64,6 +64,31 @@
 #include <QDropEvent>
 #include "PageTransferMime.h"
 
+namespace {
+
+/**
+ * @brief Assigns a value for the current scope and restores the old one on exit.
+ *
+ * Used on the paint path to render against gesture state that has not been
+ * committed to the member yet, without leaving the member perturbed if the
+ * render returns early.
+ */
+template <typename T>
+class ScopedValue {
+public:
+    ScopedValue(T& ref, const T& temporary) : m_ref(ref), m_saved(ref) { ref = temporary; }
+    ~ScopedValue() { m_ref = m_saved; }
+    
+    ScopedValue(const ScopedValue&) = delete;
+    ScopedValue& operator=(const ScopedValue&) = delete;
+    
+private:
+    T& m_ref;
+    T m_saved;
+};
+
+}  // namespace
+
 #ifdef Q_OS_ANDROID
 #include <QJniObject>       // BUG-A008: JNI for eraser tool type detection
 #include <QJniEnvironment>  // BUG-A008: For cached JNI method calls
@@ -2903,8 +2928,11 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
             // byte-comparing renders at fractional and integral offsets, which
             // come out identical at both DPR 1 and DPR 2.
             
-            // Clear only what the shifted frame won't cover.
-            fillBackgroundAround(painter, QRectF(panDeltaPixels, logicalSize));
+            // Paint the strip the shifted frame won't cover. This has to come
+            // before the blit: the bands round outward into the covered area,
+            // and the cached frame overdraws that overlap, so the freshly
+            // rendered strip and the blitted frame meet without a seam.
+            paintExposedStrip(painter, QRectF(panDeltaPixels, logicalSize));
             
             painter.drawPixmap(panDeltaPixels, m_gesture.cachedFrame);
         } else {
@@ -3009,46 +3037,7 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     }
     
     // ========== PAGED MODE ==========
-    // Get visible pages to render
-    QVector<int> visible = visiblePages();
-    
-    // Apply view transform
-    painter.save();
-    painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
-    painter.scale(m_zoomLevel, m_zoomLevel);
-    
-    // Render each visible page
-    // For partial updates, only render pages that intersect the dirty region
-    for (int pageIdx : visible) {
-        Page* page = m_document->page(pageIdx);
-        if (!page) continue;
-        
-        // Get page position once (O(1) with cache, but avoid redundant calls)
-        QPointF pos = pagePosition(pageIdx);
-        
-        // Check if this page intersects the dirty region (optimization for partial updates)
-        if (isPartialUpdate) {
-            QRectF pageRectInViewport = QRectF(
-                (pos.x() - m_panOffset.x()) * m_zoomLevel,
-                (pos.y() - m_panOffset.y()) * m_zoomLevel,
-                page->size.width() * m_zoomLevel,
-                page->size.height() * m_zoomLevel
-            );
-            if (!pageRectInViewport.intersects(dirtyRect)) {
-                continue;  // Skip this page - it doesn't intersect dirty region
-            }
-        }
-        
-        painter.save();
-        painter.translate(pos);
-        
-        // Render the page (background + content)
-        renderPage(painter, page, pageIdx);
-        
-        painter.restore();
-    }
-    
-    painter.restore();
+    renderPagedContent(painter, dirtyRect);
     
     // Render current stroke with incremental caching (Task 2.3)
     // This is done AFTER restoring the painter transform because the cache
@@ -4428,7 +4417,13 @@ void DocumentViewport::updatePanGesture(QPointF panDelta)
     
     // Restart timeout timer (each event resets the timeout)
     m_gestureTimeoutTimer->start(GESTURE_TIMEOUT_MS);
-    
+
+    // Keep the PDF cache moving with the gesture so the exposed strip has pages
+    // to draw once the pan crosses a page boundary. This only restarts a
+    // debounce timer, so it is free to call per event; the preload itself aims
+    // at the gesture target (see doAsyncPdfPreload).
+    preloadPdfCache();
+
     // Trigger repaint (will use fast cached frame shifting)
     update();
 }
@@ -4738,7 +4733,15 @@ void DocumentViewport::doAsyncPdfPreload()
     if (!m_document) {
         return;
     }
-    
+
+    // A pan gesture leaves m_panOffset at the value it started from, so reading
+    // visible pages off it would warm the pages being panned away from. Aim at
+    // the gesture target instead, which is what the exposed strip will need.
+    ScopedValue<QPointF> panAtTarget(
+        m_panOffset,
+        m_gesture.activeType == ViewportGestureState::Pan ? m_gesture.targetPan
+                                                          : m_panOffset);
+
     QVector<int> visible = visiblePages();
     if (visible.isEmpty()) {
         return;
@@ -15123,8 +15126,9 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
     }
 }
 
-void DocumentViewport::fillBackgroundAround(QPainter& painter, const QRectF& coveredLogical)
+QVector<QRect> DocumentViewport::exposedBands(const QRectF& coveredLogical) const
 {
+    QVector<QRect> bands;
     const QRect vp = rect();
     
     // Round inward: only pixels certain to be overdrawn may be skipped, so a
@@ -15137,32 +15141,86 @@ void DocumentViewport::fillBackgroundAround(QPainter& painter, const QRectF& cov
                                 std::max(0, bottom - top)).intersected(vp);
     
     if (covered.isEmpty()) {
-        // Panned further than a full viewport: nothing survives, clear it all.
-        painter.fillRect(vp, m_backgroundColor);
-        return;
+        // Panned further than a full viewport: nothing survives, expose it all.
+        bands.append(vp);
+        return bands;
     }
     
     // Top and bottom bands span the full width; the side bands cover only the
     // remaining vertical extent. Together with `covered` these tile the
     // viewport exactly - no overlap, no gap.
     if (covered.top() > vp.top()) {
-        painter.fillRect(QRect(vp.left(), vp.top(), vp.width(), covered.top() - vp.top()),
-                         m_backgroundColor);
+        bands.append(QRect(vp.left(), vp.top(), vp.width(), covered.top() - vp.top()));
     }
     if (covered.bottom() < vp.bottom()) {
-        painter.fillRect(QRect(vp.left(), covered.bottom() + 1, vp.width(),
-                               vp.bottom() - covered.bottom()),
-                         m_backgroundColor);
+        bands.append(QRect(vp.left(), covered.bottom() + 1, vp.width(),
+                           vp.bottom() - covered.bottom()));
     }
     if (covered.left() > vp.left()) {
-        painter.fillRect(QRect(vp.left(), covered.top(), covered.left() - vp.left(),
-                               covered.height()),
-                         m_backgroundColor);
+        bands.append(QRect(vp.left(), covered.top(), covered.left() - vp.left(),
+                           covered.height()));
     }
     if (covered.right() < vp.right()) {
-        painter.fillRect(QRect(covered.right() + 1, covered.top(),
-                               vp.right() - covered.right(), covered.height()),
-                         m_backgroundColor);
+        bands.append(QRect(covered.right() + 1, covered.top(),
+                           vp.right() - covered.right(), covered.height()));
+    }
+    return bands;
+}
+
+void DocumentViewport::paintExposedStrip(QPainter& painter, const QRectF& coveredLogical)
+{
+    const QVector<QRect> bands = exposedBands(coveredLogical);
+    if (bands.isEmpty()) {
+        return;
+    }
+    
+    // Always lay down background first. A PDF page that is not resident cannot
+    // be rasterized here (see the cache-only guard below), so the content pass
+    // may legitimately draw nothing - and then this is what shows, which is
+    // exactly the old behaviour rather than whatever the backing store held.
+    for (const QRect& band : bands) {
+        painter.fillRect(band, m_backgroundColor);
+    }
+    
+    if (!m_document) {
+        return;
+    }
+
+    // No area cutoff here, deliberately. The covered rect is offset by the pan
+    // accumulated since the gesture began, not since the last frame, so the
+    // strip grows as the gesture goes on and never shrinks. Skipping content
+    // past some size would blank a strip that had been drawing correctly and
+    // leave it blank for the rest of the gesture. The cost is self-limiting
+    // instead: the strip can at worst reach the whole viewport, at which point
+    // this is doing exactly the work the non-gesture path would have done.
+
+    // Render against the pan the gesture is moving to, not the committed one.
+    // The strip is newly exposed, so culling against the current visibleRect()
+    // would discard precisely the content that belongs in it. The cached frame
+    // is blitted by the same delta, so the two line up.
+    ScopedValue<QPointF> panAtTarget(m_panOffset, m_gesture.targetPan);
+    
+    // Force the cache-only paint gate for the duration. The wheel route sets
+    // this via onScrollActivity(), but updatePanGesture() does not, and without
+    // it a PDF page outside the cache would rasterize synchronously and stall
+    // the gesture - far worse than a blank edge.
+    ScopedValue<bool> cacheOnly(m_scrollActive, true);
+    
+    const bool edgeless = m_document->isEdgeless();
+    for (const QRect& band : bands) {
+        painter.save();
+        painter.setClipRect(band);
+        // The gesture path leaves antialiasing off, since shifting a cached
+        // frame does not need it. Content does: without this the strip renders
+        // hard-edged against the smooth frame it borders. save()/restore()
+        // covers render hints, so the blit that follows keeps the fast setting.
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        if (edgeless) {
+            renderEdgelessContent(painter, band);
+        } else {
+            renderPagedContent(painter, band);
+        }
+        painter.restore();
     }
 }
 
@@ -17123,7 +17181,50 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
 
 // ===== Edgeless Mode Rendering (Phase E2) =====
 
-void DocumentViewport::renderEdgelessMode(QPainter& painter, const QRect& dirtyRect)
+void DocumentViewport::renderPagedContent(QPainter& painter, const QRect& clipRect)
+{
+    if (!m_document) return;
+    
+    QVector<int> visible = visiblePages();
+    
+    // Apply view transform
+    painter.save();
+    painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
+    painter.scale(m_zoomLevel, m_zoomLevel);
+    
+    const QRectF clipF(clipRect);
+    for (int pageIdx : visible) {
+        Page* page = m_document->page(pageIdx);
+        if (!page) continue;
+        
+        // Get page position once (O(1) with cache, but avoid redundant calls)
+        QPointF pos = pagePosition(pageIdx);
+        
+        // Pages outside the requested region render into pixels the painter clip
+        // discards, so skip them regardless of how large the region is.
+        const QRectF pageRectInViewport(
+            (pos.x() - m_panOffset.x()) * m_zoomLevel,
+            (pos.y() - m_panOffset.y()) * m_zoomLevel,
+            page->size.width() * m_zoomLevel,
+            page->size.height() * m_zoomLevel
+        );
+        if (!pageRectInViewport.intersects(clipF)) {
+            continue;
+        }
+        
+        painter.save();
+        painter.translate(pos);
+        
+        // Render the page (background + content)
+        renderPage(painter, page, pageIdx);
+        
+        painter.restore();
+    }
+    
+    painter.restore();
+}
+
+void DocumentViewport::renderEdgelessContent(QPainter& painter, const QRect& dirtyRect)
 {
     if (!m_document || !m_document->isEdgeless()) return;
     
@@ -17275,6 +17376,13 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter, const QRect& dirtyR
     }
     
     painter.restore();
+}
+
+void DocumentViewport::renderEdgelessMode(QPainter& painter, const QRect& dirtyRect)
+{
+    if (!m_document || !m_document->isEdgeless()) return;
+    
+    renderEdgelessContent(painter, dirtyRect);
     
     // Render current stroke with incremental caching
     if (m_isDrawing && !m_currentStroke.points.isEmpty() && m_activeDrawingPage >= 0) {
