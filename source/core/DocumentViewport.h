@@ -3122,6 +3122,16 @@ private:
     qreal m_cacheZoom = 1.0;                  ///< Zoom level when cache was built
     QPointF m_cachePan;                       ///< Pan offset when cache was built
     
+    /// Trailing points whose rendered shape can still change as the stroke grows.
+    /// Catmull-Rom reads a four-point window and the outline tangent at each vertex
+    /// reads its neighbours, so appending a point disturbs the last four segments.
+    /// Everything before that is final and stays in the cache untouched.
+    static constexpr int STROKE_TAIL_VOLATILE_POINTS = 6;
+    
+    /// Points prepended to a tail redraw purely to supply curve context, so the
+    /// redrawn geometry comes out identical to what a full-stroke render produces.
+    static constexpr int STROKE_TAIL_CONTEXT_POINTS = 4;
+    
     // ===== Undo/Redo State (unified) =====
     QStack<UndoAction> m_undoStack;   ///< Global undo stack (both paged and edgeless)
     QStack<UndoAction> m_redoStack;   ///< Global redo stack (both paged and edgeless)
@@ -3911,6 +3921,28 @@ private:
      * Creates a transparent pixmap at viewport size for accumulating stroke segments.
      */
     void resetCurrentStrokeCache();
+    
+    /**
+     * @brief Cache pixels that a tail redraw starting at @p fromIndex may touch.
+     * @param fromIndex First point of the volatile tail.
+     * @param toCache Transform from stroke coordinates to cache (viewport) coordinates.
+     * @return Clipped to the viewport; empty when the tail is entirely off-screen.
+     */
+    QRect currentStrokeTailRect(int fromIndex, const QTransform& toCache) const;
+    
+    /**
+     * @brief Point ranges of the current stroke whose geometry can reach @p cacheRect.
+     * @param cacheRect Region about to be cleared and repainted, in cache coordinates.
+     * @param toCache Transform from stroke coordinates to cache (viewport) coordinates.
+     * @return Inclusive [first, last] index ranges, already padded with curve context
+     *         and merged, ordered by first index.
+     *
+     * Where a stroke crosses itself, clearing the tail region also destroys older
+     * settled geometry passing through it, so redrawing the tail alone leaves a
+     * hole. Every range this returns has to be repainted to restore the region.
+     */
+    QVector<QPair<int, int>> currentStrokeRangesTouching(const QRect& cacheRect,
+                                                         const QTransform& toCache) const;
     
     /**
      * @brief Render the in-progress stroke to the viewport.

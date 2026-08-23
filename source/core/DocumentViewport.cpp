@@ -14720,14 +14720,97 @@ void DocumentViewport::resetCurrentStrokeCache()
     m_cachePan = m_panOffset;
 }
 
+QRect DocumentViewport::currentStrokeTailRect(int fromIndex, const QTransform& toCache) const
+{
+    const int n = static_cast<int>(m_currentStroke.points.size());
+    if (fromIndex < 0 || fromIndex >= n) {
+        return QRect();
+    }
+    
+    qreal minX = m_currentStroke.points[fromIndex].pos.x();
+    qreal maxX = minX;
+    qreal minY = m_currentStroke.points[fromIndex].pos.y();
+    qreal maxY = minY;
+    for (int i = fromIndex + 1; i < n; ++i) {
+        const QPointF& pos = m_currentStroke.points[i].pos;
+        minX = qMin(minX, pos.x());
+        maxX = qMax(maxX, pos.x());
+        minY = qMin(minY, pos.y());
+        maxY = qMax(maxY, pos.y());
+    }
+    
+    // A full thickness of padding: half covers the outline's own half-width at
+    // maximum pressure, the rest absorbs the Catmull-Rom curve bowing outside the
+    // control points it was built from.
+    const qreal pad = m_currentStroke.baseThickness + 2.0;
+    const QRectF bounds(minX - pad, minY - pad,
+                        (maxX - minX) + pad * 2.0, (maxY - minY) + pad * 2.0);
+    
+    // Two more pixels after mapping for the antialiased fringe.
+    return toCache.mapRect(bounds).toAlignedRect().adjusted(-2, -2, 2, 2)
+        .intersected(QRect(0, 0, width(), height()));
+}
+
+QVector<QPair<int, int>> DocumentViewport::currentStrokeRangesTouching(
+    const QRect& cacheRect, const QTransform& toCache) const
+{
+    QVector<QPair<int, int>> runs;
+    const int n = static_cast<int>(m_currentStroke.points.size());
+    if (n < 2) {
+        return runs;
+    }
+    
+    // Same padding the target region was built with, so a segment is only
+    // discarded when its outline cannot reach the region.
+    const qreal pad = m_currentStroke.baseThickness + 2.0;
+    const QRectF target(cacheRect);
+    
+    // Testing segments rather than points keeps a long segment that merely
+    // passes through the region from being missed.
+    int runStart = -1;
+    for (int i = 0; i + 1 < n; ++i) {
+        const QPointF& a = m_currentStroke.points[i].pos;
+        const QPointF& b = m_currentStroke.points[i + 1].pos;
+        const QRectF box(QPointF(qMin(a.x(), b.x()) - pad, qMin(a.y(), b.y()) - pad),
+                         QPointF(qMax(a.x(), b.x()) + pad, qMax(a.y(), b.y()) + pad));
+        
+        if (toCache.mapRect(box).intersects(target)) {
+            if (runStart < 0) {
+                runStart = i;
+            }
+        } else if (runStart >= 0) {
+            runs.append({runStart, i});
+            runStart = -1;
+        }
+    }
+    if (runStart >= 0) {
+        runs.append({runStart, n - 1});
+    }
+    
+    // Widen each run with curve context and merge the runs that meet, so every
+    // repainted segment sees the neighbours a full-stroke render would give it.
+    QVector<QPair<int, int>> merged;
+    merged.reserve(runs.size());
+    for (const QPair<int, int>& run : runs) {
+        const int first = qMax(0, run.first - STROKE_TAIL_CONTEXT_POINTS);
+        const int last = qMin(n - 1, run.second + STROKE_TAIL_CONTEXT_POINTS);
+        if (!merged.isEmpty() && first <= merged.last().second + 1) {
+            merged.last().second = qMax(merged.last().second, last);
+        } else {
+            merged.append({first, last});
+        }
+    }
+    return merged;
+}
+
 void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
 {
     // ========== In-Progress Stroke Rendering ==========
     // Renders the current stroke to m_currentStrokeCache using the same
     // VectorLayer::renderStroke() path as finalized strokes, giving it
-    // Catmull-Rom smoothed curves. The cache is re-rendered when new
-    // points arrive (tracked via m_lastRenderedPointIndex) and reused
-    // for repaints where no new points were added.
+    // Catmull-Rom smoothed curves. New points rewrite only the tail of the
+    // cache (tracked via m_lastRenderedPointIndex); repaints that added no
+    // points reuse it as-is.
     
     const int n = static_cast<int>(m_currentStroke.points.size());
     if (n < 1) return;
@@ -14786,40 +14869,75 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
     int strokeAlpha = m_currentStroke.color.alpha();
     bool hasSemiTransparency = (strokeAlpha < 255);
     
-    // Re-render the full stroke to cache when new points arrive.
-    // Uses VectorLayer::renderStroke() for Catmull-Rom smoothed curves,
-    // giving the in-progress stroke the same visual quality as finalized strokes.
-    // Performance: a single stroke with ~100-300 points renders in <1ms.
+    // Update the cache when new points arrive, rewriting only the tail whose
+    // shape can still change and leaving the settled prefix in place. Redrawing
+    // the whole stroke per point costs O(n) each frame and O(n^2) across the
+    // stroke, which is what drags a long stroke below 1 fps on slower tablets.
     if (n > m_lastRenderedPointIndex && n >= 2) {
-        m_currentStrokeCache.fill(Qt::transparent);
-        
-        QPainter cachePainter(&m_currentStrokeCache);
-        cachePainter.setRenderHint(QPainter::Antialiasing, true);
-        
-        // Snap page/tile origin to integer physical pixel (see comment above)
-        cachePainter.translate(snapTxLogical, snapTyLogical);
-        
-        // Apply transform to convert coords to viewport coords
-        // The cache is in viewport coordinates (widget pixels)
-        cachePainter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
-        cachePainter.scale(m_zoomLevel, m_zoomLevel);
-        
-        // For paged mode, translate to page position
-        // For edgeless, stroke points are already in document coords - no extra translate
+        // Same mapping the cache was rasterized with, kept as a QTransform so the
+        // tail bounds can be carried into cache pixels by exactly that mapping.
+        QTransform toCache;
+        toCache.translate(snapTxLogical, snapTyLogical);
+        toCache.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
+        toCache.scale(m_zoomLevel, m_zoomLevel);
         if (!isEdgeless) {
-            cachePainter.translate(snapOrigin);
+            toCache.translate(snapOrigin.x(), snapOrigin.y());
         }
         
-        // Render using the same path as finalized strokes (Catmull-Rom smoothing).
-        // For semi-transparent strokes, create a copy with full opacity (alpha
-        // is applied during the blit step below). For opaque strokes, render
-        // directly to avoid copying the stroke's point vector.
-        if (hasSemiTransparency) {
-            VectorStroke drawStroke = m_currentStroke;
-            drawStroke.color.setAlpha(255);
-            VectorLayer::renderStroke(cachePainter, drawStroke);
+        // Everything drawn into the cache is fully opaque; the stroke's own alpha
+        // is applied once at blit time, so overlapping ranges, caps and joints
+        // cannot compound and repainting a region twice is harmless.
+        auto renderRange = [&](QPainter& cachePainter, int first, int last) {
+            // Copying the stroke shares its point vector, so slicing a range out
+            // of the copy costs only that range.
+            VectorStroke segment = m_currentStroke;
+            segment.points = m_currentStroke.points.mid(first, last - first + 1);
+            if (hasSemiTransparency) {
+                segment.color.setAlpha(255);
+            }
+            VectorLayer::renderStroke(cachePainter, segment);
+        };
+        
+        // A reset cache holds nothing, so there is no settled content to preserve.
+        if (m_lastRenderedPointIndex <= 0) {
+            m_currentStrokeCache.fill(Qt::transparent);
+            
+            QPainter cachePainter(&m_currentStrokeCache);
+            cachePainter.setRenderHint(QPainter::Antialiasing, true);
+            cachePainter.setWorldTransform(toCache);
+            renderRange(cachePainter, 0, n - 1);
         } else {
-            VectorLayer::renderStroke(cachePainter, m_currentStroke);
+            // Whatever the previous render left volatile has to be redone, along
+            // with every point added since.
+            const int redrawFrom =
+                qBound(0, m_lastRenderedPointIndex - 1 - STROKE_TAIL_VOLATILE_POINTS, n - 1);
+            const QRect tailRect = currentStrokeTailRect(redrawFrom, toCache);
+            
+            // An empty rect means the new points are off-screen; the cache only
+            // spans the viewport, so there is nothing to repaint.
+            if (!tailRect.isEmpty()) {
+                // Clearing the region also removes any older part of the stroke
+                // that crosses it, so the repaint covers every range reaching in,
+                // not just the tail.
+                const QVector<QPair<int, int>> ranges =
+                    currentStrokeRangesTouching(tailRect, toCache);
+                
+                QPainter cachePainter(&m_currentStrokeCache);
+                cachePainter.setCompositionMode(QPainter::CompositionMode_Clear);
+                cachePainter.fillRect(tailRect, Qt::transparent);
+                cachePainter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+                
+                // A hard-edged clip keeps settled pixels outside the region
+                // untouched, and the context points make the geometry inside it
+                // identical to a full render, so the two meet without a seam.
+                cachePainter.setClipRect(tailRect);
+                cachePainter.setRenderHint(QPainter::Antialiasing, true);
+                cachePainter.setWorldTransform(toCache);
+                
+                for (const QPair<int, int>& range : ranges) {
+                    renderRange(cachePainter, range.first, range.second);
+                }
+            }
         }
         
         m_lastRenderedPointIndex = n;
