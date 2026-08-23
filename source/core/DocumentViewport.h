@@ -3981,32 +3981,18 @@ private:
     void drawEraserCursor(QPainter& painter);
     
     /**
-     * @brief The bands of the viewport left uncovered by an about-to-be-drawn rect.
+     * @brief Fill the background in the bands around an already-covered rect.
+     * @param painter The QPainter to render to (viewport coordinates).
      * @param coveredLogical Region a subsequent draw will overwrite, in logical
      *        viewport coordinates.
-     * @return At most four bands that, together with @p coveredLogical, tile the
-     *         viewport exactly - no overlap between them, no gap. The whole
-     *         viewport when nothing survives the shift.
      *
-     * Rounds @p coveredLogical inward, so a fractional edge lands in a band
-     * rather than becoming an unpainted seam.
+     * The gesture pan path shifts a viewport-sized cached frame, so everything
+     * except an L-shaped strip is about to be overdrawn. Clearing only that
+     * strip removes a full-surface write per frame. Fills at most four bands
+     * and allocates nothing. Rounds @p coveredLogical inward, so a fractional
+     * edge is filled rather than left as a seam.
      */
-    QVector<QRect> exposedBands(const QRectF& coveredLogical) const;
-
-    /**
-     * @brief Paint the strip a shifted cached frame is about to leave uncovered.
-     * @param painter The QPainter to render to (viewport coordinates).
-     * @param coveredLogical Where the cached frame will land, in logical
-     *        viewport coordinates.
-     *
-     * Fills the bands with background, then draws real document content into
-     * them, so panning does not trail blank edges. Must be called before the
-     * cached frame is blitted; see the call site for why.
-     *
-     * Cost scales with the strip, which grows over the life of the gesture and
-     * tops out at a full viewport - the same work the non-gesture path does.
-     */
-    void paintExposedStrip(QPainter& painter, const QRectF& coveredLogical);
+    void fillBackgroundAround(QPainter& painter, const QRectF& coveredLogical);
 
     /**
      * @brief Finalize the eraser lasso gesture: delete all strokes inside the
@@ -4119,33 +4105,12 @@ private:
      * @param painter The QPainter to render to.
      */
     /**
-     * @brief Render the edgeless (tiled) canvas, including live overlays.
+     * @brief Render the edgeless (tiled) canvas.
      * @param painter Viewport painter, untransformed.
      * @param dirtyRect Damaged region in viewport coordinates; the tile walk is
      *        confined to the tiles it touches.
      */
     void renderEdgelessMode(QPainter& painter, const QRect& dirtyRect);
-
-    /**
-     * @brief Render settled edgeless document content only.
-     * @param painter Viewport painter, untransformed.
-     * @param dirtyRect Damaged region in viewport coordinates; the tile walk is
-     *        confined to the tiles it touches.
-     *
-     * Tile backgrounds, objects, stroke layers and document-anchored highlights,
-     * but none of the live overlays (in-progress stroke, previews, selection).
-     * Safe to call repeatedly for disjoint regions of one frame, which is what
-     * paintExposedStrip() does; the overlays are not, hence the split.
-     */
-    void renderEdgelessContent(QPainter& painter, const QRect& dirtyRect);
-
-    /**
-     * @brief Render paged document content.
-     * @param painter Viewport painter, untransformed.
-     * @param clipRect Region of interest in viewport coordinates; pages that do
-     *        not intersect it are skipped.
-     */
-    void renderPagedContent(QPainter& painter, const QRect& clipRect);
 
     /**
      * @brief Pick a render tier for one page or tile in the current paint.
