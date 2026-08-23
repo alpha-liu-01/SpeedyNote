@@ -28,6 +28,7 @@ enum class TouchGestureMode {
 #include "Document.h"
 #include "Page.h"
 #include "ToolType.h"
+#include "ViewportPerfMonitor.h"
 #include "../objects/TextBoxObject.h"
 #include "../strokes/VectorStroke.h"
 #include "../pdf/PdfProvider.h"
@@ -209,8 +210,6 @@ struct UndoAction {
 #include <QTimer>
 #include <QMutex>
 #include <QFutureWatcher>
-#include <deque>
-
 // Forward declarations
 class QPaintEvent;
 class QResizeEvent;
@@ -880,31 +879,63 @@ public:
      */
     int edgelessActiveLayerIndex() const { return m_edgelessActiveLayerIndex; }
     
-    // ===== Benchmark (Task 2.6) =====
+    // ===== Performance Instrumentation =====
     
     /**
-     * @brief Start measuring paint refresh rate.
-     * 
-     * Call this to begin tracking how often paintEvent is called.
-     * Use getPaintRate() to retrieve the current rate.
+     * @brief Start collecting per-frame paint statistics.
+     *
+     * Overhead is two clock reads and one ring-buffer write per frame, so this
+     * is safe to enable in release builds without distorting the measurement.
      */
     void startBenchmark();
     
     /**
-     * @brief Stop measuring paint refresh rate.
+     * @brief Stop collecting paint statistics and discard the samples.
      */
     void stopBenchmark();
     
     /**
-     * @brief Get the current paint refresh rate.
-     * @return Paints per second (based on last 1 second of data).
+     * @brief Get the overall repaint rate.
+     * @return Paints per second across all frame kinds, 0 when not measuring.
+     *
+     * Prefer perfStats() for anything diagnostic: this figure mixes cheap
+     * partial stroke updates with expensive full-viewport frames and so is
+     * only useful as a coarse "is anything repainting" indicator.
      */
     int getPaintRate() const;
     
     /**
-     * @brief Check if benchmarking is currently active.
+     * @brief Check if performance instrumentation is currently active.
      */
-    bool isBenchmarking() const { return m_benchmarking; }
+    bool isBenchmarking() const { return m_perf.isEnabled(); }
+    
+    /**
+     * @brief Get rolling paint statistics for one class of frames.
+     */
+    ViewportPerfMonitor::Stats perfStats(ViewportPerfMonitor::Bucket bucket) const
+    {
+        return m_perf.stats(bucket);
+    }
+    
+    /**
+     * @brief Context needed to interpret the paint statistics.
+     */
+    struct PerfContext {
+        QSize viewportLogical;      ///< Widget size in logical pixels
+        QSize viewportPhysical;     ///< Widget size in device pixels
+        qreal devicePixelRatio = 1.0;
+        qreal screenRefreshRate = 0.0;  ///< Panel refresh rate in Hz, 0 if unknown
+        QString strokeCacheTier;    ///< Capped / Focus / Direct for the visible page
+    };
+    
+    /**
+     * @brief Collect the display and render-tier context for the perf HUD.
+     *
+     * The stroke cache tier matters because it depends on
+     * zoom * devicePixelRatio, so a high-DPR tablet drops out of the cheap
+     * cached tier at roughly half the zoom level a desktop monitor would.
+     */
+    PerfContext perfContext() const;
     
     /**
      * @brief Check if the hardware eraser (stylus eraser end) is active.
@@ -3114,11 +3145,8 @@ private:
      */
     void pushPositionHistory();
     
-    // ===== Benchmark State (Task 2.6) =====
-    bool m_benchmarking = false;                      ///< Whether benchmarking is active
-    QElapsedTimer m_benchmarkTimer;                   ///< Timer for measuring intervals
-    mutable std::deque<qint64> m_paintTimestamps;     ///< Timestamps of recent paints (mutable for const getPaintRate)
-    QTimer m_benchmarkDisplayTimer;                   ///< Timer for periodic display updates
+    // ===== Performance Instrumentation State =====
+    ViewportPerfMonitor m_perf;                       ///< Per-frame paint statistics
     
     // ===== Deferred Viewport Gesture State (Task 2.3 - Zoom/Pan Optimization) =====
     /**
@@ -4003,11 +4031,6 @@ private:
      * @return DPI value scaled by zoom level.
      */
     qreal effectivePdfDpi() const;
-    
-    /**
-     * @brief Whether to show debug overlay.
-     */
-    bool m_showDebugOverlay = true;
     
     // ===== Edgeless Mode State (Phase E2/E3) =====
     

@@ -16,9 +16,12 @@
 // To disable in production: #define SPEEDYNOTE_NO_DEBUG_OVERLAY
 // ============================================================================
 
+#include "../core/ViewportPerfMonitor.h"
+
 #include <QWidget>
 #include <QTimer>
 #include <QPointer>
+#include <QElapsedTimer>
 #include <functional>
 #include <vector>
 
@@ -46,7 +49,8 @@ struct DebugSection {
  * - Semi-transparent background for readability
  * - Draggable to reposition
  * - Extensible via addSection() API
- * - Keyboard toggle (default: D key in viewport)
+ * - Keyboard toggle (default: F12, action "view.debug_overlay")
+ * - Paint performance HUD (default: F10, action "view.perf_hud")
  */
 class DebugOverlay : public QWidget {
     Q_OBJECT
@@ -179,17 +183,68 @@ private:
     QString generateCustomSections() const;
 
     /**
+     * @brief Generate the paint performance block.
+     */
+    QString generatePerfInfo() const;
+
+    /**
      * @brief Get the tool name string for display.
      */
     QString toolName() const;
 
+    /**
+     * @brief Latch the current per-bucket statistics.
+     *
+     * Statistics describe a rolling one second window, so they empty out as
+     * soon as the user stops panning - exactly when they want to read them.
+     * Latching the last non-empty sample keeps the result on screen.
+     */
+    void samplePerfStats();
+
+    /**
+     * @brief Enter or leave measurement-friendly rendering.
+     * @param perfActive Whether the viewport is currently instrumented.
+     */
+    void applyPerfModeHygiene(bool perfActive);
+
+    /**
+     * @brief Worst-case overlay size for perf mode, so the size can be frozen.
+     */
+    QSize perfModeSize() const;
+
     // ===== Members =====
+
+    /** @brief Overlay refresh while idle. */
+    static constexpr int DefaultUpdateIntervalMs = 33;
+    
+    /**
+     * @brief Overlay refresh while measuring.
+     *
+     * Every overlay repaint is a repaint this overlay caused rather than
+     * observed, so it is throttled hard while instrumentation is on. A one
+     * second rolling window gains nothing from 30Hz polling.
+     */
+    static constexpr int PerfUpdateIntervalMs = 250;
+
+    /** @brief A latched statistics sample plus how long ago it was taken. */
+    struct HeldStats {
+        ViewportPerfMonitor::Stats stats;
+        QElapsedTimer since;
+        bool valid = false;
+    };
 
     QPointer<DocumentViewport> m_viewport;      ///< The viewport to monitor
     QTimer m_updateTimer;                       ///< Timer for periodic updates
     
     std::vector<DebugSection> m_customSections; ///< User-added debug sections
     QString m_cachedText;                       ///< Pre-rendered debug text
+
+    // Perf HUD state
+    bool m_perfModeActive = false;              ///< Mirrors viewport instrumentation
+    bool m_sizeFrozen = false;                  ///< Suppresses auto-resize while measuring
+    HeldStats m_heldPan;
+    HeldStats m_heldComposite;
+    HeldStats m_heldPartial;
 
     // Drag support
     bool m_dragging = false;

@@ -46,6 +46,7 @@
 #include <QSet>       // For efficient ID lookup in eraseAt
 #include <QClipboard>     // For clipboard access (O2.4)
 #include <QGuiApplication> // For clipboard access (O2.4)
+#include <QScreen>         // For refresh rate in the perf HUD context
 #include <QApplication>    // For focusWidget() - text input focus check
 #include <QLineEdit>       // For text input focus check
 #include <QTextEdit>       // For text input focus check
@@ -181,16 +182,6 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     setAttribute(Qt::WA_OpaquePaintEvent, true);
     setAttribute(Qt::WA_NoSystemBackground, true);
     setAutoFillBackground(false);
-    
-    // Benchmark display timer - triggers repaint to update paint rate counter
-    // Note: Debug overlay is now handled by DebugOverlay widget (source/ui/DebugOverlay.cpp)
-    connect(&m_benchmarkDisplayTimer, &QTimer::timeout, this, [this]() {
-        if (m_benchmarking) {
-            // DebugOverlay widget handles its own updates, but we may want
-            // to trigger viewport repaints for accurate paint rate measurement
-            // during benchmarking (disabled for now to avoid unnecessary repaints)
-        }
-    });
     
     // PDF preload timer - debounces preload requests during rapid scrolling
     m_pdfPreloadTimer = new QTimer(this);
@@ -2840,10 +2831,12 @@ QVector<int> DocumentViewport::visiblePages() const
 
 void DocumentViewport::paintEvent(QPaintEvent* event)
 {
-    // Benchmark: track paint timestamps (Task 2.6)
-    if (m_benchmarking) {
-        m_paintTimestamps.push_back(m_benchmarkTimer.elapsed());
-    }
+    // Perf instrumentation. Declared before the QPainter on purpose: the
+    // painter must be destroyed (and its work flushed) before the sampler's
+    // destructor takes the end timestamp. Recording from a destructor also
+    // means the early returns in the fast paths below are all measured.
+    ViewportPerfMonitor::FrameSampler perfSample(m_perf, event->rect(), size(),
+                                                 devicePixelRatioF());
     
     QPainter painter(this);
     // Note: Antialiasing is deferred until after gesture fast paths.
@@ -2869,6 +2862,7 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         painter.setRenderHint(QPainter::SmoothPixmapTransform, false);  // Speed over quality
         
         if (m_gesture.activeType == ViewportGestureState::Zoom) {
+            perfSample.setPath(ViewportPerfMonitor::FramePath::GestureZoom);
             // ZOOM + PAN: Scale the cached frame around zoom center, with pan offset
             qreal relativeScale = m_gesture.targetZoom / m_gesture.startZoom;
             QSizeF scaledSize = logicalSize * relativeScale;
@@ -2893,6 +2887,7 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
             painter.drawPixmap(QRectF(scaledOrigin, scaledSize), m_gesture.cachedFrame, 
                               m_gesture.cachedFrame.rect());
         } else if (m_gesture.activeType == ViewportGestureState::Pan) {
+            perfSample.setPath(ViewportPerfMonitor::FramePath::GesturePan);
             // PAN: Shift the cached frame by pan delta
             // Pan delta in document coords → convert to viewport pixels
             QPointF panDeltaDoc = m_gesture.targetPan - m_gesture.startPan;
@@ -2910,6 +2905,8 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     // This avoids re-rendering all tiles/pages, providing smooth transform performance.
     if (m_isTransformingSelection && !m_selectionBackgroundSnapshot.isNull() 
         && m_lassoSelection.isValid() && !m_skipSelectionRendering) {
+        
+        perfSample.setPath(ViewportPerfMonitor::FramePath::SelectionTransform);
         
         // Draw the cached background (viewport without selection)
         qreal dpr = m_backgroundSnapshotDpr;
@@ -2935,6 +2932,8 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     if ((m_isDraggingObjects || m_isResizingObject) 
         && !m_objectDragBackgroundSnapshot.isNull()
         && !m_skipSelectedObjectRendering) {
+        
+        perfSample.setPath(ViewportPerfMonitor::FramePath::ObjectDrag);
         
         // Draw the cached background (viewport without selected objects)
         qreal dpr = m_objectDragSnapshotDpr;
@@ -3793,20 +3792,10 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
     // are now handled by MainWindow's QShortcut system so they work 
     // regardless of which widget has focus.
     
-    // ===== Debug Shortcut (kept as hardcoded - development only) =====
-#ifdef SPEEDYNOTE_DEBUG
-    // F10 = Toggle benchmark (debug builds only, conflicts with tool.pen in release)
-    if (event->key() == Qt::Key_F10) {
-        if (m_benchmarking) {
-            stopBenchmark();
-        } else {
-            startBenchmark();
-        }
-        update();
-        event->accept();
-        return;
-    }
-#endif
+    // ===== Note: perf HUD toggle moved to MainWindow =====
+    // The paint instrumentation toggle is registered as "view.perf_hud" in
+    // ShortcutManager so it works in release builds, is remappable, and does
+    // not require the viewport to hold keyboard focus.
     
     // Pass unhandled keys to parent
     QWidget::keyPressEvent(event);
@@ -16665,36 +16654,75 @@ int DocumentViewport::getMaxAffinity() const
     }
 }
 
-// ===== Benchmark (Task 2.6) =====
+// ===== Performance Instrumentation =====
 
 void DocumentViewport::startBenchmark()
 {
-    m_benchmarking = true;
-    m_paintTimestamps.clear();
-    m_benchmarkTimer.start();
-    
-    // Start periodic display updates (1000ms = 1 update/sec)
-    m_benchmarkDisplayTimer.start(1000);
+    m_perf.setEnabled(true);
 }
 
 void DocumentViewport::stopBenchmark()
 {
-    m_benchmarking = false;
-    m_benchmarkDisplayTimer.stop();
+    m_perf.setEnabled(false);
 }
 
 int DocumentViewport::getPaintRate() const
 {
-    if (!m_benchmarking) return 0;
+    return m_perf.stats(ViewportPerfMonitor::Bucket::All).frames;
+}
+
+DocumentViewport::PerfContext DocumentViewport::perfContext() const
+{
+    PerfContext ctx;
     
-    qint64 now = m_benchmarkTimer.elapsed();
+    const qreal dpr = devicePixelRatioF();
+    ctx.viewportLogical = size();
+    ctx.viewportPhysical = QSize(qRound(width() * dpr), qRound(height() * dpr));
+    ctx.devicePixelRatio = dpr;
     
-    // Remove timestamps older than 1 second
-    while (!m_paintTimestamps.empty() && now - m_paintTimestamps.front() > 1000) {
-        m_paintTimestamps.pop_front();
+    if (const QScreen* s = screen()) {
+        ctx.screenRefreshRate = s->refreshRate();
     }
     
-    return static_cast<int>(m_paintTimestamps.size());
+    ctx.strokeCacheTier = QStringLiteral("n/a");
+    if (!m_document) {
+        return ctx;
+    }
+    
+    // Reproduce what renderPage/dispatchTileLayer would pick for the content
+    // the user is currently looking at.
+    QSizeF tileSize;
+    QPointF tileOrigin;
+    bool haveTile = false;
+    
+    if (m_document->isEdgeless()) {
+        const int tilePx = Document::EDGELESS_TILE_SIZE;
+        const QPointF center = visibleRect().center();
+        tileOrigin = QPointF(std::floor(center.x() / tilePx) * tilePx,
+                             std::floor(center.y() / tilePx) * tilePx);
+        tileSize = QSizeF(tilePx, tilePx);
+        haveTile = true;
+    } else if (Page* page = m_document->page(currentPageIndex())) {
+        tileOrigin = pagePosition(currentPageIndex());
+        tileSize = page->size;
+        haveTile = true;
+    }
+    
+    if (haveTile) {
+        switch (chooseRenderTier(tileSize, visibleRect().translated(-tileOrigin), nullptr)) {
+        case VectorLayer::RenderTier::Capped:
+            ctx.strokeCacheTier = QStringLiteral("Capped");
+            break;
+        case VectorLayer::RenderTier::Focus:
+            ctx.strokeCacheTier = QStringLiteral("Focus");
+            break;
+        case VectorLayer::RenderTier::Direct:
+            ctx.strokeCacheTier = QStringLiteral("Direct");
+            break;
+        }
+    }
+    
+    return ctx;
 }
 
 // ===== Rendering Helpers (Task 1.3.3) =====
