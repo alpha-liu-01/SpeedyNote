@@ -2848,8 +2848,10 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     if (m_gesture.isActive() && !m_gesture.cachedFrame.isNull() 
         && m_gesture.startZoom > 0) {  // Guard against division by zero
         
-        // Fill background (for areas outside transformed frame)
-        painter.fillRect(rect(), m_backgroundColor);
+        // Background is filled per branch below, not here: the pan path only
+        // needs the strip its shifted frame leaves exposed, whereas a scaled
+        // frame can leave a border of any shape. Nothing pre-clears for us,
+        // since WA_OpaquePaintEvent is set.
         
         // Calculate frame size in LOGICAL pixels (not physical)
         // grab() returns a pixmap at device pixel ratio, so we must divide by DPR
@@ -2863,6 +2865,8 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         
         if (m_gesture.activeType == ViewportGestureState::Zoom) {
             perfSample.setPath(ViewportPerfMonitor::FramePath::GestureZoom);
+            // A scaled frame can expose a border on any side, so clear it all.
+            painter.fillRect(rect(), m_backgroundColor);
             // ZOOM + PAN: Scale the cached frame around zoom center, with pan offset
             qreal relativeScale = m_gesture.targetZoom / m_gesture.startZoom;
             QSizeF scaledSize = logicalSize * relativeScale;
@@ -2893,7 +2897,21 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
             QPointF panDeltaDoc = m_gesture.targetPan - m_gesture.startPan;
             QPointF panDeltaPixels = panDeltaDoc * m_gesture.startZoom * -1.0;  // Negate: pan offset increase = viewport moves opposite
             
+            // Note: no need to snap panDeltaPixels to whole device pixels. With
+            // SmoothPixmapTransform off, QRasterPaintEngine already quantises a
+            // pure-translate drawPixmap to the device pixel grid - verified by
+            // byte-comparing renders at fractional and integral offsets, which
+            // come out identical at both DPR 1 and DPR 2.
+            
+            // Clear only what the shifted frame won't cover.
+            fillBackgroundAround(painter, QRectF(panDeltaPixels, logicalSize));
+            
             painter.drawPixmap(panDeltaPixels, m_gesture.cachedFrame);
+        } else {
+            // Defensive: ViewportGestureState::ZoomAndPan is declared but never
+            // assigned. If that changes, clear rather than present a stale
+            // backing store.
+            painter.fillRect(rect(), m_backgroundColor);
         }
         
         // Skip normal rendering during gesture
@@ -14984,6 +15002,49 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
         QRectF dirtyRectF(viewportPos.x() - eraserRadius, viewportPos.y() - eraserRadius,
                           eraserRadius * 2, eraserRadius * 2);
         update(QRegion(dirtyRectF.toAlignedRect(), QRegion::Ellipse));
+    }
+}
+
+void DocumentViewport::fillBackgroundAround(QPainter& painter, const QRectF& coveredLogical)
+{
+    const QRect vp = rect();
+    
+    // Round inward: only pixels certain to be overdrawn may be skipped, so a
+    // fractional edge ends up in a band instead of becoming an unfilled seam.
+    const int left = static_cast<int>(std::ceil(coveredLogical.left()));
+    const int top = static_cast<int>(std::ceil(coveredLogical.top()));
+    const int right = static_cast<int>(std::floor(coveredLogical.left() + coveredLogical.width()));
+    const int bottom = static_cast<int>(std::floor(coveredLogical.top() + coveredLogical.height()));
+    const QRect covered = QRect(left, top, std::max(0, right - left),
+                                std::max(0, bottom - top)).intersected(vp);
+    
+    if (covered.isEmpty()) {
+        // Panned further than a full viewport: nothing survives, clear it all.
+        painter.fillRect(vp, m_backgroundColor);
+        return;
+    }
+    
+    // Top and bottom bands span the full width; the side bands cover only the
+    // remaining vertical extent. Together with `covered` these tile the
+    // viewport exactly - no overlap, no gap.
+    if (covered.top() > vp.top()) {
+        painter.fillRect(QRect(vp.left(), vp.top(), vp.width(), covered.top() - vp.top()),
+                         m_backgroundColor);
+    }
+    if (covered.bottom() < vp.bottom()) {
+        painter.fillRect(QRect(vp.left(), covered.bottom() + 1, vp.width(),
+                               vp.bottom() - covered.bottom()),
+                         m_backgroundColor);
+    }
+    if (covered.left() > vp.left()) {
+        painter.fillRect(QRect(vp.left(), covered.top(), covered.left() - vp.left(),
+                               covered.height()),
+                         m_backgroundColor);
+    }
+    if (covered.right() < vp.right()) {
+        painter.fillRect(QRect(covered.right() + 1, covered.top(),
+                               vp.right() - covered.right(), covered.height()),
+                         m_backgroundColor);
     }
 }
 

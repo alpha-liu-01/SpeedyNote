@@ -3947,6 +3947,20 @@ private:
      * @param painter The QPainter to render to (viewport coordinates).
      */
     void drawEraserCursor(QPainter& painter);
+    
+    /**
+     * @brief Fill the background in the bands around an already-covered rect.
+     * @param painter The QPainter to render to (viewport coordinates).
+     * @param coveredLogical Region a subsequent draw will overwrite, in logical
+     *        viewport coordinates.
+     *
+     * The gesture pan path shifts a viewport-sized cached frame, so everything
+     * except an L-shaped strip is about to be overdrawn. Clearing only that
+     * strip removes a full-surface write per frame. Fills at most four bands
+     * and allocates nothing. Rounds @p coveredLogical inward, so a fractional
+     * edge is filled rather than left as a seam.
+     */
+    void fillBackgroundAround(QPainter& painter, const QRectF& coveredLogical);
 
     /**
      * @brief Finalize the eraser lasso gesture: delete all strokes inside the
