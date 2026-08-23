@@ -570,6 +570,20 @@ public:
     }
     
     /**
+     * @brief Repair the caches after a bulk removal confined to one region.
+     * @param removedBounds Region covering every removed stroke (page/tile coords).
+     *
+     * Bulk removals (lasso erase) strip strokes from the vector directly instead
+     * of going through removeStroke(), so they have to repair the caches
+     * themselves. Patching the region the removals were confined to costs only
+     * the strokes overlapping it, where invalidateStrokeCache() would discard
+     * both caches and force a full rebuild on the next paint.
+     */
+    void patchCacheAfterRemovals(const QRectF& removedBounds) {
+        patchCacheAfterRemoval(removedBounds);
+    }
+    
+    /**
      * @brief Release stroke cache memory completely.
      * Call this for pages that are far from the visible area to save memory.
      * The cache will be rebuilt lazily when the page becomes visible again.
