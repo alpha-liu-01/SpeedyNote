@@ -929,27 +929,43 @@ public:
     };
 
     /**
-     * @brief Result of the backing-store versus heap blit comparison.
+     * @brief Raster throughput at viewport size, measured once when benchmarking starts.
      *
-     * DIAGNOSTIC - remove once the question below is answered.
+     * DIAGNOSTIC - remove once the Android blit gap is settled.
      *
-     * The gesture-pan blit costs about 0.9 ms per megapixel on Windows and
-     * 4.6 on Android running the same Snapdragon silicon, and only improves
-     * from 7.3 to 4.6 across the five-year gap from a Cortex-A9 to a
-     * Cortex-A75. A cost that barely tracks CPU generation is not CPU
-     * throughput, which leaves the memory being written or a scalar code path.
-     * Timing the identical blit into the widget's backing store and into a
-     * heap pixmap separates those: a large ratio indicts the backing store's
-     * memory, and near-parity indicts Qt's ARM raster build.
+     * The gesture-pan blit moves a viewport-sized pixmap at roughly 0.9 ms per
+     * megapixel on Windows and 6 on Android running the same Snapdragon, and a
+     * probe already ruled out the destination memory: blitting into an ordinary
+     * heap pixmap is no faster than blitting into the backing store. At 0.65 GB/s
+     * of writes that is six to ten times under what LPDDR4X delivers, so the
+     * limit is the instructions in the loop rather than the memory behind it.
+     *
+     * Comparing the same byte count three ways separates the candidates.
+     * @c memcpy is the ceiling the hardware allows with no Qt in the path, so a
+     * healthy memcpy beside a slow @c drawPixmap convicts Qt's raster code and
+     * makes this a build or SIMD-dispatch problem worth chasing, while a slow
+     * memcpy means the machine itself cannot go faster and we stop.
+     * @c fillRect writes without reading a source, which distinguishes a bad
+     * copy loop from generally bad code generation.
      */
-    struct BlitProbe {
-        qreal storeMs = 0.0;  ///< Mean ms blitting the cached frame to the backing store
-        qreal heapMs = 0.0;   ///< Mean ms for the same blit into heap memory
-        int frames = 0;       ///< Frames accumulated; 0 means nothing sampled yet
+    struct RasterBenchmark {
+        bool valid = false;
+        QString buildArch;      ///< Architecture the binary was compiled for
+        QString runtimeArch;    ///< Architecture actually executing
+        qreal memcpyMs = 0.0;   ///< Raw memcpy of the same byte count
+        qreal fillRectMs = 0.0; ///< QPainter::fillRect over the whole surface
+        qreal blitMs = 0.0;     ///< QPainter::drawPixmap of a full-size pixmap
+        qreal megapixels = 0.0; ///< Surface size each timing covers
+
+        /// @brief Throughput in megapixels per second, comparable to the Fill line.
+        qreal mpixPerSec(qreal ms) const
+        {
+            return ms > 0.0 ? megapixels / (ms / 1000.0) : 0.0;
+        }
     };
 
-    /// @brief Blit comparison collected during gesture pans while benchmarking.
-    BlitProbe blitProbe() const { return m_blitProbe; }
+    /// @brief Throughput suite captured at the last startBenchmark(); invalid until then.
+    RasterBenchmark rasterBenchmark() const { return m_rasterBenchmark; }
     
     /**
      * @brief Collect the display and render-tier context for the perf HUD.
@@ -3165,25 +3181,21 @@ private:
      */
     static constexpr int EDGELESS_STROKE_MARGIN = 100;
     
-    // ===== DIAGNOSTIC: backing store versus heap blit cost =====
-    // Remove along with runBlitProbe() and the HUD line once resolved.
-    // See the BlitProbe docs above for what this is asking and why.
-    QPixmap m_blitProbeTarget;        ///< Heap-resident destination, cached-frame sized
-    BlitProbe m_blitProbe;            ///< Running means, reset when benchmarking toggles
-    bool m_blitProbeHeapFirst = false; ///< Alternates so neither side always finds a warm source
+    // ===== DIAGNOSTIC: raster throughput suite =====
+    // Remove along with runRasterBenchmark() and the HUD lines once resolved.
+    // See the RasterBenchmark docs above for what this is asking and why.
+    RasterBenchmark m_rasterBenchmark;
     
     /**
-     * @brief Time the cached-frame blit into the backing store and into heap memory.
-     * @param painter The viewport painter, positioned as the pan branch left it.
-     * @param offset Where the cached frame is being drawn, in logical pixels.
+     * @brief Measure memcpy, fillRect and drawPixmap over one viewport of pixels.
+     * @return Median timings; the surface falls back to 1024x768 if the widget
+     *         has no size yet.
      *
-     * Performs the real blit, so the pan still renders correctly, plus one
-     * throwaway blit into @ref m_blitProbeTarget. Only the ratio is meaningful,
-     * so both are timed identically and the order alternates per frame: two
-     * back-to-back blits of an 8 MB source would otherwise leave it cached for
-     * whichever ran second and manufacture the difference we are looking for.
+     * Allocates and touches several viewport-sized buffers, so it is called from
+     * startBenchmark() on the keypress rather than from paintEvent, where it
+     * would appear as a spike in the very statistics it sits beside.
      */
-    void runBlitProbe(QPainter& painter, const QPointF& offset);
+    RasterBenchmark runRasterBenchmark() const;
     
     // ===== Undo/Redo State (unified) =====
     QStack<UndoAction> m_undoStack;   ///< Global undo stack (both paged and edgeless)

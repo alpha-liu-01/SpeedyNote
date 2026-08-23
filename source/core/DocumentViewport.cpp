@@ -38,6 +38,9 @@
 #include <QThreadStorage> // For thread-local PDF provider caching
 #include <cmath>      // For std::floor, std::ceil
 #include <algorithm>  // For std::remove_if
+#include <vector>     // DIAGNOSTIC: runRasterBenchmark() sample buffers
+#include <cstring>    // DIAGNOSTIC: runRasterBenchmark() memcpy baseline
+#include <QSysInfo>   // DIAGNOSTIC: runRasterBenchmark() architecture readout
 #include <limits>
 #include <climits>    // For INT_MIN (Phase O3.5.5: affinity filtering)
 #include <set>        // For touched-container tracking (Phase M.9)
@@ -2906,15 +2909,7 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
             // Clear only what the shifted frame won't cover.
             fillBackgroundAround(painter, QRectF(panDeltaPixels, logicalSize));
             
-            // DIAGNOSTIC (see BlitProbe): while benchmarking, time this blit
-            // against the same one into heap memory. It doubles the blit work,
-            // so the Pan bucket's own timings are inflated whenever the perf HUD
-            // is on - read the Blit line, not Pan, when interpreting this.
-            if (m_perf.isEnabled()) {
-                runBlitProbe(painter, panDeltaPixels);
-            } else {
-                painter.drawPixmap(panDeltaPixels, m_gesture.cachedFrame);
-            }
+            painter.drawPixmap(panDeltaPixels, m_gesture.cachedFrame);
         } else {
             // Defensive: ViewportGestureState::ZoomAndPan is declared but never
             // assigned. If that changes, clear rather than present a stale
@@ -15150,56 +15145,6 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
     }
 }
 
-void DocumentViewport::runBlitProbe(QPainter& painter, const QPointF& offset)
-{
-    if (m_gesture.cachedFrame.isNull()) {
-        return;
-    }
-    
-    // A QPixmap matches the backing store's pixel format on the raster platform,
-    // so the only variable left between the two blits is which memory is written.
-    if (m_blitProbeTarget.size() != m_gesture.cachedFrame.size()) {
-        m_blitProbeTarget = QPixmap(m_gesture.cachedFrame.size());
-        m_blitProbeTarget.setDevicePixelRatio(m_gesture.cachedFrame.devicePixelRatio());
-        m_blitProbeTarget.fill(Qt::white);
-    }
-    
-    QElapsedTimer timer;
-    qreal storeMs = 0.0;
-    qreal heapMs = 0.0;
-    
-    auto blitToStore = [&]() {
-        timer.start();
-        painter.drawPixmap(offset, m_gesture.cachedFrame);
-        storeMs = timer.nsecsElapsed() / 1e6;
-    };
-    
-    auto blitToHeap = [&]() {
-        QPainter heapPainter(&m_blitProbeTarget);
-        heapPainter.setRenderHint(QPainter::SmoothPixmapTransform, false);
-        // Constructed before the clock starts and destroyed after it stops, so
-        // painter setup and teardown stay out of the measurement.
-        timer.start();
-        heapPainter.drawPixmap(offset, m_gesture.cachedFrame);
-        heapMs = timer.nsecsElapsed() / 1e6;
-    };
-    
-    if (m_blitProbeHeapFirst) {
-        blitToHeap();
-        blitToStore();
-    } else {
-        blitToStore();
-        blitToHeap();
-    }
-    m_blitProbeHeapFirst = !m_blitProbeHeapFirst;
-    
-    // Cumulative mean, so a sustained pan converges rather than tracking the
-    // most recent frame.
-    ++m_blitProbe.frames;
-    m_blitProbe.storeMs += (storeMs - m_blitProbe.storeMs) / m_blitProbe.frames;
-    m_blitProbe.heapMs += (heapMs - m_blitProbe.heapMs) / m_blitProbe.frames;
-}
-
 void DocumentViewport::fillBackgroundAround(QPainter& painter, const QRectF& coveredLogical)
 {
     const QRect vp = rect();
@@ -16925,19 +16870,92 @@ int DocumentViewport::getMaxAffinity() const
 
 // ===== Performance Instrumentation =====
 
+DocumentViewport::RasterBenchmark DocumentViewport::runRasterBenchmark() const
+{
+    // Enough samples to take a median without making the F10 keypress feel stuck;
+    // at ~12 ms for the slowest case this is a fraction of a second in total.
+    constexpr int kSamples = 5;
+    
+    // Median rather than mean: one scheduler preemption should not decide it.
+    auto median = [](std::vector<qreal>& samples) {
+        if (samples.empty()) {
+            return 0.0;
+        }
+        std::sort(samples.begin(), samples.end());
+        return samples[samples.size() / 2];
+    };
+    
+    RasterBenchmark result;
+    result.buildArch = QSysInfo::buildCpuArchitecture();
+    result.runtimeArch = QSysInfo::currentCpuArchitecture();
+    
+    // Device pixels, so the byte count matches what a real pan frame moves.
+    const qreal dpr = devicePixelRatioF();
+    const QSize surface(qMax(64, qRound(width() * dpr)), qMax(64, qRound(height() * dpr)));
+    const qsizetype bytes = qsizetype(surface.width()) * surface.height() * 4;
+    result.megapixels = double(surface.width()) * surface.height() / 1e6;
+    
+    QElapsedTimer timer;
+    
+    // Raw memcpy: what the memory system allows with no Qt in the path at all.
+    {
+        std::vector<quint8> src(size_t(bytes), 0x5a);
+        std::vector<quint8> dst(size_t(bytes), 0x00);
+        std::vector<qreal> samples;
+        for (int i = 0; i < kSamples; ++i) {
+            timer.start();
+            std::memcpy(dst.data(), src.data(), size_t(bytes));
+            samples.push_back(timer.nsecsElapsed() / 1e6);
+        }
+        result.memcpyMs = median(samples);
+    }
+    
+    // fillRect writes without reading a source, so a slow fill next to a healthy
+    // memcpy points at Qt's code generation rather than at the copy loop.
+    {
+        QImage target(surface, QImage::Format_ARGB32_Premultiplied);
+        std::vector<qreal> samples;
+        for (int i = 0; i < kSamples; ++i) {
+            QPainter painter(&target);
+            timer.start();
+            painter.fillRect(QRect(QPoint(0, 0), surface), QColor(40, 90, 160));
+            samples.push_back(timer.nsecsElapsed() / 1e6);
+        }
+        result.fillRectMs = median(samples);
+    }
+    
+    // The operation the gesture-pan fast path performs: unscaled, unclipped,
+    // aligned, full-surface. Painters are built outside the timed region so
+    // their setup and teardown stay out of the number.
+    {
+        QPixmap source(surface);
+        source.fill(QColor(40, 90, 160));
+        QPixmap target(surface);
+        target.fill(Qt::white);
+        std::vector<qreal> samples;
+        for (int i = 0; i < kSamples; ++i) {
+            QPainter painter(&target);
+            painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+            timer.start();
+            painter.drawPixmap(0, 0, source);
+            samples.push_back(timer.nsecsElapsed() / 1e6);
+        }
+        result.blitMs = median(samples);
+    }
+    
+    result.valid = true;
+    return result;
+}
+
 void DocumentViewport::startBenchmark()
 {
     m_perf.setEnabled(true);
-    m_blitProbe = BlitProbe{};
+    m_rasterBenchmark = runRasterBenchmark();
 }
 
 void DocumentViewport::stopBenchmark()
 {
     m_perf.setEnabled(false);
-    // Release the probe's viewport-sized scratch pixmap; it is only wanted while
-    // measuring, and on a small tablet it is several megabytes.
-    m_blitProbe = BlitProbe{};
-    m_blitProbeTarget = QPixmap();
 }
 
 int DocumentViewport::getPaintRate() const
