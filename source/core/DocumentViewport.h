@@ -929,69 +929,6 @@ public:
     };
 
     /**
-     * @brief Raster throughput at viewport size, measured once when benchmarking starts.
-     *
-     * DIAGNOSTIC - remove once the Android blit gap is settled.
-     *
-     * The gesture-pan blit moves a viewport-sized pixmap at roughly 0.9 ms per
-     * megapixel on Windows and 6 on Android running the same Snapdragon, and a
-     * probe already ruled out the destination memory: blitting into an ordinary
-     * heap pixmap is no faster than blitting into the backing store. At 0.65 GB/s
-     * of writes that is six to ten times under what LPDDR4X delivers, so the
-     * limit is the instructions in the loop rather than the memory behind it.
-     *
-     * Comparing the same byte count three ways separates the candidates.
-     * @c memcpy is the ceiling the hardware allows with no Qt in the path, so a
-     * healthy memcpy beside a slow @c drawPixmap convicts Qt's raster code and
-     * makes this a build or SIMD-dispatch problem worth chasing, while a slow
-     * memcpy means the machine itself cannot go faster and we stop.
-     * @c fillRect writes without reading a source, which distinguishes a bad
-     * copy loop from generally bad code generation.
-     */
-    struct RasterBenchmark {
-        bool valid = false;
-        QString buildArch;      ///< Architecture the binary was compiled for
-        QString runtimeArch;    ///< Architecture actually executing
-        qreal memcpyMs = 0.0;   ///< Raw memcpy of the same byte count
-        qreal fillRectMs = 0.0; ///< QPainter::fillRect over the whole surface
-        qreal megapixels = 0.0; ///< Surface size each timing covers
-
-        /// @brief One source-to-destination format pairing and what it cost.
-        struct BlitCase {
-            QString label;   ///< Short "src>dst" tag for the HUD
-            qreal ms = 0.0;  ///< Median time for a full-surface blit
-        };
-
-        /**
-         * @brief Blit cost per format pairing, in the order declared below.
-         *
-         * The earlier suite only varied the source and always wrote into a
-         * QPixmap, but the pan path writes into the widget's backing store,
-         * which need not share QPixmap's format. If that store is byte-ordered
-         * for GL texture upload while QPixmap is native-endian, a native-endian
-         * opaque source still needs a per-pixel swizzle to reach it and Qt will
-         * not memcpy - which would explain an opaque source buying nothing in
-         * the real path despite winning 7x in the synthetic one. Whichever
-         * pairing here matches the observed Pan paint cost identifies the
-         * store's real format, and the fastest opaque pairing is the one the
-         * snapshot should be captured in.
-         */
-        QVector<BlitCase> blits;
-
-        bool snapshotHasAlpha = false;   ///< Did the last real grabOpaqueViewport() carry alpha
-        bool snapshotValid = false;      ///< Whether a real snapshot has been taken yet
-
-        /// @brief Throughput in megapixels per second, comparable to the Fill line.
-        qreal mpixPerSec(qreal ms) const
-        {
-            return ms > 0.0 ? megapixels / (ms / 1000.0) : 0.0;
-        }
-    };
-
-    /// @brief Throughput suite captured at the last startBenchmark(); invalid until then.
-    RasterBenchmark rasterBenchmark() const { return m_rasterBenchmark; }
-    
-    /**
      * @brief Collect the display and render-tier context for the perf HUD.
      *
      * The stroke cache tier matters because it depends on
@@ -3204,26 +3141,6 @@ private:
      * region by this much, or it will miss strokes bulging in from a neighbour.
      */
     static constexpr int EDGELESS_STROKE_MARGIN = 100;
-    
-    // ===== DIAGNOSTIC: raster throughput suite =====
-    // Remove along with runRasterBenchmark() and the HUD lines once resolved.
-    // See the RasterBenchmark docs above for what this is asking and why.
-    RasterBenchmark m_rasterBenchmark;
-    // Latched from the real snapshot path, since the cached frame is released at
-    // gesture end and would read as null by the time the HUD refreshes.
-    bool m_lastSnapshotHadAlpha = false;
-    bool m_lastSnapshotValid = false;
-    
-    /**
-     * @brief Measure memcpy, fillRect and drawPixmap over one viewport of pixels.
-     * @return Median timings; the surface falls back to 1024x768 if the widget
-     *         has no size yet.
-     *
-     * Allocates and touches several viewport-sized buffers, so it is called from
-     * startBenchmark() on the keypress rather than from paintEvent, where it
-     * would appear as a spike in the very statistics it sits beside.
-     */
-    RasterBenchmark runRasterBenchmark() const;
     
     // ===== Undo/Redo State (unified) =====
     QStack<UndoAction> m_undoStack;   ///< Global undo stack (both paged and edgeless)

@@ -265,12 +265,6 @@ QSize DebugOverlay::perfModeSize() const
         "Compose: 9999.9 fps | paint 9999.9ms avg, 9999.9 p95, 9999.9 max (99s ago)\n"
         "Partial: 9999.9 fps | paint 9999.9ms avg, 9999.9 p95, 9999.9 max (99s ago)\n"
         "Fill:    99999 Mpix/s | 99.99 MP/frame\n"
-        "Arch:    build wwwwwwww | runtime wwwwwwww | 99.99 MP surface\n"
-        "Raster:  memcpy 999.99ms 99999Mp/s | fill 999.99ms 99999Mp/s\n"
-        "Snap:    - (pan once to capture a snapshot)\n"
-        "Blit:    wwwwwwwww 999.99ms 99999Mp/s   wwwwwwwww 999.99ms 99999Mp/s\n"
-        "Blit:    wwwwwwwww 999.99ms 99999Mp/s   wwwwwwwww 999.99ms 99999Mp/s\n"
-        "Blit:    wwwwwwwww 999.99ms 99999Mp/s   wwwwwwwww 999.99ms 99999Mp/s\n"
         "Verdict: PRESENT-BOUND - paint 9999.9 of 9999.9ms, residual 9999.9ms\n"
         "Surface: 99999x99999 phys @9.99dpr | vp 99999x99999 | 999.9Hz | tier Capped");
     
@@ -346,44 +340,6 @@ QString DebugOverlay::generatePerfInfo() const
                      .arg(s.residualMs, 0, 'f', 1);
     } else {
         lines << QStringLiteral("Fill:    - (pan or scroll to collect samples)");
-    }
-    
-    // DIAGNOSTIC (see DocumentViewport::RasterBenchmark): the same byte count moved
-    // three ways. memcpy is the hardware ceiling with no Qt in the path, so a
-    // healthy memcpy beside a slow blit convicts Qt's raster code; a slow memcpy
-    // means the machine cannot go faster. fillRect writes without reading a source.
-    const DocumentViewport::RasterBenchmark rb = m_viewport->rasterBenchmark();
-    if (rb.valid) {
-        lines << QStringLiteral("Arch:    build %1 | runtime %2 | %3 MP surface")
-                     .arg(rb.buildArch, rb.runtimeArch)
-                     .arg(rb.megapixels, 0, 'f', 2);
-        lines << QStringLiteral("Raster:  memcpy %1ms %2Mp/s | fill %3ms %4Mp/s")
-                     .arg(rb.memcpyMs, 0, 'f', 2)
-                     .arg(rb.mpixPerSec(rb.memcpyMs), 0, 'f', 0)
-                     .arg(rb.fillRectMs, 0, 'f', 2)
-                     .arg(rb.mpixPerSec(rb.fillRectMs), 0, 'f', 0);
-        // Whether the real snapshot came out opaque decides whether the fix is
-        // even in effect; fromImage() is free to convert back to platform format.
-        lines << QStringLiteral("Snap:    %1")
-                     .arg(!rb.snapshotValid
-                              ? QStringLiteral("- (pan once to capture a snapshot)")
-                              : (rb.snapshotHasAlpha
-                                     ? QStringLiteral("HAS ALPHA - fix not in effect")
-                                     : QStringLiteral("opaque - fix in effect")));
-        
-        // Two pairings per line to stay inside a phone-width overlay. The pairing
-        // whose cost matches the live Pan paint identifies the backing store's
-        // real format; the cheapest opaque pairing is what to capture in.
-        for (int i = 0; i < rb.blits.size(); i += 2) {
-            QString line = QStringLiteral("Blit:  ");
-            for (int j = i; j < qMin(i + 2, rb.blits.size()); ++j) {
-                line += QStringLiteral("  %1 %2ms %3Mp/s")
-                            .arg(rb.blits[j].label, -9)
-                            .arg(rb.blits[j].ms, 0, 'f', 2)
-                            .arg(rb.mpixPerSec(rb.blits[j].ms), 0, 'f', 0);
-            }
-            lines << line;
-        }
     }
     
     // Physical viewport pixels are what the rasterizer actually fills, and the

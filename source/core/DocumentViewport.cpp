@@ -38,9 +38,6 @@
 #include <QThreadStorage> // For thread-local PDF provider caching
 #include <cmath>      // For std::floor, std::ceil
 #include <algorithm>  // For std::remove_if
-#include <vector>     // DIAGNOSTIC: runRasterBenchmark() sample buffers
-#include <cstring>    // DIAGNOSTIC: runRasterBenchmark() memcpy baseline
-#include <QSysInfo>   // DIAGNOSTIC: runRasterBenchmark() architecture readout
 #include <limits>
 #include <climits>    // For INT_MIN (Phase O3.5.5: affinity filtering)
 #include <set>        // For touched-container tracking (Phase M.9)
@@ -15168,12 +15165,6 @@ QPixmap DocumentViewport::grabOpaqueViewport()
     QPixmap snapshot = QPixmap::fromImage(std::move(frame));
     // fromImage() may or may not carry the ratio across; callers scale by it.
     snapshot.setDevicePixelRatio(dpr);
-    
-    // DIAGNOSTIC: fromImage() is free to convert back to the platform format,
-    // which would hand back the alpha channel and silently undo this.
-    m_lastSnapshotHadAlpha = snapshot.hasAlphaChannel();
-    m_lastSnapshotValid = true;
-    
     return snapshot;
 }
 
@@ -16902,118 +16893,9 @@ int DocumentViewport::getMaxAffinity() const
 
 // ===== Performance Instrumentation =====
 
-DocumentViewport::RasterBenchmark DocumentViewport::runRasterBenchmark() const
-{
-    // Enough samples to take a median without making the F10 keypress feel stuck;
-    // at ~12 ms for the slowest case this is a fraction of a second in total.
-    constexpr int kSamples = 5;
-    
-    // Median rather than mean: one scheduler preemption should not decide it.
-    auto median = [](std::vector<qreal>& samples) {
-        if (samples.empty()) {
-            return 0.0;
-        }
-        std::sort(samples.begin(), samples.end());
-        return samples[samples.size() / 2];
-    };
-    
-    RasterBenchmark result;
-    result.buildArch = QSysInfo::buildCpuArchitecture();
-    result.runtimeArch = QSysInfo::currentCpuArchitecture();
-    
-    // Device pixels, so the byte count matches what a real pan frame moves.
-    const qreal dpr = devicePixelRatioF();
-    const QSize surface(qMax(64, qRound(width() * dpr)), qMax(64, qRound(height() * dpr)));
-    const qsizetype bytes = qsizetype(surface.width()) * surface.height() * 4;
-    result.megapixels = double(surface.width()) * surface.height() / 1e6;
-    
-    QElapsedTimer timer;
-    
-    // Raw memcpy: what the memory system allows with no Qt in the path at all.
-    {
-        std::vector<quint8> src(size_t(bytes), 0x5a);
-        std::vector<quint8> dst(size_t(bytes), 0x00);
-        std::vector<qreal> samples;
-        // Nothing else reads dst, so the copy is dead code the optimizer will
-        // delete outright. Sampling a byte into a volatile after each timing
-        // keeps the buffer live without adding to the measurement.
-        volatile quint8 sink = 0;
-        for (int i = 0; i < kSamples; ++i) {
-            timer.start();
-            std::memcpy(dst.data(), src.data(), size_t(bytes));
-            samples.push_back(timer.nsecsElapsed() / 1e6);
-            sink = dst[size_t(i) % size_t(bytes)];
-        }
-        Q_UNUSED(sink);
-        result.memcpyMs = median(samples);
-    }
-    
-    // fillRect writes without reading a source, so a slow fill next to a healthy
-    // memcpy points at Qt's code generation rather than at the copy loop.
-    {
-        QImage target(surface, QImage::Format_ARGB32_Premultiplied);
-        std::vector<qreal> samples;
-        for (int i = 0; i < kSamples; ++i) {
-            QPainter painter(&target);
-            timer.start();
-            painter.fillRect(QRect(QPoint(0, 0), surface), QColor(40, 90, 160));
-            samples.push_back(timer.nsecsElapsed() / 1e6);
-        }
-        result.fillRectMs = median(samples);
-    }
-    
-    // The operation the gesture-pan fast path performs: unscaled, unclipped,
-    // aligned, full-surface. Painters are built outside the timed region so
-    // their setup and teardown stay out of the number.
-    {
-        // QImage on both sides, because QPixmap's format is chosen by the
-        // platform and the whole question here is which format pairing is in
-        // play. drawImage and drawPixmap resolve to the same blend functions.
-        auto timePair = [&](QImage::Format srcFormat, QImage::Format dstFormat) {
-            QImage source(surface, srcFormat);
-            source.fill(QColor(40, 90, 160));
-            QImage target(surface, dstFormat);
-            target.fill(Qt::white);
-            
-            std::vector<qreal> samples;
-            for (int i = 0; i < kSamples; ++i) {
-                QPainter painter(&target);
-                painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
-                timer.start();
-                painter.drawImage(0, 0, source);
-                samples.push_back(timer.nsecsElapsed() / 1e6);
-            }
-            return median(samples);
-        };
-        
-        // Native-endian is what QPixmap uses; byte-ordered RGBA is what a
-        // GL-backed backing store wants for texture upload. Each pairing is
-        // labelled src>dst, with x marking an opaque (alpha-free) format.
-        const struct { const char* label; QImage::Format src; QImage::Format dst; } cases[] = {
-            {"argb>argb", QImage::Format_ARGB32_Premultiplied,   QImage::Format_ARGB32_Premultiplied},
-            {"rgbx>argb", QImage::Format_RGB32,                  QImage::Format_ARGB32_Premultiplied},
-            {"gl>gl",     QImage::Format_RGBA8888_Premultiplied, QImage::Format_RGBA8888_Premultiplied},
-            {"glx>gl",    QImage::Format_RGBX8888,               QImage::Format_RGBA8888_Premultiplied},
-            {"rgbx>gl",   QImage::Format_RGB32,                  QImage::Format_RGBA8888_Premultiplied},
-            {"argb>gl",   QImage::Format_ARGB32_Premultiplied,   QImage::Format_RGBA8888_Premultiplied},
-        };
-        
-        result.blits.reserve(int(std::size(cases)));
-        for (const auto& c : cases) {
-            result.blits.append({QString::fromLatin1(c.label), timePair(c.src, c.dst)});
-        }
-    }
-    
-    result.snapshotHasAlpha = m_lastSnapshotHadAlpha;
-    result.snapshotValid = m_lastSnapshotValid;
-    result.valid = true;
-    return result;
-}
-
 void DocumentViewport::startBenchmark()
 {
     m_perf.setEnabled(true);
-    m_rasterBenchmark = runRasterBenchmark();
 }
 
 void DocumentViewport::stopBenchmark()
