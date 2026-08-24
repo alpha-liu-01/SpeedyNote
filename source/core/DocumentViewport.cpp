@@ -3740,15 +3740,32 @@ QPointF DocumentViewport::applyTrackpadAxisLock(const QWheelEvent* event,
         m_scrollLockAccum += QPointF(dx, dy);
         const qreal ax = qAbs(m_scrollLockAccum.x());
         const qreal ay = qAbs(m_scrollLockAccum.y());
+        const qreal strong = qMax(ax, ay);
 
-        if (qMax(ax, ay) < SCROLL_LOCK_DECIDE_PX) {
+        if (strong < SCROLL_LOCK_DECIDE_PX) {
             // Still ambiguous.  Pass both axes through so scrolling responds
             // from the very first event; the leak is bounded by the threshold.
             return scrollDelta;
         }
+
+        // A gesture already travelling well off-axis is a deliberate diagonal.
+        // Locking it just to make the user fight back out is wasted effort, so
+        // commit straight to Free.
+        if (qMin(ax, ay) >= strong * SCROLL_LOCK_DIAGONAL_RATIO) {
+            m_scrollLock = ScrollAxisLock::Free;
+            return scrollDelta;
+        }
+
         m_scrollLock = (ay >= ax) ? ScrollAxisLock::Vertical
                                   : ScrollAxisLock::Horizontal;
         m_scrollLockCross = 0.0;
+    }
+
+    // Once released, stay released until the next gesture.  Re-evaluating here
+    // is what made a diagonal impossible to hold: the lock kept re-forming
+    // under the user mid-drag.
+    if (m_scrollLock == ScrollAxisLock::Free) {
+        return scrollDelta;
     }
 
     const bool vertical = (m_scrollLock == ScrollAxisLock::Vertical);
@@ -3757,7 +3774,7 @@ QPointF DocumentViewport::applyTrackpadAxisLock(const QWheelEvent* event,
 
     // Momentum must never break a lock the user's fingers established.
     if (event->phase() != Qt::ScrollMomentum) {
-        if (qAbs(cross) > qAbs(along)) {
+        if (qAbs(cross) > qAbs(along) * SCROLL_LOCK_CROSS_RATIO) {
             // Reversing direction restarts the push, so a wobble that happens to
             // straddle the threshold cannot creep past it.
             if (!qFuzzyIsNull(m_scrollLockCross) && (cross > 0) != (m_scrollLockCross > 0)) {
@@ -3765,17 +3782,18 @@ QPointF DocumentViewport::applyTrackpadAxisLock(const QWheelEvent* event,
             }
             m_scrollLockCross += cross;
         } else {
-            // This event was predominantly along the locked axis.  Discarding the
-            // push here is what separates a deliberate change of direction from a
-            // sustained slight diagonal, which should never flip the lock however
-            // long it goes on.
+            // Too shallow to be intent.  Discarding it is what keeps a straight
+            // scroll straight however far it runs, since every one of its cross
+            // deltas shares a sign and would otherwise accumulate.
             m_scrollLockCross = 0.0;
         }
 
         if (qAbs(m_scrollLockCross) >= SCROLL_LOCK_BREAKOUT_PX) {
-            m_scrollLock = vertical ? ScrollAxisLock::Horizontal
-                                    : ScrollAxisLock::Vertical;
+            // Release rather than flip to the perpendicular axis.  The user is
+            // steering, and a flip would only trade one fight for another.
+            m_scrollLock = ScrollAxisLock::Free;
             m_scrollLockCross = 0.0;
+            return scrollDelta;
         }
     }
 

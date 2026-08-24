@@ -3230,18 +3230,27 @@ private:
     enum class ScrollAxisLock {
         Undecided,   ///< Too little travel so far to know what the user meant
         Vertical,    ///< X suppressed
-        Horizontal   ///< Y suppressed
+        Horizontal,  ///< Y suppressed
+        Free         ///< Both axes pass; the user is steering diagonally
     };
     
     ScrollAxisLock m_scrollLock = ScrollAxisLock::Undecided;
     QPointF m_scrollLockAccum;         ///< Travel since gesture start, screen px
     qreal m_scrollLockCross = 0.0;     ///< Signed cross-axis push since lock, screen px
     
-    /// Accumulated travel before committing to an axis.  Small enough that the
-    /// cross-axis leak before the decision is imperceptible.
-    static constexpr qreal SCROLL_LOCK_DECIDE_PX = 8.0;
-    /// Consistent cross-axis travel needed to flip the lock.
-    static constexpr qreal SCROLL_LOCK_BREAKOUT_PX = 40.0;
+    /// Accumulated travel before committing.  Wide enough to sample the gesture's
+    /// real direction instead of latching onto the jitter of its first event.
+    static constexpr qreal SCROLL_LOCK_DECIDE_PX = 12.0;
+    /// Consistent cross-axis travel needed to release the lock.
+    static constexpr qreal SCROLL_LOCK_BREAKOUT_PX = 24.0;
+    /// A sideways push only counts toward release once it exceeds this fraction
+    /// of the same event's along-axis motion.  Below it the motion is drift
+    /// rather than intent, and letting it accumulate would unlock a straight
+    /// scroll.  Above roughly 1.0 no real diagonal can ever escape.
+    static constexpr qreal SCROLL_LOCK_CROSS_RATIO = 0.4;
+    /// If the weaker axis is at least this fraction of the stronger when the
+    /// gesture commits, it is already diagonal by intent, so never lock it.
+    static constexpr qreal SCROLL_LOCK_DIAGONAL_RATIO = 0.5;
     
     /**
      * @brief Suppress off-axis scrolling for macOS trackpad gestures.
