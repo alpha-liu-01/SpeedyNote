@@ -3238,19 +3238,25 @@ private:
     QPointF m_scrollLockAccum;         ///< Travel since gesture start, screen px
     qreal m_scrollLockCross = 0.0;     ///< Signed cross-axis push since lock, screen px
     
-    /// Accumulated travel before committing.  Wide enough to sample the gesture's
-    /// real direction instead of latching onto the jitter of its first event.
-    static constexpr qreal SCROLL_LOCK_DECIDE_PX = 12.0;
-    /// Consistent cross-axis travel needed to release the lock.
-    static constexpr qreal SCROLL_LOCK_BREAKOUT_PX = 24.0;
+    // The four numbers below trade "keeps a straight scroll straight" against
+    // "lets a deliberate diagonal through".  They are the only tuning knobs.
+    
+    /// Accumulated travel before committing.  Enough to sample the gesture's real
+    /// direction rather than its opening jitter, but every pixel of it is a
+    /// window where both axes still pass, so it cannot grow far.
+    static constexpr qreal SCROLL_LOCK_DECIDE_PX = 10.0;
+    /// Consistent cross-axis travel needed to release the lock mid-gesture.
+    static constexpr qreal SCROLL_LOCK_BREAKOUT_PX = 36.0;
     /// A sideways push only counts toward release once it exceeds this fraction
-    /// of the same event's along-axis motion.  Below it the motion is drift
-    /// rather than intent, and letting it accumulate would unlock a straight
-    /// scroll.  Above roughly 1.0 no real diagonal can ever escape.
-    static constexpr qreal SCROLL_LOCK_CROSS_RATIO = 0.4;
+    /// of the same event's along-axis motion, i.e. steeper than ~31 degrees off
+    /// the locked axis.  Below it the motion reads as drift, and letting it
+    /// accumulate would unlock a straight scroll.  At 1.0 and above no real
+    /// diagonal can ever escape, which is the failure mode to avoid.
+    static constexpr qreal SCROLL_LOCK_CROSS_RATIO = 0.6;
     /// If the weaker axis is at least this fraction of the stronger when the
-    /// gesture commits, it is already diagonal by intent, so never lock it.
-    static constexpr qreal SCROLL_LOCK_DIAGONAL_RATIO = 0.5;
+    /// gesture commits, it started diagonal by intent, so never lock it.  Set
+    /// well clear of a casual crooked swipe: this is ~35 degrees off-axis.
+    static constexpr qreal SCROLL_LOCK_DIAGONAL_RATIO = 0.7;
     
     /**
      * @brief Suppress off-axis scrolling for macOS trackpad gestures.
