@@ -3221,6 +3221,43 @@ private:
      */
     void onGestureTimeout();
     
+    // ===== macOS Trackpad Axis Lock =====
+    // Windows precision touchpads and libinput lock a scroll gesture to one axis
+    // at the driver level.  macOS does not: it delivers raw two-axis deltas as
+    // QWheelEvent, so scrolling straight by hand is difficult.  This reproduces
+    // the lock in-app, using the scroll phases that Qt only reports on macOS.
+    
+    enum class ScrollAxisLock {
+        Undecided,   ///< Too little travel so far to know what the user meant
+        Vertical,    ///< X suppressed
+        Horizontal   ///< Y suppressed
+    };
+    
+    ScrollAxisLock m_scrollLock = ScrollAxisLock::Undecided;
+    QPointF m_scrollLockAccum;         ///< Travel since gesture start, screen px
+    qreal m_scrollLockCross = 0.0;     ///< Signed cross-axis push since lock, screen px
+    
+    /// Accumulated travel before committing to an axis.  Small enough that the
+    /// cross-axis leak before the decision is imperceptible.
+    static constexpr qreal SCROLL_LOCK_DECIDE_PX = 8.0;
+    /// Consistent cross-axis travel needed to flip the lock.
+    static constexpr qreal SCROLL_LOCK_BREAKOUT_PX = 40.0;
+    
+    /**
+     * @brief Suppress off-axis scrolling for macOS trackpad gestures.
+     * @param event The wheel event being handled.
+     * @param scrollDelta Scroll delta in document units.
+     * @param pixelDelta The event's raw pixel delta, used for the thresholds so
+     *                   that the feel does not change with zoom.
+     * @return scrollDelta with the locked-out axis zeroed, or unchanged if this
+     *         event is not a phase-carrying trackpad scroll.
+     *
+     * No-op on platforms other than macOS.
+     */
+    QPointF applyTrackpadAxisLock(const QWheelEvent* event,
+                                  QPointF scrollDelta,
+                                  QPoint pixelDelta);
+    
     // ===== Private Methods =====
     
     /**

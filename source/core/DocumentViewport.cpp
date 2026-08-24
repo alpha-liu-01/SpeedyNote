@@ -3696,6 +3696,102 @@ void DocumentViewport::showObjectContextMenu(const QPoint& globalPos)
     menu.exec(globalPos);
 }
 
+QPointF DocumentViewport::applyTrackpadAxisLock(const QWheelEvent* event,
+                                                QPointF scrollDelta,
+                                                QPoint pixelDelta)
+{
+#ifdef Q_OS_MACOS
+    // A conventional wheel reports no phase and no pixel delta.  Its discrete
+    // steps need no help staying on one axis, and without phases there is no
+    // gesture boundary to latch a decision against.
+    if (event->phase() == Qt::NoScrollPhase || pixelDelta.isNull()) {
+        return scrollDelta;
+    }
+
+    // Shift and backtick are explicit requests for a specific axis (see the
+    // dispatch below), so the lock must not second-guess them.
+    if ((event->modifiers() & Qt::ShiftModifier) || m_backtickHeld) {
+        return scrollDelta;
+    }
+
+    // ScrollBegin is the only reliable reset point.  macOS sends ScrollEnd when
+    // the fingers lift, then keeps sending momentum updates followed by a second
+    // ScrollEnd, so resetting on ScrollEnd would unlock mid-fling and let the
+    // momentum drift off-axis.
+    if (event->phase() == Qt::ScrollBegin) {
+        m_scrollLock = ScrollAxisLock::Undecided;
+        m_scrollLockAccum = QPointF();
+        m_scrollLockCross = 0.0;
+    }
+
+    // The toolbar's Y-axis-only mode is a hard lock, matching what
+    // TouchGestureHandler applies to touchscreen pans.  Disabled is deliberately
+    // not treated as "no lock": it means no touchscreen gestures, and on a Mac
+    // the trackpad is the primary way to scroll.
+    if (touchGestureMode() == TouchGestureMode::YAxisOnly) {
+        scrollDelta.setX(0);
+        return scrollDelta;
+    }
+
+    const qreal dx = pixelDelta.x();
+    const qreal dy = pixelDelta.y();
+
+    if (m_scrollLock == ScrollAxisLock::Undecided) {
+        m_scrollLockAccum += QPointF(dx, dy);
+        const qreal ax = qAbs(m_scrollLockAccum.x());
+        const qreal ay = qAbs(m_scrollLockAccum.y());
+
+        if (qMax(ax, ay) < SCROLL_LOCK_DECIDE_PX) {
+            // Still ambiguous.  Pass both axes through so scrolling responds
+            // from the very first event; the leak is bounded by the threshold.
+            return scrollDelta;
+        }
+        m_scrollLock = (ay >= ax) ? ScrollAxisLock::Vertical
+                                  : ScrollAxisLock::Horizontal;
+        m_scrollLockCross = 0.0;
+    }
+
+    const bool vertical = (m_scrollLock == ScrollAxisLock::Vertical);
+    const qreal along = vertical ? dy : dx;
+    const qreal cross = vertical ? dx : dy;
+
+    // Momentum must never break a lock the user's fingers established.
+    if (event->phase() != Qt::ScrollMomentum) {
+        if (qAbs(cross) > qAbs(along)) {
+            // Reversing direction restarts the push, so a wobble that happens to
+            // straddle the threshold cannot creep past it.
+            if (!qFuzzyIsNull(m_scrollLockCross) && (cross > 0) != (m_scrollLockCross > 0)) {
+                m_scrollLockCross = 0.0;
+            }
+            m_scrollLockCross += cross;
+        } else {
+            // This event was predominantly along the locked axis.  Discarding the
+            // push here is what separates a deliberate change of direction from a
+            // sustained slight diagonal, which should never flip the lock however
+            // long it goes on.
+            m_scrollLockCross = 0.0;
+        }
+
+        if (qAbs(m_scrollLockCross) >= SCROLL_LOCK_BREAKOUT_PX) {
+            m_scrollLock = vertical ? ScrollAxisLock::Horizontal
+                                    : ScrollAxisLock::Vertical;
+            m_scrollLockCross = 0.0;
+        }
+    }
+
+    if (m_scrollLock == ScrollAxisLock::Vertical) {
+        scrollDelta.setX(0);
+    } else {
+        scrollDelta.setY(0);
+    }
+    return scrollDelta;
+#else
+    Q_UNUSED(event);
+    Q_UNUSED(pixelDelta);
+    return scrollDelta;
+#endif
+}
+
 void DocumentViewport::wheelEvent(QWheelEvent* event)
 {
     if (!m_document) {
@@ -3749,6 +3845,10 @@ void DocumentViewport::wheelEvent(QWheelEvent* event)
         scrollDelta.setX(-angleDelta.x() / 120.0 * scrollSpeed);
         scrollDelta.setY(-angleDelta.y() / 120.0 * scrollSpeed);
     }
+    
+    // macOS trackpads deliver both axes with no OS-level lock, so keeping a
+    // scroll straight is otherwise up to the steadiness of the user's fingers.
+    scrollDelta = applyTrackpadAxisLock(event, scrollDelta, pixelDelta);
     
     if (!scrollDelta.isNull()) {
         // Check for Shift modifier → Deferred horizontal pan
