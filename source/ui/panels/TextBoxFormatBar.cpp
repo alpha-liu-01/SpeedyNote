@@ -40,7 +40,7 @@ TextBoxFormatBar::TextBoxFormatBar(QWidget* parent)
     m_fontSize->setRange(6.0, 144.0);
     m_fontSize->setDecimals(1);
     m_fontSize->setSingleStep(1.0);
-    m_fontSize->setFixedWidth(80);
+    m_fontSize->setFixedWidth(96);
     m_fontSize->setMinimumHeight(34);
     m_fontSize->setToolTip(tr("Base font size"));
     m_fontSize->setAccessibleName(tr("Base font size"));
@@ -53,7 +53,7 @@ TextBoxFormatBar::TextBoxFormatBar(QWidget* parent)
     // legacy aliases such as "MS Sans Serif" are unsuitable for scalable
     // document text and can make DirectWrite report invalid font metrics.
     m_fontFamily->setFontFilters(QFontComboBox::ScalableFonts);
-    m_fontFamily->setMinimumWidth(130);
+    m_fontFamily->setMinimumWidth(114);
     m_fontFamily->setMaximumWidth(190);
     m_fontFamily->setMinimumHeight(34);
     m_fontFamily->setToolTip(tr("Font family"));

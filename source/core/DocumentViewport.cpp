@@ -3696,6 +3696,120 @@ void DocumentViewport::showObjectContextMenu(const QPoint& globalPos)
     menu.exec(globalPos);
 }
 
+QPointF DocumentViewport::applyTrackpadAxisLock(const QWheelEvent* event,
+                                                QPointF scrollDelta,
+                                                QPoint pixelDelta)
+{
+#ifdef Q_OS_MACOS
+    // A conventional wheel reports no phase and no pixel delta.  Its discrete
+    // steps need no help staying on one axis, and without phases there is no
+    // gesture boundary to latch a decision against.
+    if (event->phase() == Qt::NoScrollPhase || pixelDelta.isNull()) {
+        return scrollDelta;
+    }
+
+    // Shift and backtick are explicit requests for a specific axis (see the
+    // dispatch below), so the lock must not second-guess them.
+    if ((event->modifiers() & Qt::ShiftModifier) || m_backtickHeld) {
+        return scrollDelta;
+    }
+
+    // ScrollBegin is the only reliable reset point.  macOS sends ScrollEnd when
+    // the fingers lift, then keeps sending momentum updates followed by a second
+    // ScrollEnd, so resetting on ScrollEnd would unlock mid-fling and let the
+    // momentum drift off-axis.
+    if (event->phase() == Qt::ScrollBegin) {
+        m_scrollLock = ScrollAxisLock::Undecided;
+        m_scrollLockAccum = QPointF();
+        m_scrollLockCross = 0.0;
+    }
+
+    // The toolbar's Y-axis-only mode is a hard lock, matching what
+    // TouchGestureHandler applies to touchscreen pans.  Disabled is deliberately
+    // not treated as "no lock": it means no touchscreen gestures, and on a Mac
+    // the trackpad is the primary way to scroll.
+    if (touchGestureMode() == TouchGestureMode::YAxisOnly) {
+        scrollDelta.setX(0);
+        return scrollDelta;
+    }
+
+    const qreal dx = pixelDelta.x();
+    const qreal dy = pixelDelta.y();
+
+    if (m_scrollLock == ScrollAxisLock::Undecided) {
+        m_scrollLockAccum += QPointF(dx, dy);
+        const qreal ax = qAbs(m_scrollLockAccum.x());
+        const qreal ay = qAbs(m_scrollLockAccum.y());
+        const qreal strong = qMax(ax, ay);
+
+        if (strong < SCROLL_LOCK_DECIDE_PX) {
+            // Still ambiguous.  Pass both axes through so scrolling responds
+            // from the very first event; the leak is bounded by the threshold.
+            return scrollDelta;
+        }
+
+        // A gesture already travelling well off-axis is a deliberate diagonal.
+        // Locking it just to make the user fight back out is wasted effort, so
+        // commit straight to Free.
+        if (qMin(ax, ay) >= strong * SCROLL_LOCK_DIAGONAL_RATIO) {
+            m_scrollLock = ScrollAxisLock::Free;
+            return scrollDelta;
+        }
+
+        m_scrollLock = (ay >= ax) ? ScrollAxisLock::Vertical
+                                  : ScrollAxisLock::Horizontal;
+        m_scrollLockCross = 0.0;
+    }
+
+    // Once released, stay released until the next gesture.  Re-evaluating here
+    // is what made a diagonal impossible to hold: the lock kept re-forming
+    // under the user mid-drag.
+    if (m_scrollLock == ScrollAxisLock::Free) {
+        return scrollDelta;
+    }
+
+    const bool vertical = (m_scrollLock == ScrollAxisLock::Vertical);
+    const qreal along = vertical ? dy : dx;
+    const qreal cross = vertical ? dx : dy;
+
+    // Momentum must never break a lock the user's fingers established.
+    if (event->phase() != Qt::ScrollMomentum) {
+        if (qAbs(cross) > qAbs(along) * SCROLL_LOCK_CROSS_RATIO) {
+            // Reversing direction restarts the push, so a wobble that happens to
+            // straddle the threshold cannot creep past it.
+            if (!qFuzzyIsNull(m_scrollLockCross) && (cross > 0) != (m_scrollLockCross > 0)) {
+                m_scrollLockCross = 0.0;
+            }
+            m_scrollLockCross += cross;
+        } else {
+            // Too shallow to be intent.  Discarding it is what keeps a straight
+            // scroll straight however far it runs, since every one of its cross
+            // deltas shares a sign and would otherwise accumulate.
+            m_scrollLockCross = 0.0;
+        }
+
+        if (qAbs(m_scrollLockCross) >= SCROLL_LOCK_BREAKOUT_PX) {
+            // Release rather than flip to the perpendicular axis.  The user is
+            // steering, and a flip would only trade one fight for another.
+            m_scrollLock = ScrollAxisLock::Free;
+            m_scrollLockCross = 0.0;
+            return scrollDelta;
+        }
+    }
+
+    if (m_scrollLock == ScrollAxisLock::Vertical) {
+        scrollDelta.setX(0);
+    } else {
+        scrollDelta.setY(0);
+    }
+    return scrollDelta;
+#else
+    Q_UNUSED(event);
+    Q_UNUSED(pixelDelta);
+    return scrollDelta;
+#endif
+}
+
 void DocumentViewport::wheelEvent(QWheelEvent* event)
 {
     if (!m_document) {
@@ -3749,6 +3863,10 @@ void DocumentViewport::wheelEvent(QWheelEvent* event)
         scrollDelta.setX(-angleDelta.x() / 120.0 * scrollSpeed);
         scrollDelta.setY(-angleDelta.y() / 120.0 * scrollSpeed);
     }
+    
+    // macOS trackpads deliver both axes with no OS-level lock, so keeping a
+    // scroll straight is otherwise up to the steadiness of the user's fingers.
+    scrollDelta = applyTrackpadAxisLock(event, scrollDelta, pixelDelta);
     
     if (!scrollDelta.isNull()) {
         // Check for Shift modifier → Deferred horizontal pan
@@ -4267,7 +4385,7 @@ void DocumentViewport::beginZoomGesture(QPointF centerPoint)
     m_gesture.initialCentroidSet = true;
     
     // Capture current viewport as cached frame for fast scaling
-    m_gesture.cachedFrame = grab();
+    m_gesture.cachedFrame = grabOpaqueViewport();
     // Store device pixel ratio for correct scaling on high-DPI displays
     m_gesture.frameDevicePixelRatio = m_gesture.cachedFrame.devicePixelRatio();
     
@@ -4402,7 +4520,7 @@ void DocumentViewport::beginPanGesture()
     m_gesture.targetPan = m_panOffset;
     
     // Capture current viewport as cached frame for fast shifting
-    m_gesture.cachedFrame = grab();
+    m_gesture.cachedFrame = grabOpaqueViewport();
     // Store device pixel ratio for correct positioning on high-DPI displays
     m_gesture.frameDevicePixelRatio = m_gesture.cachedFrame.devicePixelRatio();
     
@@ -11309,7 +11427,7 @@ void DocumentViewport::captureSelectionBackground()
     m_skipSelectionRendering = true;
     
     // Capture the viewport (this triggers a paint without selection)
-    m_selectionBackgroundSnapshot = grab();
+    m_selectionBackgroundSnapshot = grabOpaqueViewport();
     m_backgroundSnapshotDpr = m_selectionBackgroundSnapshot.devicePixelRatio();
     
     // Re-enable selection rendering
@@ -11337,7 +11455,7 @@ void DocumentViewport::captureObjectDragBackground()
     m_skipSelectedObjectRendering = true;
     
     // Capture the viewport (this triggers a paint without selected objects)
-    m_objectDragBackgroundSnapshot = grab();
+    m_objectDragBackgroundSnapshot = grabOpaqueViewport();
     m_objectDragSnapshotDpr = m_objectDragBackgroundSnapshot.devicePixelRatio();
     
     // Re-enable selected object rendering
@@ -15140,6 +15258,32 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
                           eraserRadius * 2, eraserRadius * 2);
         update(QRegion(dirtyRectF.toAlignedRect(), QRegion::Ellipse));
     }
+}
+
+QPixmap DocumentViewport::grabOpaqueViewport()
+{
+    if (width() <= 0 || height() <= 0) {
+        return QPixmap();
+    }
+    
+    // Mirrors what grab() does, differing only in the format it renders into.
+    const qreal dpr = devicePixelRatioF();
+    QImage frame(QSize(qRound(width() * dpr), qRound(height() * dpr)),
+                 QImage::Format_RGB32);
+    if (frame.isNull()) {
+        return grab();  // Allocation failed; the slower snapshot beats none at all.
+    }
+    frame.setDevicePixelRatio(dpr);
+    
+    // RGB32 has no transparency to start from, so any pixel render() leaves
+    // untouched would show uninitialized memory rather than blank canvas.
+    frame.fill(m_backgroundColor);
+    render(&frame);
+    
+    QPixmap snapshot = QPixmap::fromImage(std::move(frame));
+    // fromImage() may or may not carry the ratio across; callers scale by it.
+    snapshot.setDevicePixelRatio(dpr);
+    return snapshot;
 }
 
 void DocumentViewport::fillBackgroundAround(QPainter& painter, const QRectF& coveredLogical)

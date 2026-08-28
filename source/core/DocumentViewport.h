@@ -927,7 +927,7 @@ public:
         qreal screenRefreshRate = 0.0;  ///< Panel refresh rate in Hz, 0 if unknown
         QString strokeCacheTier;    ///< Capped / Focus / Direct for the visible page
     };
-    
+
     /**
      * @brief Collect the display and render-tier context for the perf HUD.
      *
@@ -3221,12 +3221,84 @@ private:
      */
     void onGestureTimeout();
     
+    // ===== macOS Trackpad Axis Lock =====
+    // Windows precision touchpads and libinput lock a scroll gesture to one axis
+    // at the driver level.  macOS does not: it delivers raw two-axis deltas as
+    // QWheelEvent, so scrolling straight by hand is difficult.  This reproduces
+    // the lock in-app, using the scroll phases that Qt only reports on macOS.
+    
+    enum class ScrollAxisLock {
+        Undecided,   ///< Too little travel so far to know what the user meant
+        Vertical,    ///< X suppressed
+        Horizontal,  ///< Y suppressed
+        Free         ///< Both axes pass; the user is steering diagonally
+    };
+    
+    ScrollAxisLock m_scrollLock = ScrollAxisLock::Undecided;
+    QPointF m_scrollLockAccum;         ///< Travel since gesture start, screen px
+    qreal m_scrollLockCross = 0.0;     ///< Signed cross-axis push since lock, screen px
+    
+    // The four numbers below trade "keeps a straight scroll straight" against
+    // "lets a deliberate diagonal through".  They are the only tuning knobs.
+    
+    /// Accumulated travel before committing.  Enough to sample the gesture's real
+    /// direction rather than its opening jitter, but every pixel of it is a
+    /// window where both axes still pass, so it cannot grow far.
+    static constexpr qreal SCROLL_LOCK_DECIDE_PX = 10.0;
+    /// Consistent cross-axis travel needed to release the lock mid-gesture.
+    static constexpr qreal SCROLL_LOCK_BREAKOUT_PX = 36.0;
+    /// A sideways push only counts toward release once it exceeds this fraction
+    /// of the same event's along-axis motion, i.e. steeper than ~31 degrees off
+    /// the locked axis.  Below it the motion reads as drift, and letting it
+    /// accumulate would unlock a straight scroll.  At 1.0 and above no real
+    /// diagonal can ever escape, which is the failure mode to avoid.
+    static constexpr qreal SCROLL_LOCK_CROSS_RATIO = 0.6;
+    /// If the weaker axis is at least this fraction of the stronger when the
+    /// gesture commits, it started diagonal by intent, so never lock it.  Set
+    /// well clear of a casual crooked swipe: this is ~35 degrees off-axis.
+    static constexpr qreal SCROLL_LOCK_DIAGONAL_RATIO = 0.7;
+    
+    /**
+     * @brief Suppress off-axis scrolling for macOS trackpad gestures.
+     * @param event The wheel event being handled.
+     * @param scrollDelta Scroll delta in document units.
+     * @param pixelDelta The event's raw pixel delta, used for the thresholds so
+     *                   that the feel does not change with zoom.
+     * @return scrollDelta with the locked-out axis zeroed, or unchanged if this
+     *         event is not a phase-carrying trackpad scroll.
+     *
+     * No-op on platforms other than macOS.
+     */
+    QPointF applyTrackpadAxisLock(const QWheelEvent* event,
+                                  QPointF scrollDelta,
+                                  QPoint pixelDelta);
+    
     // ===== Private Methods =====
     
     /**
      * @brief Clamp pan offset to valid bounds.
      */
     void clampPanOffset();
+    
+    /**
+     * @brief Snapshot the viewport into a pixmap with no alpha channel.
+     * @return Viewport contents at device pixel ratio, or a null pixmap if the
+     *         widget has no size yet.
+     *
+     * Use this instead of grab() for any snapshot that will be blitted back
+     * repeatedly during an interaction. grab() allocates in the platform's
+     * preferred format, which carries an alpha channel wherever the backing
+     * store does - as it does on Android. An alpha-carrying source sends every
+     * blit of the snapshot through Qt's per-pixel argb32-on-argb32 blend, which
+     * has hand-written SIMD on x86 and on 32-bit ARM but falls back to scalar C
+     * on aarch64. An alpha-free source makes an unscaled SourceOver blit
+     * provably a copy, which Qt does with memcpy per scanline.
+     *
+     * Measured full-viewport blit, alpha source against alpha-free source:
+     * 229 vs 1698 Mpix/s on a Snapdragon 845, and 110 vs 428 on an Exynos 7870.
+     * These snapshots are fully opaque regardless, so the channel is pure cost.
+     */
+    QPixmap grabOpaqueViewport();
     
     /**
      * @brief Update the current page index based on pan position.

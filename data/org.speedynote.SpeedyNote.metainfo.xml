@@ -79,6 +79,20 @@
 
 
   <releases type="embedded">
+    <release version="1.5.3" date="2026-08-28">
+      <description>
+        <p>New Features:</p>
+        <ul>
+          <li>Trackpad axis autolock feature to prevent accidental horizontal scrolling Mac touchpads.</li>
+          <li>New performance overlay for the viewport to show the frame rate and memory usage. Press F10 to toggle.</li>
+        </ul>
+        <p>Bug Fixes and Improvements:</p>
+        <ul>
+          <li>Vastly improved long stroke rendering performance.</li>
+          <li>Adjusted stylesheet of the text box format bar for better visibility and accessibility.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.5.2" date="2026-08-21">
       <description>
         <p>New Features:</p>
