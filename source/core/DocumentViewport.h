@@ -189,6 +189,11 @@ struct UndoAction {
     /// objectOld/NewSize, since re-ranging moves the region's bounding box.
     HighlightRegion objectOldRegion;
     HighlightRegion objectNewRegion;
+    /// Also carried because recolouring the mark re-derives the badge tint from
+    /// it, so the two have to travel together. Equal on both sides for an
+    /// Adjust session, which only moves geometry.
+    QColor objectOldIconColor;
+    QColor objectNewIconColor;
 
     // OcrLockChange fields
     QVector<QString> ocrLockObjectIds;
@@ -673,12 +678,10 @@ public:
     };
 
     /**
-     * @brief Set the auto-highlight style.
-     * @param style New style; HighlightStyle::None disables auto-highlight.
+     * @brief Set the style a committed highlight is given.
      *
-     * When set to anything other than None, releasing the pointer after a
-     * text selection automatically creates highlight strokes of the chosen
-     * style. Called from HighlighterSubToolbar.
+     * What a highlight looks like, not whether one is made: that is
+     * setHighlightOnRelease(). Called from HighlighterSubToolbar.
      */
     void setAutoHighlightStyle(HighlightStyle style);
 
@@ -686,6 +689,22 @@ public:
      * @brief Get the current auto-highlight style.
      */
     HighlightStyle autoHighlightStyle() const { return m_autoHighlightStyle; }
+
+    /**
+     * @brief Whether releasing a text selection turns it into a highlight.
+     *
+     * False is "select text only": the selection is finalized and left up so
+     * it can be copied, and no annotation is created. This used to be
+     * HighlightStyle::None, a tool mode disguised as an appearance option.
+     */
+    bool highlightOnRelease() const { return m_highlightOnRelease; }
+
+    /**
+     * @brief Set whether a released selection becomes a highlight.
+     *
+     * Emits highlightOnReleaseChanged() only if the value actually changed.
+     */
+    void setHighlightOnRelease(bool enabled);
 
     // ===== Highlighter Selection Source (PDF vs OCR) =====
 
@@ -817,10 +836,16 @@ public:
      * been written in. Position and size travel with the region because
      * re-ranging moves the region's bounding box, which *is* the object's
      * position (see the stage 2 note in HIGHLIGHT_ANNOTATION_QA.md).
+     *
+     * @p oldIconColor travels for the same reason: recolouring a mark re-derives
+     * the badge tint, so undoing one without the other leaves a green highlight
+     * wearing a yellow badge. Pass the object's current tint when only geometry
+     * changed.
      */
     void pushObjectRegionChangeUndo(
         LinkObject* obj, const HighlightRegion& oldRegion,
-        const QPointF& oldPosition, const QSizeF& oldSize, int pageIndex,
+        const QPointF& oldPosition, const QSizeF& oldSize,
+        const QColor& oldIconColor, int pageIndex,
         Document::TileCoord oldTile = {0, 0},
         Document::TileCoord newTile = {0, 0});
 
@@ -1188,8 +1213,29 @@ public:
 
     /**
      * @brief Apply a new icon color to the selected LinkObject.
+     *
+     * For standalone link icons only. When the annotation carries a highlight
+     * the badge tint is derived from the mark's colour instead, so it is set
+     * through setSelectedLinkRegionColor().
      */
     void setSelectedLinkColor(const QColor& color);
+
+    /**
+     * @brief Recolour the selected annotation's highlight.
+     * @param color Opaque as picked; stored at HighlightRegion::DEFAULT_OPACITY.
+     *
+     * Also re-derives the badge tint, so a green mark stops wearing the badge
+     * of the yellow it used to be. Undoable through ObjectRegionChange with the
+     * geometry unchanged, unless an Adjust session is live on this object, in
+     * which case it folds into that session's single entry.
+     */
+    void setSelectedLinkRegionColor(const QColor& color);
+
+    /**
+     * @brief Restyle the selected annotation's highlight.
+     * @param style A HighlightRegion::Style value as an int.
+     */
+    void setSelectedLinkRegionStyle(int style);
 
     /**
      * @brief Apply a new description to the selected LinkObject.
@@ -1681,6 +1727,10 @@ public:
         HighlightRegion startRegion;
         QPointF startPosition;
         QSizeF startSize;
+        /// Badge tint on entry. A recolour made mid-session folds into the
+        /// session's one entry rather than pushing its own, so Esc has to be
+        /// able to put the derived tint back too.
+        QColor startIconColor;
         bool active = false;
         /**
          * @brief Whether a live text range was recovered on entry.
@@ -1697,6 +1747,7 @@ public:
             startRegion = HighlightRegion();
             startPosition = QPointF();
             startSize = QSizeF();
+            startIconColor = QColor();
             active = false;
             endpointsResolved = false;
         }
@@ -1785,6 +1836,16 @@ public:
     void syncLinkObjectBar();
     void updateLinkObjectBarGeometry();
     void closeLinkObjectBarPopups(bool acceptPreview);
+
+    /// The selected annotation when it carries an editable highlight.
+    LinkObject* selectedHighlightForAppearance() const;
+
+    /// Shared tail of a region recolour or restyle: re-derive the badge tint,
+    /// refresh the caches, and record one undo entry unless an Adjust session
+    /// is live to absorb it.
+    void finishRegionAppearanceChange(LinkObject* link,
+                                      const HighlightRegion& oldRegion,
+                                      const QColor& oldIconColor);
 
     void beginTextBoxFormatInteraction();
     void applyTextBoxFormatPreview(TextBoxFormatChange change,
@@ -2495,6 +2556,14 @@ signals:
     void autoHighlightStyleChanged(HighlightStyle style);
 
     /**
+     * @brief Emitted when the select-vs-highlight mode changes.
+     *
+     * Routed by MainWindow to the Highlighter subtoolbar so the toggle reflects
+     * the active viewport, the same way the style dropdown does.
+     */
+    void highlightOnReleaseChanged(bool enabled);
+
+    /**
      * @brief Emitted when the highlighter selection source (PDF vs OCR) changes.
      *
      * MainWindow routes this back to HighlighterSubToolbar so the per-viewport
@@ -2878,7 +2947,8 @@ private:
 
     // Highlighter tool settings
     QColor m_highlighterColor = QColor(255, 255, 0, 128);  ///< Yellow, 50% alpha
-    HighlightStyle m_autoHighlightStyle = HighlightStyle::None;  ///< Style of auto-created highlight strokes (None disables auto-highlight)
+    HighlightStyle m_autoHighlightStyle = HighlightStyle::Cover;  ///< What a committed highlight looks like
+    bool m_highlightOnRelease = true;  ///< Whether a released selection becomes a highlight at all
     HighlighterMode m_highlighterMode = HighlighterMode::Pdf;  ///< PDF vs OCR text selection source
     
     // ===== PDF Search Highlighting =====

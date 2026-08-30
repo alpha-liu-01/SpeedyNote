@@ -225,7 +225,11 @@ void ShortcutManager::registerDefaults()
     // Explicit style-selection shortcuts replace the old pdf.auto_highlight
     // toggle: each auto-highlight dropdown option is now a first-class
     // shortcut. Ctrl+H migrates to highlighter.style_cover for muscle memory.
-    registerAction("highlighter.style_none",      "Ctrl+Shift+H", tr("Auto-Highlight: None"),             tr("Highlighter"));
+    // Legacy id: this used to select HighlightStyle::None, which was how the
+    // tool's select-text-only mode was expressed. It now drives the dedicated
+    // toggle. The id is kept so users' persisted overrides in shortcuts.json
+    // are not orphaned by the rename.
+    registerAction("highlighter.style_none",      "Ctrl+Shift+H", tr("Highlighter: Select Text Only"),    tr("Highlighter"));
     registerAction("highlighter.style_cover",     "Ctrl+H",       tr("Auto-Highlight: Cover Text"),       tr("Highlighter"));
     registerAction("highlighter.style_underline", "Ctrl+U",       tr("Auto-Highlight: Underline"),        tr("Highlighter"));
     registerAction("highlighter.style_dotted",    "Ctrl+Shift+U", tr("Auto-Highlight: Dotted Underline"), tr("Highlighter"));

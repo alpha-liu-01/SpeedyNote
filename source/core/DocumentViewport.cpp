@@ -9017,6 +9017,19 @@ void DocumentViewport::pasteObjects()
 
 // ===== LinkObject Creation (Phase C.3.2 & C.4.5) =====
 
+// The badge is a 24x24 icon in the margin, so it cannot carry the mark's own
+// 50%-alpha tint and stay legible on a white page. Both the creation path and
+// the post-hoc recolour derive it here so the two cannot drift apart.
+static QColor badgeTintForHighlight(const QColor& regionColor)
+{
+    QColor tint = regionColor;
+    tint.setRed(tint.red() * 0.5);
+    tint.setGreen(tint.green() * 0.5);
+    tint.setBlue(tint.blue() * 0.5);
+    tint.setAlpha(255);
+    return tint;
+}
+
 HighlightRegion::SourceRange
 DocumentViewport::buildHighlightSourceRange(int pageIndex) const
 {
@@ -9052,13 +9065,7 @@ LinkObject* DocumentViewport::createLinkObjectForHighlight(
     // the annotation counts as "nothing worth opening" until the user acts.
     linkObj->description = m_textSelection.selectedText;
 
-    // Use a DARKER version of highlighter color for visibility on white pages.
-    QColor darkened = m_highlighterColor;
-    darkened.setRed(darkened.red() * 0.5);
-    darkened.setGreen(darkened.green() * 0.5);
-    darkened.setBlue(darkened.blue() * 0.5);
-    darkened.setAlpha(255);
-    linkObj->iconColor = darkened;
+    linkObj->iconColor = badgeTintForHighlight(m_highlighterColor);
 
     linkObj->region.style =
         static_cast<HighlightRegion::Style>(m_autoHighlightStyle);
@@ -9604,6 +9611,10 @@ void DocumentViewport::ensureLinkObjectBar()
             this, &DocumentViewport::clearLinkSlot);
     connect(m_linkObjectBar, &LinkObjectBar::linkObjectColorChanged,
             this, &DocumentViewport::setSelectedLinkColor);
+    connect(m_linkObjectBar, &LinkObjectBar::regionColorChanged,
+            this, &DocumentViewport::setSelectedLinkRegionColor);
+    connect(m_linkObjectBar, &LinkObjectBar::regionStyleChanged,
+            this, &DocumentViewport::setSelectedLinkRegionStyle);
     connect(m_linkObjectBar, &LinkObjectBar::linkObjectDescriptionChanged,
             this, &DocumentViewport::setSelectedLinkDescription);
     connect(m_linkObjectBar, &LinkObjectBar::adjustToggled,
@@ -9646,10 +9657,17 @@ void DocumentViewport::syncLinkObjectBar()
         }
     }
 
+    // hasRegion drives which colour the single swatch edits and whether the
+    // style dropdown shows; regionAdjustable additionally requires the object
+    // to be unlocked, since Adjust moves the region's bounding box.
+    const bool hasRegion = !link->region.isEmpty();
     m_linkObjectBar->setValues(states, link->iconColor, link->description,
-                               !link->region.isEmpty() && !link->locked,
+                               hasRegion && !link->locked,
                                m_adjustSession.active
-                                   && m_adjustSession.objectId == link->id);
+                                   && m_adjustSession.objectId == link->id,
+                               hasRegion,
+                               link->region.color,
+                               static_cast<int>(link->region.style));
     m_linkObjectBar->show();
     updateLinkObjectBarGeometry();
     m_linkObjectBar->raise();
@@ -9698,6 +9716,93 @@ void DocumentViewport::setSelectedLinkColor(const QColor& color)
     emit documentModified();
     emit linkObjectAppearanceChanged(link->id, link->description, color);
     update();
+}
+
+LinkObject* DocumentViewport::selectedHighlightForAppearance() const
+{
+    // No `locked` check on purpose: the flag means "cannot be moved/resized/
+    // deleted" (InsertedObject.h), and recolouring is none of the three. The
+    // icon-tint path has never checked it either. Adjust does gate on it,
+    // because re-ranging moves the object.
+    LinkObject* link = selectedLinkForBar();
+    if (!link || link->region.isEmpty())
+        return nullptr;
+    return link;
+}
+
+void DocumentViewport::finishRegionAppearanceChange(LinkObject* link,
+                                                    const HighlightRegion& oldRegion,
+                                                    const QColor& oldIconColor)
+{
+    // The badge is derived from the mark at creation, so it keeps following it:
+    // a green highlight wearing the badge of the yellow it used to be reads as
+    // a bug.
+    link->iconColor = badgeTintForHighlight(link->region.color);
+
+    markLinkContainerDirtyAndRefreshOutline(link);
+
+    // Inside an Adjust session every gesture writes straight into the object
+    // and one entry is pushed at the end, so an appearance change made
+    // mid-session rides along rather than interleaving an entry of its own.
+    const bool inSession =
+        m_adjustSession.active && m_adjustSession.objectId == link->id;
+    if (!inSession) {
+        int pageIndex = -1;
+        Document::TileCoord tileCoord{};
+        resolveRegionContainer(link, &pageIndex, nullptr, &tileCoord);
+        // Geometry is untouched, so the object cannot have changed tile and
+        // neither maxObjectExtent nor the tile margin can need recomputing.
+        pushObjectRegionChangeUndo(link, oldRegion, link->position, link->size,
+                                   oldIconColor, pageIndex, tileCoord, tileCoord);
+        if (!m_document->isEdgeless() && pageIndex >= 0) {
+            m_pendingThumbnailPages.insert(pageIndex);
+            emit pageModified(pageIndex);
+        }
+    }
+
+    emit documentModified();
+    // Appearance only: the set of annotations is unchanged, so rebuilding the
+    // notes sidebar would collapse its expanded subtrees for nothing.
+    emit linkObjectAppearanceChanged(link->id, link->description, link->iconColor);
+    update();
+}
+
+void DocumentViewport::setSelectedLinkRegionColor(const QColor& color)
+{
+    LinkObject* link = selectedHighlightForAppearance();
+    if (!link || !color.isValid())
+        return;
+
+    QColor stored = color;
+    stored.setAlpha(HighlightRegion::DEFAULT_OPACITY);
+    if (link->region.color == stored)
+        return;
+
+    const HighlightRegion oldRegion = link->region;
+    const QColor oldIconColor = link->iconColor;
+    link->region.color = stored;
+    finishRegionAppearanceChange(link, oldRegion, oldIconColor);
+}
+
+void DocumentViewport::setSelectedLinkRegionStyle(int style)
+{
+    if (style < static_cast<int>(HighlightRegion::Style::None)
+        || style > static_cast<int>(HighlightRegion::Style::DottedUnderline)) {
+        return;
+    }
+
+    LinkObject* link = selectedHighlightForAppearance();
+    if (!link)
+        return;
+
+    const auto newStyle = static_cast<HighlightRegion::Style>(style);
+    if (link->region.style == newStyle)
+        return;
+
+    const HighlightRegion oldRegion = link->region;
+    const QColor oldIconColor = link->iconColor;
+    link->region.style = newStyle;
+    finishRegionAppearanceChange(link, oldRegion, oldIconColor);
 }
 
 void DocumentViewport::setSelectedLinkDescription(const QString& description)
@@ -13630,6 +13735,19 @@ void DocumentViewport::setAutoHighlightStyle(HighlightStyle style)
     #endif
 }
 
+void DocumentViewport::setHighlightOnRelease(bool enabled)
+{
+    if (m_highlightOnRelease == enabled) {
+        return;
+    }
+
+    m_highlightOnRelease = enabled;
+    emit highlightOnReleaseChanged(enabled);
+    #ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "Highlight on release:" << enabled;
+    #endif
+}
+
 void DocumentViewport::setHighlighterMode(HighlighterMode mode)
 {
     if (m_highlighterMode == mode) {
@@ -14220,8 +14338,10 @@ void DocumentViewport::handlePointerRelease_Highlighter(const PointerEvent& pe)
     if (m_textSelection.isValid()) {
         finalizeTextSelection();
         
-        // Commit the selection as a highlight annotation if a style is selected
-        if (m_autoHighlightStyle != HighlightStyle::None) {
+        // Commit as a highlight annotation, unless the tool is in select-only
+        // mode, where the finalized selection is deliberately left up so the
+        // action bar's Copy button stays reachable.
+        if (m_highlightOnRelease) {
             commitHighlightAnnotation();
             // Note: commitHighlightAnnotation() already clears m_textSelection
         }
@@ -15010,9 +15130,10 @@ LinkObject* DocumentViewport::commitHighlightAnnotation()
         return nullptr;
     }
 
-    // Nothing to do if caller reached here with None (defensive; the release
-    // handler guards this, but we stay safe for future call sites).
-    if (m_autoHighlightStyle == HighlightStyle::None) {
+    // Nothing to do in select-only mode, or if the style somehow reads None
+    // (defensive; the release handler guards both, but we stay safe for future
+    // call sites).
+    if (!m_highlightOnRelease || m_autoHighlightStyle == HighlightStyle::None) {
         m_textSelection.clear();
         return nullptr;
     }
@@ -15311,6 +15432,7 @@ bool DocumentViewport::beginHighlightAdjust()
     m_adjustSession.startRegion = link->region;
     m_adjustSession.startPosition = link->position;
     m_adjustSession.startSize = link->size;
+    m_adjustSession.startIconColor = link->iconColor;
     m_adjustSession.active = true;
 
     TextSelection derived;
@@ -15386,8 +15508,12 @@ void DocumentViewport::commitHighlightAdjust()
     m_adjustSession.clear();
 
     if (link && m_document) {
+        // Appearance counts too: a recolour or restyle made mid-session folds
+        // into this one entry rather than pushing its own.
         const bool changed =
             link->region.rects != session.startRegion.rects
+            || link->region.style != session.startRegion.style
+            || link->region.color != session.startRegion.color
             || link->position != session.startPosition
             || link->size != session.startSize;
 
@@ -15408,6 +15534,7 @@ void DocumentViewport::commitHighlightAdjust()
 
             pushObjectRegionChangeUndo(link, session.startRegion,
                                        session.startPosition, session.startSize,
+                                       session.startIconColor,
                                        session.pageIndex, session.tileCoord,
                                        newTile);
             markLinkContainerDirtyAndRefreshOutline(link);
@@ -15456,14 +15583,30 @@ void DocumentViewport::cancelHighlightAdjust()
     m_adjustSession.clear();
 
     if (link && m_document) {
+        const bool tintReverted = session.startIconColor.isValid()
+                                  && link->iconColor != session.startIconColor;
+
         link->region = session.startRegion;
         link->position = session.startPosition;
         link->size = session.startSize;
+        if (session.startIconColor.isValid())
+            link->iconColor = session.startIconColor;
         m_document->updateMaxObjectExtent(link);
         if (m_document->isEdgeless()) {
             m_document->markTileDirty(session.tileCoord);
         } else if (session.pageIndex >= 0) {
             m_document->markPageDirty(session.pageIndex);
+        }
+
+        if (tintReverted) {
+            // A recolour mid-session already pushed the new tint into the
+            // outline cache and the notes sidebar; both have to come back with
+            // it. Only the appearance signal fires: the set of annotations is
+            // unchanged, so rebuilding the sidebar would collapse its subtrees
+            // for nothing.
+            markLinkContainerDirtyAndRefreshOutline(link);
+            emit linkObjectAppearanceChanged(link->id, link->description,
+                                             link->iconColor);
         }
     }
 
@@ -16567,13 +16710,16 @@ static void applyObjectRegionChange(Document* doc, const UndoAction& a, bool toO
     const HighlightRegion& region = toOld ? a.objectOldRegion : a.objectNewRegion;
     const QPointF& pos = toOld ? a.objectOldPosition : a.objectNewPosition;
     const QSizeF& size = toOld ? a.objectOldSize : a.objectNewSize;
+    const QColor& tint = toOld ? a.objectOldIconColor : a.objectNewIconColor;
 
     auto assign = [](InsertedObject* obj, const HighlightRegion& r,
-                     const QPointF& p, const QSizeF& s) {
+                     const QPointF& p, const QSizeF& s, const QColor& t) {
         if (auto* link = dynamic_cast<LinkObject*>(obj)) {
             link->region = r;
             link->position = p;
             link->size = s;
+            if (t.isValid())
+                link->iconColor = t;
         }
     };
 
@@ -16588,7 +16734,7 @@ static void applyObjectRegionChange(Document* doc, const UndoAction& a, bool toO
             source ? source->extractObject(a.objectId) : nullptr;
         if (!moved)
             return;
-        assign(moved.get(), region, pos, size);
+        assign(moved.get(), region, pos, size, tint);
         if (Page* target = doc->getOrCreateTile(to.first, to.second)) {
             target->addObject(std::move(moved));
             doc->markTileDirty(to);
@@ -16604,14 +16750,15 @@ static void applyObjectRegionChange(Document* doc, const UndoAction& a, bool toO
             assign(moved.get(),
                    toOld ? a.objectNewRegion : a.objectOldRegion,
                    toOld ? a.objectNewPosition : a.objectOldPosition,
-                   toOld ? a.objectNewSize : a.objectOldSize);
+                   toOld ? a.objectNewSize : a.objectOldSize,
+                   toOld ? a.objectNewIconColor : a.objectOldIconColor);
             source->addObject(std::move(moved));
         }
         return;
     }
 
     if (Page* c = getObjContainer(doc, a, false)) {
-        assign(c->objectById(a.objectId), region, pos, size);
+        assign(c->objectById(a.objectId), region, pos, size, tint);
         markObjDirty(doc, a);
         // Re-ranging can change which annotation is topmost on the container,
         // which is what pageLinkMarkers() reports, so the cache has to follow.
@@ -17737,7 +17884,7 @@ void DocumentViewport::pushObjectTextEditUndo(
 void DocumentViewport::pushObjectRegionChangeUndo(
     LinkObject* obj,
     const HighlightRegion& oldRegion, const QPointF& oldPosition,
-    const QSizeF& oldSize, int pageIndex,
+    const QSizeF& oldSize, const QColor& oldIconColor, int pageIndex,
     Document::TileCoord oldTile, Document::TileCoord newTile)
 {
     if (!obj)
@@ -17748,6 +17895,8 @@ void DocumentViewport::pushObjectRegionChangeUndo(
     action.objectId = obj->id;
     action.objectOldRegion = oldRegion;
     action.objectNewRegion = obj->region;
+    action.objectOldIconColor = oldIconColor;
+    action.objectNewIconColor = obj->iconColor;
     action.objectOldPosition = oldPosition;
     action.objectNewPosition = obj->position;
     action.objectOldSize = oldSize;

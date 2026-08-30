@@ -3502,6 +3502,327 @@ public:
         return true;
     }
 
+    static bool testHighlightAppearanceEdit() {
+        printf("  testHighlightAppearanceEdit... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        // Same synthetic OCR block the Adjust tests use: an even character
+        // split, so indices are arithmetic rather than engine-dependent.
+        auto seedOcrBlock = [](DocumentViewport& vp, const QString& text,
+                               const QRectF& blockRect) {
+            DocumentViewport::OcrBlockRef ref;
+            ref.text = text;
+            ref.blockRect = blockRect;
+            const qreal charWidth = blockRect.width() / text.length();
+            for (int i = 0; i < text.length(); ++i) {
+                ref.charRects.append(QRectF(blockRect.left() + i * charWidth,
+                                            blockRect.top(), charWidth,
+                                            blockRect.height()));
+            }
+            vp.m_ocrBlockCache.clear();
+            vp.m_ocrBlockCache.append(ref);
+            vp.m_lastOcrHitBlockIndex = -1;
+            vp.m_ocrBlockCachePageIndex = 0;
+            if (vp.m_document && vp.m_document->isEdgeless())
+                vp.m_ocrBlockCacheTileVersion = vp.m_document->tileLoadVersion();
+        };
+
+        auto seedSelection = [](DocumentViewport& vp, int pageIndex,
+                                const QVector<QRectF>& rects,
+                                const QString& text) {
+            vp.m_textSelection.clear();
+            vp.m_textSelection.source =
+                DocumentViewport::TextSelection::Source::Ocr;
+            vp.m_textSelection.pageIndex = pageIndex;
+            vp.m_textSelection.startBoxIndex = 0;
+            vp.m_textSelection.startCharIndex = 0;
+            vp.m_textSelection.endBoxIndex = 0;
+            vp.m_textSelection.endCharIndex = text.size();
+            vp.m_textSelection.selectedText = text;
+            vp.m_textSelection.highlightRects = rects;
+        };
+
+        auto commitOcrHighlight = [&](DocumentViewport& vp, int pageIndex,
+                                      const QVector<QRectF>& rects,
+                                      const QString& text) -> LinkObject* {
+            seedSelection(vp, pageIndex, rects, text);
+            return vp.commitHighlightAnnotation();
+        };
+
+        const QString text = QStringLiteral("hello world here");
+        const QRectF blockRect(50.0, 200.0, 160.0, 16.0);
+        const QVector<QRectF> markRects{QRectF(110.0, 200.0, 50.0, 16.0)};
+
+        // ===== Recolour: stored alpha, derived badge, one undoable entry =====
+        {
+            auto doc = Document::createNew("Highlight recolour");
+            DocumentViewport viewport;
+            viewport.resize(1100, 820);
+            viewport.setDocument(doc.get());
+            viewport.setCurrentTool(ToolType::Highlighter);
+            viewport.setHighlighterMode(DocumentViewport::HighlighterMode::Ocr);
+            viewport.m_autoHighlightStyle =
+                DocumentViewport::HighlightStyle::Cover;
+
+            seedOcrBlock(viewport, text, blockRect);
+            LinkObject* mark = commitOcrHighlight(viewport, 0, markRects,
+                                                  QStringLiteral("world"));
+            if (!mark)
+                return fail("recolour test highlight did not commit");
+
+            const HighlightRegion originalRegion = mark->region;
+            const QColor originalTint = mark->iconColor;
+            const QPointF originalPosition = mark->position;
+            const QSizeF originalSize = mark->size;
+            const int stackAfterCommit = viewport.m_undoStack.size();
+
+            // The bar hands over an opaque colour; the mark is stored at 50%.
+            viewport.setSelectedLinkRegionColor(QColor(0, 200, 0));
+
+            if (mark->region.color.alpha() != HighlightRegion::DEFAULT_OPACITY)
+                return fail("a recolour did not store the default opacity");
+            if (mark->region.color.green() != 200 || mark->region.color.red() != 0)
+                return fail("a recolour did not store the picked colour");
+            if (mark->iconColor != QColor(0, 100, 0, 255))
+                return fail("the badge tint was not re-derived from the mark");
+            if (mark->position != originalPosition || mark->size != originalSize)
+                return fail("a recolour moved the annotation");
+
+            if (viewport.m_undoStack.size() != stackAfterCommit + 1)
+                return fail("a recolour was not exactly one undo entry");
+            if (viewport.m_undoStack.top().type != UndoAction::ObjectRegionChange)
+                return fail("a recolour pushed the wrong undo type");
+
+            // Re-picking the same colour is not a change.
+            viewport.setSelectedLinkRegionColor(QColor(0, 200, 0));
+            if (viewport.m_undoStack.size() != stackAfterCommit + 1)
+                return fail("re-picking the same colour pushed an entry");
+
+            const QColor recolouredMark = mark->region.color;
+            const QColor recolouredTint = mark->iconColor;
+
+            viewport.undo();
+            if (mark->region.color != originalRegion.color)
+                return fail("undo did not restore the mark's colour");
+            if (mark->iconColor != originalTint)
+                return fail("undo left the badge tint on the new colour");
+            if (mark->region.rects != originalRegion.rects
+                || mark->position != originalPosition)
+                return fail("undoing a recolour disturbed the geometry");
+
+            viewport.redo();
+            if (mark->region.color != recolouredMark
+                || mark->iconColor != recolouredTint)
+                return fail("redo did not reapply the colour and its badge");
+
+            // ===== Style, driven through the bar's dropdown =====
+            viewport.selectObject(mark, false);
+            viewport.refreshLinkObjectBar();
+            auto* styleButton = viewport.m_linkObjectBar
+                ? viewport.m_linkObjectBar->findChild<QToolButton*>(
+                      QStringLiteral("linkRegionStyle"))
+                : nullptr;
+            if (!styleButton)
+                return fail("the bar has no highlight style dropdown");
+            if (!styleButton->isVisible() && !styleButton->isVisibleTo(
+                    viewport.m_linkObjectBar))
+                return fail("the style dropdown is hidden for a highlight");
+            if (!styleButton->menu()
+                || styleButton->menu()->actions().size() != 3)
+                return fail("the style dropdown does not offer exactly 3 styles");
+
+            const int stackBeforeStyle = viewport.m_undoStack.size();
+            styleButton->menu()->actions().at(1)->trigger();  // Underline
+            if (mark->region.style != HighlightRegion::Style::Underline)
+                return fail("the dropdown did not restyle the mark");
+            if (viewport.m_undoStack.size() != stackBeforeStyle + 1)
+                return fail("a restyle was not exactly one undo entry");
+
+            viewport.undo();
+            if (mark->region.style != HighlightRegion::Style::Cover)
+                return fail("undo did not restore the mark's style");
+
+            viewport.setDocument(nullptr);
+        }
+
+        // ===== A standalone link icon still edits its own tint, no undo =====
+        {
+            auto doc = Document::createNew("Standalone link colour");
+            DocumentViewport viewport;
+            viewport.resize(1100, 820);
+            viewport.setDocument(doc.get());
+            Page* page = doc->page(0);
+            if (!page)
+                return fail("missing standalone link page");
+
+            auto link = std::make_unique<LinkObject>();
+            link->position = QPointF(100.0, 100.0);
+            link->size = QSizeF(24.0, 24.0);
+            link->iconColor = QColor(180, 180, 180);
+            LinkObject* icon = link.get();
+            page->addObject(std::move(link));
+
+            viewport.setCurrentTool(ToolType::ObjectSelect);
+            viewport.selectObject(icon, false);
+            viewport.refreshLinkObjectBar();
+
+            auto* styleButton = viewport.m_linkObjectBar
+                ? viewport.m_linkObjectBar->findChild<QToolButton*>(
+                      QStringLiteral("linkRegionStyle"))
+                : nullptr;
+            if (!styleButton)
+                return fail("the bar lost its style dropdown");
+            if (styleButton->isVisibleTo(viewport.m_linkObjectBar))
+                return fail("the style dropdown showed for an icon-only link");
+
+            const int stackBefore = viewport.m_undoStack.size();
+            viewport.setSelectedLinkColor(QColor(10, 20, 30));
+            if (icon->iconColor != QColor(10, 20, 30))
+                return fail("an icon-only link did not take the new tint");
+            if (viewport.m_undoStack.size() != stackBefore)
+                return fail("a badge-tint edit became undoable");
+
+            // The region path must refuse an annotation with no mark.
+            viewport.setSelectedLinkRegionColor(QColor(0, 200, 0));
+            if (icon->region.color.isValid())
+                return fail("an icon-only link accepted a mark colour");
+            if (viewport.m_undoStack.size() != stackBefore)
+                return fail("a refused recolour still pushed an entry");
+
+            viewport.setDocument(nullptr);
+        }
+
+        // ===== Recolour inside a session folds in; Esc reverts appearance =====
+        {
+            auto doc = Document::createNew("Recolour during Adjust");
+            DocumentViewport viewport;
+            viewport.resize(1100, 820);
+            viewport.setDocument(doc.get());
+            viewport.setCurrentTool(ToolType::Highlighter);
+            viewport.setHighlighterMode(DocumentViewport::HighlighterMode::Ocr);
+            viewport.m_autoHighlightStyle =
+                DocumentViewport::HighlightStyle::Cover;
+
+            seedOcrBlock(viewport, text, blockRect);
+            LinkObject* mark = commitOcrHighlight(viewport, 0, markRects,
+                                                  QStringLiteral("world"));
+            if (!mark)
+                return fail("session recolour highlight did not commit");
+            seedOcrBlock(viewport, text, blockRect);
+
+            const QColor startColor = mark->region.color;
+            const QColor startTint = mark->iconColor;
+            const int stackAfterCommit = viewport.m_undoStack.size();
+
+            if (!viewport.beginHighlightAdjust())
+                return fail("could not enter Adjust for the fold-in case");
+
+            viewport.setSelectedLinkRegionColor(QColor(0, 0, 255));
+            if (mark->region.color.blue() != 255)
+                return fail("a mid-session recolour did not reach the mark");
+            if (viewport.m_undoStack.size() != stackAfterCommit)
+                return fail("a mid-session recolour pushed its own entry");
+
+            viewport.m_textSelection.startCharIndex = 0;
+            viewport.m_textSelection.endCharIndex = 10;
+            viewport.snapSelectionToWords();
+            viewport.updateSelectedTextAndRects();
+            if (!viewport.applyAdjustedRangeToRegion())
+                return fail("the fold-in tweak did not reach the region");
+
+            viewport.commitHighlightAdjust();
+            if (viewport.m_undoStack.size() != stackAfterCommit + 1)
+                return fail("a recolour plus a tweak was not one entry");
+            viewport.undo();
+            if (mark->region.color != startColor || mark->iconColor != startTint)
+                return fail("undoing the session did not revert the colour");
+            viewport.redo();
+            if (mark->region.color.blue() != 255)
+                return fail("redoing the session did not reapply the colour");
+
+            // Esc reverts appearance along with geometry, and leaves no entry.
+            seedOcrBlock(viewport, text, blockRect);
+            viewport.selectObject(mark, false);
+            const QColor beforeEsc = mark->region.color;
+            const QColor beforeEscTint = mark->iconColor;
+            const int stackBeforeEsc = viewport.m_undoStack.size();
+
+            if (!viewport.beginHighlightAdjust())
+                return fail("could not enter Adjust for the Esc case");
+            viewport.setSelectedLinkRegionColor(QColor(255, 0, 0));
+            if (mark->region.color == beforeEsc)
+                return fail("the Esc-case recolour changed nothing to revert");
+            if (!viewport.handleEscapeKey())
+                return fail("Esc did not report handling the session");
+            if (mark->region.color != beforeEsc || mark->iconColor != beforeEscTint)
+                return fail("Esc did not revert the appearance change");
+            if (viewport.m_undoStack.size() != stackBeforeEsc)
+                return fail("the Esc-case recolour left an undo entry");
+
+            viewport.setDocument(nullptr);
+        }
+
+        // ===== The release gate: select-only makes nothing, and keeps text =====
+        {
+            auto doc = Document::createNew("Highlight on release");
+            DocumentViewport viewport;
+            viewport.resize(1100, 820);
+            viewport.setDocument(doc.get());
+            viewport.setCurrentTool(ToolType::Highlighter);
+            viewport.setHighlighterMode(DocumentViewport::HighlighterMode::Ocr);
+            viewport.m_autoHighlightStyle =
+                DocumentViewport::HighlightStyle::Cover;
+            Page* page = doc->page(0);
+            if (!page)
+                return fail("missing release-gate page");
+
+            auto countLinks = [](Page* p) {
+                int n = 0;
+                for (const auto& object : p->objects) {
+                    if (object && object->type() == QLatin1String("link")) ++n;
+                }
+                return n;
+            };
+
+            PointerEvent pe;
+            pe.type = PointerEvent::Release;
+            pe.source = PointerEvent::Mouse;
+            pe.button = Qt::LeftButton;
+            pe.viewportPos = viewport.documentToViewport(
+                viewport.pagePosition(0) + QPointF(130.0, 208.0));
+
+            seedOcrBlock(viewport, text, blockRect);
+            viewport.setHighlightOnRelease(false);
+            seedSelection(viewport, 0, markRects, QStringLiteral("world"));
+            viewport.m_textSelection.isSelecting = true;
+            viewport.handlePointerRelease_Highlighter(pe);
+
+            if (countLinks(page) != 0)
+                return fail("select-only mode still created an annotation");
+            if (!viewport.m_textSelection.isValid()
+                || viewport.m_textSelection.selectedText.isEmpty())
+                return fail("select-only mode discarded the text to copy");
+
+            seedOcrBlock(viewport, text, blockRect);
+            viewport.setHighlightOnRelease(true);
+            seedSelection(viewport, 0, markRects, QStringLiteral("world"));
+            viewport.m_textSelection.isSelecting = true;
+            viewport.handlePointerRelease_Highlighter(pe);
+
+            if (countLinks(page) != 1)
+                return fail("highlight mode did not commit exactly one mark");
+
+            viewport.setDocument(nullptr);
+        }
+
+        printf("PASSED\n");
+        return true;
+    }
+
     static bool testOcrTextBoxConversion() {
         printf("  testOcrTextBoxConversion... ");
 
@@ -3857,6 +4178,8 @@ public:
                 "testHighlightAnnotationGeometry");
         runTest(testHighlightAdjustMode,
                 "testHighlightAdjustMode");
+        runTest(testHighlightAppearanceEdit,
+                "testHighlightAppearanceEdit");
         runTest(testOcrTextBoxConversion,
                 "testOcrTextBoxConversion");
         

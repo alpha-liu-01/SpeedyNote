@@ -8,9 +8,12 @@
 
 class ColorPresetButton;
 class SubToolbarToggle;
+class QAction;
 class QHBoxLayout;
 class QLineEdit;
+class QMenu;
 class QPushButton;
+class QToolButton;
 
 /**
  * Compact, viewport-owned controls for a selected LinkObject.
@@ -42,12 +45,23 @@ public:
      *        Adjust toggle for standalone link icons.
      * @param adjusting True while an Adjust session is live, so the same widget
      *        reads "Done".
+     * @param hasRegion True when the object carries a highlight at all. Drives
+     *        what the single colour swatch means: the mark's colour for a
+     *        highlight, the badge tint for a standalone link icon. Distinct
+     *        from @p regionAdjustable, which is additionally false when the
+     *        object is locked.
+     * @param regionColor The highlight's colour, stored at
+     *        HighlightRegion::DEFAULT_OPACITY. Shown and edited opaque.
+     * @param regionStyle The highlight's HighlightRegion::Style as an int.
      */
     void setValues(const LinkSlotState states[NUM_SLOTS],
                    const QColor& iconColor,
                    const QString& description,
                    bool regionAdjustable = false,
-                   bool adjusting = false);
+                   bool adjusting = false,
+                   bool hasRegion = false,
+                   const QColor& regionColor = QColor(),
+                   int regionStyle = 0);
 
     void setDarkMode(bool darkMode);
 
@@ -87,8 +101,23 @@ signals:
 
     /**
      * @brief Emitted when the LinkObject color is changed via the color button.
+     *
+     * Only for standalone link icons. When the annotation carries a highlight
+     * the same button edits the mark instead and emits regionColorChanged.
      */
     void linkObjectColorChanged(const QColor& color);
+
+    /**
+     * @brief Emitted when the highlight's colour is changed via the color button.
+     * @param color Opaque as picked; the viewport applies the stored alpha.
+     */
+    void regionColorChanged(const QColor& color);
+
+    /**
+     * @brief Emitted when the highlight's style is picked from the dropdown.
+     * @param style A HighlightRegion::Style value as an int.
+     */
+    void regionStyleChanged(int style);
 
     /**
      * @brief Emitted when the LinkObject description is changed.
@@ -115,6 +144,7 @@ private slots:
     void onSlotDeleteRequested(int index);
     void onColorButtonClicked();
     void onColorButtonEditRequested();
+    void onRegionStyleTriggered(QAction* action);
     void onDescriptionButtonToggled(bool checked);
     void onDescriptionConfirm();
     void onDescriptionCancel();
@@ -124,9 +154,23 @@ private:
     void setupConnections();
     bool confirmSlotDelete(int index);
 
+    /// Refresh the trigger icon and check state to match @ref m_regionStyle.
+    void updateRegionStyleButtonIcon();
+    /// Rebuild the per-action icons and dark/light stylesheets. Theme only.
+    void applyRegionStyleStyling();
+
     QHBoxLayout* m_layout = nullptr;
 
-    ColorPresetButton* m_colorButton = nullptr;       // LinkObject color editor
+    /// Number of styles the dropdown offers: Cover, Underline, DottedUnderline.
+    /// HighlightRegion::Style::None is deliberately absent - it means
+    /// "select text only", which is a Highlighter tool mode, not something an
+    /// annotation that already exists can be set to.
+    static constexpr int NUM_REGION_STYLES = 3;
+
+    ColorPresetButton* m_colorButton = nullptr;       // Mark colour or badge tint
+    QToolButton* m_regionStyleButton = nullptr;       // Highlight style dropdown
+    QMenu* m_regionStyleMenu = nullptr;               // Its 3 style entries
+    QAction* m_regionStyleActions[NUM_REGION_STYLES] = {nullptr, nullptr, nullptr};
     SubToolbarToggle* m_adjustButton = nullptr;       // Enter/leave Adjust mode
     SubToolbarToggle* m_descriptionButton = nullptr;  // Toggle description editor
     QWidget* m_descriptionPopup = nullptr;            // Popup container
@@ -136,6 +180,9 @@ private:
     QString m_originalDescription;                    // For cancel functionality
     bool m_popupClosedByButton = false;               // Prevents double signal emission
     bool m_colorDialogOpen = false;                   // Modal colour dialog guard
+    bool m_hasRegion = false;                         // Which colour the swatch edits
+    bool m_darkMode = false;                          // For the dropdown's icons
+    int m_regionStyle = 0;                            // HighlightRegion::Style as int
     LinkSlotButton* m_slotButtons[NUM_SLOTS] = {nullptr, nullptr, nullptr};
 
     static constexpr int PADDING_LEFT = 6;

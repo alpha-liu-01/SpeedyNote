@@ -1963,16 +1963,19 @@ void MainWindow::wireQActionDispatchers()
     // ----- Highlighter Style (MAC.7) -----
     // Style shortcuts drive the dropdown's QAction::trigger() path so the
     // existing onAutoHighlightStyleTriggered() slot handles persistence,
-    // check-state, icon refresh, and autoHighlightStyleChanged emission.
+    // check-state, icon refresh, turning highlight-on-release on, and the
+    // autoHighlightStyleChanged emission.
     // These auto-switch to the Highlighter tool first (via ensureTool) so the
     // style/source change takes effect immediately even when another tool is
     // active; the subtoolbar call remains the single source that pushes state
     // to the viewport.
     using HS = HighlighterSubToolbar::HighlightStyle;
+    // Legacy id (see ShortcutManager): this is the select-text-only mode, which
+    // is now the toggle rather than a style.
     wire("highlighter.style_none", [ensureTool](MainWindow* w){
         if (auto* vp = w->currentViewport()) ensureTool(w, vp, ToolType::Highlighter);
         if (auto* st = w->m_toolbar ? w->m_toolbar->highlighterSubToolbar() : nullptr)
-            st->selectAutoHighlightStyleFromShortcut(HS::None);
+            st->setHighlightOnReleaseFromShortcut(false);
     });
     wire("highlighter.style_cover", [ensureTool](MainWindow* w){
         if (auto* vp = w->currentViewport()) ensureTool(w, vp, ToolType::Highlighter);
@@ -2382,6 +2385,11 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_autoHighlightConn);
         m_autoHighlightConn = {};
     }
+    // Disconnect select-vs-highlight sync connection
+    if (m_highlightOnReleaseConn) {
+        disconnect(m_highlightOnReleaseConn);
+        m_highlightOnReleaseConn = {};
+    }
     // Disconnect highlighter-mode (PDF/OCR) sync connection
     if (m_highlighterModeConn) {
         disconnect(m_highlighterModeConn);
@@ -2576,11 +2584,13 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         }
     });
 
-    // Also sync the current auto-highlight style to the subtoolbar
-    if (m_toolbar->highlighterSubToolbar()) {
-        m_toolbar->highlighterSubToolbar()->setAutoHighlightStyle(
-            static_cast<HighlighterSubToolbar::HighlightStyle>(viewport->autoHighlightStyle()));
-    }
+    // Connect select-vs-highlight sync (viewport -> subtoolbar)
+    m_highlightOnReleaseConn = connect(viewport, &DocumentViewport::highlightOnReleaseChanged,
+                                       this, [this](bool enabled) {
+        if (m_toolbar && m_toolbar->highlighterSubToolbar()) {
+            m_toolbar->highlighterSubToolbar()->setHighlightOnRelease(enabled);
+        }
+    });
 
     // Connect highlighter-mode (PDF/OCR) sync (viewport -> subtoolbar)
     m_highlighterModeConn = connect(viewport, &DocumentViewport::highlighterModeChanged,
@@ -2593,13 +2603,13 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         }
     });
 
-    // Also sync the current highlighter mode to the subtoolbar
-    if (m_toolbar->highlighterSubToolbar()) {
-        auto src = (viewport->highlighterMode() == DocumentViewport::HighlighterMode::Ocr)
-                       ? HighlighterSubToolbar::SelectionSource::Ocr
-                       : HighlighterSubToolbar::SelectionSource::Pdf;
-        m_toolbar->highlighterSubToolbar()->setSelectionSourceState(src);
-    }
+    // Seed the viewport from the subtoolbar rather than the other way round.
+    // These three are global tool settings backed by QSettings, like the
+    // highlighter colour: pushing viewport -> subtoolbar here is what used to
+    // overwrite the persisted values with a fresh viewport's defaults. Both
+    // this and applyAllSubToolbarValuesToViewport() now push the same way, so
+    // it no longer matters which of the two signal handlers runs first.
+    applyHighlighterSettingsToViewport(viewport);
 
     // Keep the three object toolbar buttons and action-bar mode toggle in sync
     // with per-viewport state (including changes made through shortcuts).
@@ -3059,6 +3069,32 @@ void MainWindow::applySubToolbarValuesToViewport(ToolType tool)
     }
 }
 
+void MainWindow::applyHighlighterSettingsToViewport(DocumentViewport* viewport)
+{
+    auto* highlighterST = m_toolbar ? m_toolbar->highlighterSubToolbar() : nullptr;
+    if (!viewport || !highlighterST) {
+        return;
+    }
+
+    // Colour, style, select-vs-highlight and PDF/OCR source are global tool
+    // settings backed by QSettings, so the subtoolbar is the source and the
+    // viewport is the sink. Everything except the colour used to be pushed the
+    // other way, which meant the persisted values were loaded into the
+    // subtoolbar and then immediately overwritten by a fresh viewport's
+    // hardcoded defaults: the Highlighter came up in select-only PDF mode after
+    // every restart no matter what the user had chosen.
+    viewport->setHighlighterColor(highlighterST->currentColor());
+    viewport->setAutoHighlightStyle(
+        static_cast<DocumentViewport::HighlightStyle>(
+            highlighterST->currentAutoHighlightStyle()));
+    viewport->setHighlightOnRelease(highlighterST->highlightOnRelease());
+    viewport->setHighlighterMode(
+        highlighterST->currentSelectionSource()
+                == HighlighterSubToolbar::SelectionSource::Ocr
+            ? DocumentViewport::HighlighterMode::Ocr
+            : DocumentViewport::HighlighterMode::Pdf);
+}
+
 void MainWindow::applyAllSubToolbarValuesToViewport(DocumentViewport* viewport)
 {
     // Phase D: Apply ALL subtoolbar preset values DIRECTLY to a specific viewport
@@ -3082,12 +3118,10 @@ void MainWindow::applyAllSubToolbarValuesToViewport(DocumentViewport* viewport)
         viewport->setMarkerThickness(m_toolbar->markerSubToolbar()->currentThickness());
     }
     
-    // Apply highlighter color (uses separate m_highlighterColor in viewport)
+    // Apply highlighter settings (uses separate m_highlighterColor in viewport)
     // Note: Highlighter and Marker share the same color PRESETS (QSettings),
     // but the Highlighter tool uses a separate color variable in DocumentViewport
-    if (m_toolbar->highlighterSubToolbar()) {
-        viewport->setHighlighterColor(m_toolbar->highlighterSubToolbar()->currentColor());
-    }
+    applyHighlighterSettingsToViewport(viewport);
     
     // Apply eraser size and mode
     if (m_toolbar->eraserSubToolbar()) {
@@ -5670,6 +5704,10 @@ void MainWindow::connectSubToolbarSignals()
             [this](HighlighterSubToolbar::HighlightStyle style) {
         if (DocumentViewport* vp = currentViewport())
             vp->setAutoHighlightStyle(static_cast<DocumentViewport::HighlightStyle>(style));
+    });
+    connect(highlighterST, &HighlighterSubToolbar::highlightOnReleaseChanged, this,
+            [this](bool enabled) {
+        if (DocumentViewport* vp = currentViewport()) vp->setHighlightOnRelease(enabled);
     });
     connect(highlighterST, &HighlighterSubToolbar::selectionSourceChanged, this,
             [this](HighlighterSubToolbar::SelectionSource src) {

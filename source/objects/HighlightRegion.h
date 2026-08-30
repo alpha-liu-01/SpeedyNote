@@ -35,6 +35,17 @@
  */
 struct HighlightRegion {
     /**
+     * @brief Alpha a highlight colour is stored at (50%).
+     *
+     * The marker tools carry their own private MARKER_OPACITY with the same
+     * value, but neither is reachable from the objects or viewport layer, so
+     * this is the canonical copy for anything writing `color`. Colours are
+     * picked and displayed opaque and get this alpha applied on the way in,
+     * matching how the marker presets behave.
+     */
+    static constexpr int DEFAULT_OPACITY = 128;
+
+    /**
      * @brief Visual style of the highlight.
      *
      * Third mirror of the same 0..3 ordering as DocumentViewport::HighlightStyle
