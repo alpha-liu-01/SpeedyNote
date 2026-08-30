@@ -16,8 +16,7 @@
 安装以下软件包：
 
 ```zsh
-brew install qt@6
-brew install mupdf
+brew install qt@6 mupdf librsvg
 
 ```
 

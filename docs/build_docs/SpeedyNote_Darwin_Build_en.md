@@ -16,8 +16,7 @@ Install with default settings.
 Install these packages:
 
 ```zsh
-brew install qt@6
-brew install mupdf
+brew install qt@6 mupdf librsvg
 
 ```
 ### Build
