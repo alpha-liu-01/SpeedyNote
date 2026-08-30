@@ -2180,7 +2180,16 @@ signals:
      * - Tiles are loaded/evicted in edgeless mode
      */
     void linkObjectListMayHaveChanged();
-    
+
+    /**
+     * @brief Emitted when the slot contents of the selected LinkObject change.
+     *
+     * Narrower than linkObjectListMayHaveChanged(): the set of LinkObjects is
+     * unchanged, only the 3 slots of one object. Drives the ObjectSelect
+     * subtoolbar slot buttons.
+     */
+    void linkSlotsChanged();
+
     /**
      * @brief Emitted when the current tool changes.
      * @param tool New tool type.

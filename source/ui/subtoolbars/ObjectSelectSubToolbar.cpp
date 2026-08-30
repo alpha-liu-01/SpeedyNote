@@ -323,7 +323,11 @@ void ObjectSelectSubToolbar::setLinkObjectDescription(const QString& description
             m_descriptionButton->setChecked(false);
         }
     }
-    if (m_descriptionEdit) {
+    // This is also called whenever the selected LinkObject's slots change, which
+    // can happen while the popup is open. Re-seeding the editor then would throw
+    // away whatever the user has typed so far.
+    const bool editing = enabled && m_descriptionPopup && m_descriptionPopup->isVisible();
+    if (m_descriptionEdit && !editing) {
         m_descriptionEdit->setText(description);
     }
     if (m_descriptionPopup && !enabled) {

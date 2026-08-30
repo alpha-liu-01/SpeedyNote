@@ -10308,6 +10308,7 @@ void DocumentViewport::activateLinkSlot(int slotIndex)
 
                 emit documentModified();
                 emit linkObjectListMayHaveChanged();   // M.7.3: refresh the right sidebar
+                emit linkSlotsChanged();
                 update();
                 // TODO: Notify user that note was missing
                 return;
@@ -10387,6 +10388,7 @@ void DocumentViewport::addLinkToSlot(int slotIndex)
             }
             
             emit documentModified();
+            emit linkSlotsChanged();
             update();
             
             #ifdef SPEEDYNOTE_DEBUG
@@ -10461,6 +10463,7 @@ void DocumentViewport::clearLinkSlot(int slotIndex)
 
     emit documentModified();
     emit linkObjectListMayHaveChanged();   // M.7.3: refresh the right sidebar
+    emit linkSlotsChanged();
     update();
 }
 
@@ -10542,6 +10545,9 @@ void DocumentViewport::createMarkdownNoteForSlot(int slotIndex)
     markLinkContainerDirtyAndRefreshOutline(link);
 
     emit documentModified();
+    // Emitted before requestOpenMarkdownNote so the slot buttons are already
+    // correct if the sidebar handler spins a nested event loop.
+    emit linkSlotsChanged();
     emit requestOpenMarkdownNote(noteId, link->id);
     
     update();

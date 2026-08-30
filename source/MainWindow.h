@@ -763,6 +763,10 @@ private:
     QMetaObject::Connection m_insertModeConn;
     QMetaObject::Connection m_actionModeConn;
     QMetaObject::Connection m_selectionChangedConn;
+    /// Slot-content sync: refreshes the ObjectSelect subtoolbar slot buttons
+    /// when the selected LinkObject's slots are mutated (link added/cleared)
+    /// without the selection itself changing.
+    QMetaObject::Connection m_linkSlotsChangedConn;
     
     // Action Bar: Selection state connections (viewport → action bar container)
     QMetaObject::Connection m_lassoSelectionConn;

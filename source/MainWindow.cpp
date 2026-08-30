@@ -982,7 +982,10 @@ void MainWindow::setupUi() {
             }
         }
 
-        if (found) vp->update();
+        if (found) {
+            vp->update();
+            updateLinkSlotButtons(vp);
+        }
         refreshNotesOutline();
     });
     
@@ -2398,6 +2401,10 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_selectionChangedConn);
         m_selectionChangedConn = {};
     }
+    if (m_linkSlotsChangedConn) {
+        disconnect(m_linkSlotsChangedConn);
+        m_linkSlotsChangedConn = {};
+    }
     // Action Bar: Disconnect selection state connections
     if (m_lassoSelectionConn) {
         disconnect(m_lassoSelectionConn);
@@ -2627,6 +2634,13 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         // MAC.7 review fix: gate on isActiveWindow() so background-window
         // selection changes don't pollute the active window's QAction states.
         if (isActiveWindow()) updateObjectActionsEnabled();
+    });
+    
+    // Slot contents can change without the selection changing (adding a URL /
+    // markdown note, clearing a slot), so the buttons need this second trigger.
+    m_linkSlotsChangedConn = connect(viewport, &DocumentViewport::linkSlotsChanged,
+                                     this, [this, viewport]() {
+        updateLinkSlotButtons(viewport);
     });
     
     // Also sync the current selection state to the subtoolbar
