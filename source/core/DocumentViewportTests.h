@@ -19,6 +19,7 @@
 #include "../ui/panels/TextBoxFormatBar.h"
 #include "../ui/widgets/ColorPresetButton.h"
 #include "../ui/widgets/LinkSlotButton.h"
+#include "../ui/widgets/ToggleButton.h"  // Contains SubToolbarToggle
 #include "../../markdown/qmarkdowntextedit.h"
 #include "../strokes/VectorStroke.h"
 #include "../strokes/StrokePoint.h"
@@ -3030,6 +3031,477 @@ public:
         return true;
     }
 
+    /**
+     * @brief Adjust mode: re-ranging an existing highlight's covered text.
+     *
+     * The load-bearing decisions here are that endpoints come from the region
+     * rects rather than the stored source range (whose box indices address a
+     * lazily rebuilt cache), that a whole session collapses to one undo entry no
+     * matter how many tweaks it contains, and that Esc leaves no entry at all.
+     * Also covers the two mode-plumbing traps: entering Adjust from ObjectSelect
+     * must survive the tool switch, and tapping a highlight from the Highlighter
+     * must still respect the layer-affinity filter.
+     */
+    static bool testHighlightAdjustMode() {
+        printf("  testHighlightAdjustMode... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        constexpr qreal pdfToPage = 96.0 / 72.0;
+
+        // Seed a synthetic OCR block whose per-character rects are an even
+        // split, so expected character indices are arithmetic rather than
+        // dependent on a real engine.
+        auto seedOcrBlock = [](DocumentViewport& vp, const QString& text,
+                               const QRectF& blockRect) {
+            DocumentViewport::OcrBlockRef ref;
+            ref.text = text;
+            ref.blockRect = blockRect;
+            const qreal charWidth = blockRect.width() / text.length();
+            for (int i = 0; i < text.length(); ++i) {
+                ref.charRects.append(QRectF(blockRect.left() + i * charWidth,
+                                            blockRect.top(), charWidth,
+                                            blockRect.height()));
+            }
+            vp.m_ocrBlockCache.clear();
+            vp.m_ocrBlockCache.append(ref);
+            vp.m_lastOcrHitBlockIndex = -1;
+            // Makes loadOcrBlocksForPage() a no-op so the synthetic cache stands.
+            vp.m_ocrBlockCachePageIndex = 0;
+            if (vp.m_document && vp.m_document->isEdgeless())
+                vp.m_ocrBlockCacheTileVersion = vp.m_document->tileLoadVersion();
+        };
+
+        auto commitOcrHighlight = [](DocumentViewport& vp, int pageIndex,
+                                     const QVector<QRectF>& rects,
+                                     const QString& text) -> LinkObject* {
+            vp.m_textSelection.clear();
+            vp.m_textSelection.source =
+                DocumentViewport::TextSelection::Source::Ocr;
+            vp.m_textSelection.pageIndex = pageIndex;
+            vp.m_textSelection.startBoxIndex = 0;
+            vp.m_textSelection.startCharIndex = 0;
+            vp.m_textSelection.endBoxIndex = 0;
+            vp.m_textSelection.endCharIndex = text.size();
+            vp.m_textSelection.selectedText = text;
+            vp.m_textSelection.highlightRects = rects;
+            return vp.commitHighlightAnnotation();
+        };
+
+        // ===== Endpoints come from the rects: PDF word boxes =====
+        {
+            auto doc = Document::createNew("Adjust PDF endpoints");
+            DocumentViewport viewport;
+            viewport.resize(1100, 820);
+            viewport.setDocument(doc.get());
+            Page* page = doc->page(0);
+            if (!page)
+                return fail("missing PDF endpoint page");
+
+            // Three word boxes on one line, in PDF coordinates.
+            auto makeBox = [](const QString& text, qreal left) {
+                PdfTextBox box;
+                box.text = text;
+                const qreal charWidth = 8.0;
+                box.boundingBox =
+                    QRectF(left, 100.0, charWidth * text.length(), 12.0);
+                for (int i = 0; i < text.length(); ++i) {
+                    box.charBoundingBoxes.append(
+                        QRectF(left + i * charWidth, 100.0, charWidth, 12.0));
+                }
+                return box;
+            };
+            viewport.m_textBoxCache = {makeBox(QStringLiteral("Alpha"), 100.0),
+                                       makeBox(QStringLiteral("Beta"), 150.0),
+                                       makeBox(QStringLiteral("Gamma"), 190.0)};
+            viewport.m_textBoxCachePageIndex = 0;
+            viewport.m_lastHitBoxIndex = -1;
+
+            // A mark covering "Alpha Beta": PDF x 100..182, converted to the page
+            // coordinates the region actually stores.
+            auto mark = std::make_unique<LinkObject>();
+            mark->setRegionFromPageRects({QRectF(100.0 * pdfToPage,
+                                                 100.0 * pdfToPage,
+                                                 82.0 * pdfToPage,
+                                                 12.0 * pdfToPage)});
+            mark->region.style = HighlightRegion::Style::Cover;
+            // Deliberately bogus stored indices: derivation must ignore them.
+            mark->region.sourceRange.source = HighlightRegion::Source::Pdf;
+            mark->region.sourceRange.startBoxIndex = 2;
+            mark->region.sourceRange.startCharIndex = 4;
+            mark->region.sourceRange.endBoxIndex = 2;
+            mark->region.sourceRange.endCharIndex = 4;
+            LinkObject* pdfMark = mark.get();
+            page->addObject(std::move(mark));
+
+            DocumentViewport::TextSelection derived;
+            if (!viewport.deriveRegionEndpoints(pdfMark, derived))
+                return fail("PDF endpoint derivation failed outright");
+            if (derived.source != DocumentViewport::TextSelection::Source::Pdf)
+                return fail("derived selection lost its PDF source");
+            if (derived.startBoxIndex != 0 || derived.startCharIndex != 0)
+                return fail("PDF start endpoint did not land on the first word");
+            if (derived.endBoxIndex != 1 || derived.endCharIndex != 3)
+                return fail("PDF end endpoint did not land on the last word");
+
+            // Word snapping on PDF is picking an end of the box, since MuPDF
+            // emits one box per word.
+            int boxIndex = 1;
+            int charIndex = 1;
+            viewport.snapEndpointToWord(
+                DocumentViewport::TextSelection::Source::Pdf, boxIndex,
+                charIndex, false);
+            if (charIndex != 3)
+                return fail("PDF end snap did not reach the end of the word");
+            charIndex = 2;
+            viewport.snapEndpointToWord(
+                DocumentViewport::TextSelection::Source::Pdf, boxIndex,
+                charIndex, true);
+            if (charIndex != 0)
+                return fail("PDF start snap did not reach the start of the word");
+
+            viewport.setDocument(nullptr);
+        }
+
+        // ===== Endpoints from rects: OCR paragraph, plus word snapping =====
+        {
+            auto doc = Document::createNew("Adjust OCR endpoints");
+            DocumentViewport viewport;
+            viewport.resize(1100, 820);
+            viewport.setDocument(doc.get());
+            Page* page = doc->page(0);
+            if (!page)
+                return fail("missing OCR endpoint page");
+
+            // 16 characters over 160pt, so one character is exactly 10pt wide.
+            const QString text = QStringLiteral("hello world here");
+            seedOcrBlock(viewport, text, QRectF(50.0, 200.0, 160.0, 16.0));
+
+            auto mark = std::make_unique<LinkObject>();
+            // Covers "world": characters 6..10, x 110..160.
+            mark->setRegionFromPageRects({QRectF(110.0, 200.0, 50.0, 16.0)});
+            mark->region.style = HighlightRegion::Style::Cover;
+            mark->region.sourceRange.source = HighlightRegion::Source::Ocr;
+            LinkObject* ocrMark = mark.get();
+            page->addObject(std::move(mark));
+
+            DocumentViewport::TextSelection derived;
+            if (!viewport.deriveRegionEndpoints(ocrMark, derived))
+                return fail("OCR endpoint derivation failed outright");
+            if (derived.source != DocumentViewport::TextSelection::Source::Ocr)
+                return fail("derived selection lost its OCR source");
+            if (derived.startBoxIndex != 0 || derived.startCharIndex != 6)
+                return fail("OCR start endpoint missed the start of the word");
+            if (derived.endBoxIndex != 0 || derived.endCharIndex != 10)
+                return fail("OCR end endpoint missed the end of the word");
+
+            // An OCR block is a paragraph, so snapping has to scan its text.
+            viewport.m_textSelection = derived;
+            viewport.m_textSelection.startCharIndex = 7;
+            viewport.m_textSelection.endCharIndex = 8;
+            viewport.snapSelectionToWords();
+            if (viewport.m_textSelection.startCharIndex != 6
+                || viewport.m_textSelection.endCharIndex != 10)
+                return fail("OCR snapping did not expand to the whole word");
+
+            // A backwards range snaps outward the other way round.
+            viewport.m_textSelection.startCharIndex = 8;
+            viewport.m_textSelection.endCharIndex = 7;
+            viewport.snapSelectionToWords();
+            if (viewport.m_textSelection.startCharIndex != 10
+                || viewport.m_textSelection.endCharIndex != 6)
+                return fail("a backwards range snapped the wrong ends outward");
+
+            viewport.setDocument(nullptr);
+        }
+
+        // ===== CJK has no word separators, so snapping leaves it alone =====
+        {
+            auto doc = Document::createNew("Adjust CJK snapping");
+            DocumentViewport viewport;
+            viewport.resize(1100, 820);
+            viewport.setDocument(doc.get());
+
+            seedOcrBlock(viewport, QString::fromUtf8("中文汉字测试"),
+                         QRectF(40.0, 60.0, 120.0, 20.0));
+
+            int boxIndex = 0;
+            int charIndex = 2;
+            viewport.snapEndpointToWord(
+                DocumentViewport::TextSelection::Source::Ocr, boxIndex,
+                charIndex, true);
+            if (charIndex != 2)
+                return fail("CJK start snap swallowed neighbouring glyphs");
+            charIndex = 3;
+            viewport.snapEndpointToWord(
+                DocumentViewport::TextSelection::Source::Ocr, boxIndex,
+                charIndex, false);
+            if (charIndex != 3)
+                return fail("CJK end snap swallowed neighbouring glyphs");
+
+            viewport.setDocument(nullptr);
+        }
+
+        // ===== A whole session is one undo entry; Esc is none =====
+        {
+            auto doc = Document::createNew("Adjust undo coalescing");
+            DocumentViewport viewport;
+            viewport.resize(1100, 820);
+            viewport.setDocument(doc.get());
+            viewport.setCurrentTool(ToolType::Highlighter);
+            viewport.setHighlighterMode(DocumentViewport::HighlighterMode::Ocr);
+            viewport.m_autoHighlightStyle =
+                DocumentViewport::HighlightStyle::Cover;
+
+            const QString text = QStringLiteral("hello world here");
+            seedOcrBlock(viewport, text, QRectF(50.0, 200.0, 160.0, 16.0));
+
+            LinkObject* mark = commitOcrHighlight(
+                viewport, 0, {QRectF(110.0, 200.0, 50.0, 16.0)},
+                QStringLiteral("world"));
+            if (!mark)
+                return fail("adjust test highlight did not commit");
+            // commitHighlightAnnotation() re-seeded the cache lookup, so restore
+            // the synthetic block before deriving from it.
+            seedOcrBlock(viewport, text, QRectF(50.0, 200.0, 160.0, 16.0));
+
+            const HighlightRegion original = mark->region;
+            const QPointF originalPosition = mark->position;
+            const int stackAfterCommit = viewport.m_undoStack.size();
+
+            if (!viewport.beginHighlightAdjust())
+                return fail("could not enter Adjust on a selected highlight");
+            if (!viewport.isAdjustingHighlight())
+                return fail("Adjust session did not report itself active");
+            if (!viewport.m_adjustSession.endpointsResolved)
+                return fail("Adjust could not recover the covered range");
+
+            // Three tweaks in a row, each written straight into the mark.
+            auto retarget = [&](int startChar, int endChar) {
+                viewport.m_textSelection.startCharIndex = startChar;
+                viewport.m_textSelection.endCharIndex = endChar;
+                viewport.snapSelectionToWords();
+                viewport.updateSelectedTextAndRects();
+                return viewport.applyAdjustedRangeToRegion();
+            };
+            if (!retarget(0, 10))
+                return fail("first Adjust tweak did not reach the region");
+            if (!retarget(0, 15))
+                return fail("second Adjust tweak did not reach the region");
+            if (!retarget(6, 15))
+                return fail("third Adjust tweak did not reach the region");
+            if (mark->region.rects == original.rects)
+                return fail("the tweaks left the region unchanged");
+            if (viewport.m_undoStack.size() != stackAfterCommit)
+                return fail("a mid-session tweak pushed its own undo entry");
+
+            viewport.commitHighlightAdjust();
+            if (viewport.isAdjustingHighlight())
+                return fail("commit left the session active");
+            if (viewport.m_undoStack.size() != stackAfterCommit + 1)
+                return fail("a three-tweak session was not one undo entry");
+            if (viewport.m_undoStack.top().type
+                != UndoAction::ObjectRegionChange)
+                return fail("the session pushed the wrong undo type");
+            if (viewport.m_undoStack.top().objectNewRegion.rects
+                != mark->region.rects)
+                return fail("the undo entry did not capture the new region");
+            if (mark->region.sourceRange.stale
+                || !mark->region.sourceRange.isUsable())
+                return fail("commit did not refresh the source range");
+
+            const HighlightRegion adjusted = mark->region;
+            const QPointF adjustedPosition = mark->position;
+
+            // Undo/redo round-trip. maxObjectExtent is recalculated in both
+            // directions, so a shrink is reflected rather than latched.
+            viewport.undo();
+            if (mark->region.rects != original.rects
+                || mark->position != originalPosition)
+                return fail("undo did not restore the pre-Adjust region");
+            viewport.redo();
+            if (mark->region.rects != adjusted.rects
+                || mark->position != adjustedPosition)
+                return fail("redo did not reapply the adjusted region");
+
+            // Esc abandons a session without leaving an entry behind.
+            const int stackBeforeEsc = viewport.m_undoStack.size();
+            seedOcrBlock(viewport, text, QRectF(50.0, 200.0, 160.0, 16.0));
+            viewport.selectObject(mark, false);
+            if (!viewport.beginHighlightAdjust())
+                return fail("could not re-enter Adjust for the Esc case");
+            if (!retarget(0, 4))
+                return fail("the Esc-case tweak did not reach the region");
+            if (mark->region.rects == adjusted.rects)
+                return fail("the Esc-case tweak changed nothing to revert");
+            if (!viewport.handleEscapeKey())
+                return fail("Esc did not report handling the Adjust session");
+            if (viewport.isAdjustingHighlight())
+                return fail("Esc left the session active");
+            if (mark->region.rects != adjusted.rects
+                || mark->position != adjustedPosition)
+                return fail("Esc did not restore the region it started with");
+            if (viewport.m_undoStack.size() != stackBeforeEsc)
+                return fail("Esc still pushed an undo entry");
+
+            viewport.setDocument(nullptr);
+        }
+
+        // ===== Entering Adjust from ObjectSelect keeps the selection =====
+        {
+            auto doc = Document::createNew("Adjust from ObjectSelect");
+            DocumentViewport viewport;
+            viewport.resize(1100, 820);
+            viewport.setDocument(doc.get());
+            viewport.setCurrentTool(ToolType::Highlighter);
+            viewport.setHighlighterMode(DocumentViewport::HighlighterMode::Ocr);
+            viewport.m_autoHighlightStyle =
+                DocumentViewport::HighlightStyle::Cover;
+
+            const QString text = QStringLiteral("hello world here");
+            seedOcrBlock(viewport, text, QRectF(50.0, 200.0, 160.0, 16.0));
+            LinkObject* mark = commitOcrHighlight(
+                viewport, 0, {QRectF(110.0, 200.0, 50.0, 16.0)},
+                QStringLiteral("world"));
+            if (!mark)
+                return fail("cross-tool test highlight did not commit");
+
+            viewport.setCurrentTool(ToolType::ObjectSelect);
+            viewport.selectObject(mark, false);
+            seedOcrBlock(viewport, text, QRectF(50.0, 200.0, 160.0, 16.0));
+
+            if (!viewport.beginHighlightAdjust())
+                return fail("Adjust could not be entered from ObjectSelect");
+            if (viewport.currentTool() != ToolType::Highlighter)
+                return fail("Adjust did not take over the Highlighter tool");
+            if (viewport.selectedObjects().size() != 1
+                || viewport.selectedObjects().first() != mark)
+                return fail("the tool switch destroyed the Adjust target");
+
+            // The bar's toggle is the visible state of the session.
+            viewport.refreshLinkObjectBar();
+            auto* adjustToggle = viewport.m_linkObjectBar
+                ? viewport.m_linkObjectBar->findChild<SubToolbarToggle*>(
+                      QStringLiteral("linkAdjustToggle"))
+                : nullptr;
+            if (!adjustToggle)
+                return fail("the bar has no Adjust toggle");
+            if (!adjustToggle->isChecked())
+                return fail("the bar's Adjust toggle did not follow the session");
+            viewport.commitHighlightAdjust();
+            if (adjustToggle->isChecked())
+                return fail("the toggle stayed checked after Done");
+
+            viewport.setDocument(nullptr);
+        }
+
+        // ===== Tapping a highlight selects it, subject to layer affinity =====
+        {
+            auto doc = Document::createNew("Adjust tap to select");
+            DocumentViewport viewport;
+            viewport.resize(1100, 820);
+            viewport.setDocument(doc.get());
+            viewport.setCurrentTool(ToolType::Highlighter);
+            viewport.setHighlighterMode(DocumentViewport::HighlighterMode::Ocr);
+            viewport.m_autoHighlightStyle =
+                DocumentViewport::HighlightStyle::Cover;
+            Page* page = doc->page(0);
+            if (!page)
+                return fail("missing tap-to-select page");
+
+            const QString text = QStringLiteral("hello world here");
+            seedOcrBlock(viewport, text, QRectF(50.0, 200.0, 160.0, 16.0));
+            LinkObject* mark = commitOcrHighlight(
+                viewport, 0, {QRectF(110.0, 200.0, 50.0, 16.0)},
+                QStringLiteral("world"));
+            if (!mark)
+                return fail("tap-to-select highlight did not commit");
+            viewport.deselectAllObjects();
+
+            PointerEvent pe;
+            pe.type = PointerEvent::Press;
+            pe.source = PointerEvent::Mouse;
+            pe.button = Qt::LeftButton;
+            pe.viewportPos = viewport.documentToViewport(
+                viewport.pagePosition(0) + QPointF(130.0, 208.0));
+
+            // Affinity mismatch first: a highlight made on one layer must not be
+            // selectable from another, exactly like every other object.
+            const int trueAffinity = mark->getLayerAffinity();
+            mark->setLayerAffinity(trueAffinity + 1);
+            viewport.handlePointerPress_Highlighter(pe);
+            if (!viewport.selectedObjects().isEmpty())
+                return fail("a tap crossed the layer-affinity filter");
+
+            mark->setLayerAffinity(trueAffinity);
+            viewport.handlePointerPress_Highlighter(pe);
+            if (viewport.selectedObjects().size() != 1
+                || viewport.selectedObjects().first() != mark)
+                return fail("a tap on a highlight did not select it");
+            if (viewport.m_textSelection.isSelecting)
+                return fail("tap-to-select also started a text selection");
+
+            viewport.setDocument(nullptr);
+        }
+
+        // ===== Edgeless: tile-local rects probe a document-space OCR cache =====
+        {
+            auto doc = Document::createNew("Adjust edgeless",
+                                           Document::Mode::Edgeless);
+            DocumentViewport viewport;
+            viewport.resize(1100, 820);
+            viewport.setDocument(doc.get());
+            viewport.setCurrentTool(ToolType::Highlighter);
+            viewport.setHighlighterMode(DocumentViewport::HighlighterMode::Ocr);
+            viewport.m_autoHighlightStyle =
+                DocumentViewport::HighlightStyle::Cover;
+
+            // A block living in tile (1,0), addressed in document space as the
+            // edgeless cache always is.
+            const qreal tileSize = Document::EDGELESS_TILE_SIZE;
+            const QString text = QStringLiteral("hello world here");
+            const QRectF blockRect(tileSize + 50.0, 200.0, 160.0, 16.0);
+
+            LinkObject* mark = commitOcrHighlight(
+                viewport, 0,
+                {QRectF(blockRect.left() + 60.0, 200.0, 50.0, 16.0)},
+                QStringLiteral("world"));
+            if (!mark)
+                return fail("edgeless adjust highlight did not commit");
+            if (mark->position.x() >= tileSize)
+                return fail("edgeless mark was not rebased tile-local");
+            seedOcrBlock(viewport, text, blockRect);
+
+            DocumentViewport::TextSelection derived;
+            if (!viewport.deriveRegionEndpoints(mark, derived))
+                return fail("edgeless endpoint derivation failed");
+            if (derived.startCharIndex != 6 || derived.endCharIndex != 10)
+                return fail("edgeless derivation ignored the tile origin");
+
+            // Extending the mark must widen the document-wide extent, or
+            // edgeless culling would clip a mark that now spans further.
+            if (!viewport.beginHighlightAdjust())
+                return fail("could not enter Adjust in edgeless mode");
+            viewport.m_textSelection.startCharIndex = 0;
+            viewport.m_textSelection.endCharIndex = 15;
+            viewport.snapSelectionToWords();
+            viewport.updateSelectedTextAndRects();
+            if (!viewport.applyAdjustedRangeToRegion())
+                return fail("the edgeless tweak did not reach the region");
+            viewport.commitHighlightAdjust();
+            if (doc->maxObjectExtent() < 160)
+                return fail("a widened edgeless mark did not widen the extent");
+
+            viewport.setDocument(nullptr);
+        }
+
+        printf("PASSED\n");
+        return true;
+    }
+
     static bool testOcrTextBoxConversion() {
         printf("  testOcrTextBoxConversion... ");
 
@@ -3383,6 +3855,8 @@ public:
                 "testLinkObjectBar");
         runTest(testHighlightAnnotationGeometry,
                 "testHighlightAnnotationGeometry");
+        runTest(testHighlightAdjustMode,
+                "testHighlightAdjustMode");
         runTest(testOcrTextBoxConversion,
                 "testOcrTextBoxConversion");
         

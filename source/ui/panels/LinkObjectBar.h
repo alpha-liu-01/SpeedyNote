@@ -37,10 +37,17 @@ public:
      * @param states Slot states, one per slot.
      * @param iconColor The object's icon color.
      * @param description The object's description.
+     * @param regionAdjustable True when the object carries a highlight, which
+     *        is the only case where a text range exists to re-range. Hides the
+     *        Adjust toggle for standalone link icons.
+     * @param adjusting True while an Adjust session is live, so the same widget
+     *        reads "Done".
      */
     void setValues(const LinkSlotState states[NUM_SLOTS],
                    const QColor& iconColor,
-                   const QString& description);
+                   const QString& description,
+                   bool regionAdjustable = false,
+                   bool adjusting = false);
 
     void setDarkMode(bool darkMode);
 
@@ -88,6 +95,12 @@ signals:
      */
     void linkObjectDescriptionChanged(const QString& description);
 
+    /**
+     * @brief Emitted when the user asks to enter or leave Adjust mode.
+     * @param adjusting True to start re-ranging the highlight, false for Done.
+     */
+    void adjustToggled(bool adjusting);
+
 protected:
     // Children such as the colour swatch ignore pointer events. Swallow
     // whatever reaches the bar so the canvas underneath never treats an
@@ -114,6 +127,7 @@ private:
     QHBoxLayout* m_layout = nullptr;
 
     ColorPresetButton* m_colorButton = nullptr;       // LinkObject color editor
+    SubToolbarToggle* m_adjustButton = nullptr;       // Enter/leave Adjust mode
     SubToolbarToggle* m_descriptionButton = nullptr;  // Toggle description editor
     QWidget* m_descriptionPopup = nullptr;            // Popup container
     QLineEdit* m_descriptionEdit = nullptr;           // Description text editor

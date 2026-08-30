@@ -78,6 +78,19 @@ void LinkObjectBar::createWidgets()
     m_colorButton->setToolTip(tr("LinkObject color (click to edit)"));
     m_layout->addWidget(m_colorButton, 0, Qt::AlignVCenter);
 
+    // One widget serves as both the way into Adjust and the Done button that
+    // leaves it, so there is never a Done control with nothing to finish.
+    // Hidden until a highlight is selected; a standalone link icon has no text
+    // range to re-range.
+    m_adjustButton = new SubToolbarToggle(this);
+    m_adjustButton->setObjectName(QStringLiteral("linkAdjustToggle"));
+    m_adjustButton->setIconName("edit");
+    m_adjustButton->setDarkMode(dark);
+    m_adjustButton->setToolTip(tr("Adjust highlight range"));
+    m_adjustButton->setChecked(false);
+    m_adjustButton->hide();
+    m_layout->addWidget(m_adjustButton, 0, Qt::AlignVCenter);
+
     // Description edit button (SubToolbarToggle handles styling)
     m_descriptionButton = new SubToolbarToggle(this);
     m_descriptionButton->setIconName("ibeam");
@@ -151,6 +164,9 @@ void LinkObjectBar::setupConnections()
     connect(m_colorButton, &ColorPresetButton::editRequested,
             this, &LinkObjectBar::onColorButtonEditRequested);
 
+    connect(m_adjustButton, &SubToolbarToggle::toggled,
+            this, [this](bool checked) { emit adjustToggled(checked); });
+
     // Description button/editor connections
     connect(m_descriptionButton, &SubToolbarToggle::toggled,
             this, &LinkObjectBar::onDescriptionButtonToggled);
@@ -174,7 +190,9 @@ void LinkObjectBar::setupConnections()
 
 void LinkObjectBar::setValues(const LinkSlotState states[NUM_SLOTS],
                               const QColor& iconColor,
-                              const QString& description)
+                              const QString& description,
+                              bool regionAdjustable,
+                              bool adjusting)
 {
     for (int i = 0; i < NUM_SLOTS; ++i) {
         m_slotButtons[i]->setState(states[i]);
@@ -183,6 +201,17 @@ void LinkObjectBar::setValues(const LinkSlotState states[NUM_SLOTS],
     if (m_colorButton) {
         m_colorButton->setColor(iconColor);
         m_colorButton->setSelected(true);  // Always selected for immediate edit
+    }
+
+    if (m_adjustButton) {
+        m_adjustButton->setVisible(regionAdjustable);
+        // Blocked: this is the viewport reporting the session state back, so
+        // reacting to it would re-enter the toggle handler.
+        m_adjustButton->blockSignals(true);
+        m_adjustButton->setChecked(adjusting);
+        m_adjustButton->blockSignals(false);
+        m_adjustButton->setToolTip(adjusting ? tr("Done adjusting")
+                                             : tr("Adjust highlight range"));
     }
 
     // setValues() also runs whenever the selected LinkObject's slots change,
@@ -245,6 +274,9 @@ bool LinkObjectBar::confirmSlotDelete(int index)
 
 void LinkObjectBar::setDarkMode(bool darkMode)
 {
+    if (m_adjustButton) {
+        m_adjustButton->setDarkMode(darkMode);
+    }
     if (m_descriptionButton) {
         m_descriptionButton->setDarkMode(darkMode);
     }

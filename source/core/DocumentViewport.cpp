@@ -379,6 +379,9 @@ void DocumentViewport::setDocument(Document* doc)
     closeLinkObjectBarPopups(true);
     finishTextBoxFormatInteraction(true);
     commitInlineTextEdit();
+    // The session's target belongs to the outgoing document and the undo stacks
+    // are cleared below, so there is nothing to commit into.
+    discardHighlightAdjust();
     
     // End any active gesture (cached frame is from old document)
     if (m_gesture.isActive()) {
@@ -799,7 +802,15 @@ void DocumentViewport::setCurrentTool(ToolType tool)
     }
 
     commitInlineTextEdit();
-    
+    // Adjust lives inside the Highlighter, so leaving that tool ends the
+    // session. Commit rather than discard: every gesture in the session was
+    // already applied to the mark, so dropping them would silently revert
+    // visible work.
+    if (m_adjustSession.active && m_currentTool == ToolType::Highlighter
+        && tool != ToolType::Highlighter) {
+        commitHighlightAdjust();
+    }
+
     ToolType previousTool = m_currentTool;
     m_currentTool = tool;
     
@@ -820,8 +831,11 @@ void DocumentViewport::setCurrentTool(ToolType tool)
         }
     }
     
-    // Clear object selection and cancel creation when switching away from ObjectSelect tool
-    if (previousTool == ToolType::ObjectSelect && tool != ToolType::ObjectSelect) {
+    // Clear object selection and cancel creation when switching away from ObjectSelect tool.
+    // Entering Adjust is the exception: it switches to the Highlighter precisely
+    // in order to keep working on the annotation that is selected right now.
+    if (previousTool == ToolType::ObjectSelect && tool != ToolType::ObjectSelect
+        && !m_enteringAdjustMode) {
         clearObjectSelection();
     }
     
@@ -4027,6 +4041,7 @@ void DocumentViewport::hideEvent(QHideEvent* event)
     finishTextBoxFormatInteraction(true);
     if (m_inlineEditSession.active)
         commitInlineTextEdit();
+    commitHighlightAdjust();
     
     // BUG-A005 v4 FIX: Clear gesture state when viewport is hidden
     // When user goes to launcher and comes back, any stale gesture state
@@ -7355,6 +7370,8 @@ void DocumentViewport::clearObjectSelection()
     // nothing selected and silently drop whatever the user typed next.
     if (m_inlineEditSession.active)
         commitInlineTextEdit();
+    // Same reasoning for Adjust: its target is the selected annotation.
+    commitHighlightAdjust();
 
     closeTextBoxFormatPopups(true);
     closeLinkObjectBarPopups(true);
@@ -7611,6 +7628,10 @@ void DocumentViewport::deselectAllObjects()
     // the undo snapshot instead of losing it behind a still-visible editor.
     if (m_inlineEditSession.active)
         commitInlineTextEdit();
+    // Adjust's target is the selection, and its gestures are already applied to
+    // the mark, so the session has to land its undo entry here for the same
+    // reason.
+    commitHighlightAdjust();
 
     if (m_selectedObjects.isEmpty()) return;
 
@@ -8158,6 +8179,9 @@ void DocumentViewport::deleteSelectedObjects()
         if (m_selectedObjects.isEmpty())
             return;
     }
+    // Same reasoning as the popup discard above: the delete snapshot already
+    // captures the adjusted region, so undo restores what was on screen.
+    discardHighlightAdjust();
     
     // Separate OcrTextObjects (derived cache — no undo) from regular objects
     QVector<InsertedObject*> regularObjects;
@@ -9582,6 +9606,18 @@ void DocumentViewport::ensureLinkObjectBar()
             this, &DocumentViewport::setSelectedLinkColor);
     connect(m_linkObjectBar, &LinkObjectBar::linkObjectDescriptionChanged,
             this, &DocumentViewport::setSelectedLinkDescription);
+    connect(m_linkObjectBar, &LinkObjectBar::adjustToggled,
+            this, [this](bool adjusting) {
+        if (adjusting) {
+            if (!beginHighlightAdjust()) {
+                // Nothing to adjust; put the toggle back rather than leaving it
+                // stuck on with no session behind it.
+                syncLinkObjectBar();
+            }
+        } else {
+            commitHighlightAdjust();
+        }
+    });
 }
 
 void DocumentViewport::syncLinkObjectBar()
@@ -9610,7 +9646,10 @@ void DocumentViewport::syncLinkObjectBar()
         }
     }
 
-    m_linkObjectBar->setValues(states, link->iconColor, link->description);
+    m_linkObjectBar->setValues(states, link->iconColor, link->description,
+                               !link->region.isEmpty() && !link->locked,
+                               m_adjustSession.active
+                                   && m_adjustSession.objectId == link->id);
     m_linkObjectBar->show();
     updateLinkObjectBarGeometry();
     m_linkObjectBar->raise();
@@ -12860,6 +12899,14 @@ bool DocumentViewport::handleEscapeKey()
         cancelInlineTextEdit();
         return true;
     }
+
+    // Adjust ranks with the inline editor rather than with the plain text
+    // selection below: it is a modal session over a real object, and Esc is the
+    // only way to abandon a botched re-range without leaving an undo entry.
+    if (m_adjustSession.active) {
+        cancelHighlightAdjust();
+        return true;
+    }
     
     // Priority 1: Cancel lasso selection or drawing (Lasso tool only)
     // Note: Lasso selection is cleared when switching away from Lasso tool,
@@ -13938,11 +13985,35 @@ void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
         }
     }
 
-    // A previous highlight leaves its annotation selected so its controls are
-    // reachable. Drop that selection now, or the bar would hover over the drag
-    // that is about to start.
-    if (!m_selectedObjects.isEmpty()) {
-        deselectAllObjects();
+    const bool adjusting = m_adjustSession.active;
+
+    if (!adjusting) {
+        // Tapping an existing highlight selects its annotation, so its slots and
+        // description are reachable without leaving the Highlighter. A tap on
+        // plain text already produced a zero-length selection that goes nowhere,
+        // so this costs no existing gesture.
+        //
+        // objectAtPoint() applies the layer-affinity filter, which is the
+        // agreed behaviour: a highlight is selectable only from the layer it was
+        // made on, consistent with every other InsertedObject.
+        InsertedObject* under = objectAtPoint(viewportToDocument(pe.viewportPos));
+        if (auto* annotation = dynamic_cast<LinkObject*>(under)) {
+            if (!annotation->region.isEmpty()) {
+                m_textSelection.clear();
+                selectObject(annotation, false);
+                m_pointerActive = false;
+                updateHighlighterCursor();
+                update();
+                return;
+            }
+        }
+
+        // A previous highlight leaves its annotation selected so its controls are
+        // reachable. Drop that selection now, or the bar would hover over the drag
+        // that is about to start.
+        if (!m_selectedObjects.isEmpty()) {
+            deselectAllObjects();
+        }
     }
 
     // Load the appropriate cache for this page.
@@ -13950,6 +14021,17 @@ void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
         loadOcrBlocksForPage(hit.pageIndex);
     } else {
         loadTextBoxesForPage(hit.pageIndex);
+    }
+
+    if (adjusting) {
+        // Inside Adjust a tap is the trim gesture, so the multi-click paths below
+        // must not fire: both replace m_textSelection wholesale and finalize it,
+        // which would drop the session's anchor mid-gesture.
+        m_adjustGestureStart = pe.viewportPos;
+        m_adjustGestureIsTap = true;
+        m_textSelection.isSelecting = true;
+        update();
+        return;
     }
 
     // Check for double-click (word selection) and triple-click (line selection)
@@ -14050,6 +14132,43 @@ void DocumentViewport::handlePointerMove_Highlighter(const PointerEvent& pe)
         charPos = findCharacterAtPoint(pdfPos);
     }
 
+    if (m_adjustSession.active && m_adjustGestureIsTap) {
+        // Decide tap versus drag once, at the moment the pointer leaves the
+        // press point. Crossing the threshold means drag-redefine, so the range
+        // is re-anchored at the press point and the code below extends it as
+        // usual; staying put keeps the session's range for tap-moves-the-edge.
+        if (QLineF(m_adjustGestureStart, pe.viewportPos).length()
+            <= ADJUST_TAP_SLOP) {
+            return;
+        }
+        m_adjustGestureIsTap = false;
+
+        CharacterPosition anchor;
+        if (m_document->isEdgeless()) {
+            anchor = findOcrCharAtPoint(viewportToDocument(m_adjustGestureStart));
+        } else {
+            const PageHit start = viewportToPage(m_adjustGestureStart);
+            if (start.valid()) {
+                if (m_textSelection.source == TextSelection::Source::Ocr) {
+                    anchor = findOcrCharAtPoint(start.pagePoint);
+                } else {
+                    anchor = findCharacterAtPoint(
+                        QPointF(start.pagePoint.x() * PAGE_TO_PDF_SCALE,
+                                start.pagePoint.y() * PAGE_TO_PDF_SCALE));
+                }
+            }
+        }
+        if (!anchor.isValid()) {
+            // The drag began off the text layer, so there is nothing to anchor
+            // to; keep the existing range rather than collapsing it.
+            return;
+        }
+        m_textSelection.startBoxIndex = anchor.boxIndex;
+        m_textSelection.startCharIndex = anchor.charIndex;
+        m_textSelection.endBoxIndex = anchor.boxIndex;
+        m_textSelection.endCharIndex = anchor.charIndex;
+    }
+
     if (charPos.isValid()) {
         // PERF: Only update if position actually changed
         // This avoids expensive string/rect rebuilding on every mouse move
@@ -14080,8 +14199,6 @@ void DocumentViewport::handlePointerMove_Highlighter(const PointerEvent& pe)
 
 void DocumentViewport::handlePointerRelease_Highlighter(const PointerEvent& pe)
 {
-    Q_UNUSED(pe);
-    
     if (!m_textSelection.isSelecting) {
         // Phase D.1: Still need to clear pointer state and update cursor
         m_pointerActive = false;
@@ -14090,6 +14207,14 @@ void DocumentViewport::handlePointerRelease_Highlighter(const PointerEvent& pe)
     }
     
     m_textSelection.isSelecting = false;
+
+    if (m_adjustSession.active) {
+        finishAdjustGesture(pe.viewportPos);
+        m_pointerActive = false;
+        updateHighlighterCursor();
+        update();
+        return;
+    }
     
     // Finalize selection
     if (m_textSelection.isValid()) {
@@ -14107,6 +14232,104 @@ void DocumentViewport::handlePointerRelease_Highlighter(const PointerEvent& pe)
     updateHighlighterCursor();
     
     update();
+}
+
+void DocumentViewport::finishAdjustGesture(const QPointF& viewportPos)
+{
+    if (!m_adjustSession.active || !m_document) {
+        return;
+    }
+
+    const bool ocr = (m_textSelection.source == TextSelection::Source::Ocr);
+
+    // Resolve the release point into the same cache the session is selecting in.
+    CharacterPosition hitPos;
+    if (m_document->isEdgeless()) {
+        hitPos = findOcrCharAtPoint(viewportToDocument(viewportPos));
+    } else {
+        const PageHit hit = viewportToPage(viewportPos);
+        if (hit.valid() && hit.pageIndex == m_textSelection.pageIndex) {
+            if (ocr) {
+                hitPos = findOcrCharAtPoint(hit.pagePoint);
+            } else {
+                hitPos = findCharacterAtPoint(
+                    QPointF(hit.pagePoint.x() * PAGE_TO_PDF_SCALE,
+                            hit.pagePoint.y() * PAGE_TO_PDF_SCALE));
+            }
+        }
+    }
+
+    if (m_adjustGestureIsTap) {
+        // Tap moves the *near* endpoint and anchors the far one, so trimming is
+        // one tap instead of re-dragging the whole passage. The anchor is always
+        // the far end, so there is no hidden state to remember.
+        if (!hitPos.isValid() || !m_adjustSession.endpointsResolved
+            || !m_textSelection.isValid()) {
+            return;
+        }
+
+        const bool nearIsStart = tapIsNearerToSelectionStart(hitPos);
+        if (nearIsStart) {
+            m_textSelection.startBoxIndex = hitPos.boxIndex;
+            m_textSelection.startCharIndex = hitPos.charIndex;
+        } else {
+            m_textSelection.endBoxIndex = hitPos.boxIndex;
+            m_textSelection.endCharIndex = hitPos.charIndex;
+        }
+    } else if (!m_textSelection.isValid()) {
+        return;
+    }
+
+    snapSelectionToWords();
+    updateSelectedTextAndRects();
+    applyAdjustedRangeToRegion();
+}
+
+bool DocumentViewport::tapIsNearerToSelectionStart(
+    const CharacterPosition& tapPos) const
+{
+    // Compare in flattened (box, char) order rather than by pixel distance: the
+    // endpoints of a multi-line mark can be vertically far apart while being
+    // only a few characters away in reading order, which is what "near" means
+    // for a text range.
+    auto flatten = [](int boxIndex, int charIndex) {
+        return static_cast<qint64>(boxIndex) * 4096 + charIndex;
+    };
+
+    const qint64 tap = flatten(tapPos.boxIndex, tapPos.charIndex);
+    const qint64 start = flatten(m_textSelection.startBoxIndex,
+                                 m_textSelection.startCharIndex);
+    const qint64 end = flatten(m_textSelection.endBoxIndex,
+                               m_textSelection.endCharIndex);
+
+    const qint64 lo = qMin(start, end);
+    const qint64 hi = qMax(start, end);
+    const bool loIsStart = (lo == start);
+
+    const bool nearerToLo = qAbs(tap - lo) <= qAbs(tap - hi);
+    return nearerToLo ? loIsStart : !loIsStart;
+}
+
+void DocumentViewport::snapSelectionToWords()
+{
+    if (!m_textSelection.isValid()) {
+        return;
+    }
+
+    // Snap each endpoint outward, so a coarse stylus still produces whole words.
+    // "Outward" depends on which endpoint is textually first, which is not
+    // necessarily the anchor: a backwards drag puts end before start.
+    auto flatten = [](int boxIndex, int charIndex) {
+        return static_cast<qint64>(boxIndex) * 4096 + charIndex;
+    };
+    const bool startIsFirst =
+        flatten(m_textSelection.startBoxIndex, m_textSelection.startCharIndex)
+        <= flatten(m_textSelection.endBoxIndex, m_textSelection.endCharIndex);
+
+    snapEndpointToWord(m_textSelection.source, m_textSelection.startBoxIndex,
+                       m_textSelection.startCharIndex, startIsFirst);
+    snapEndpointToWord(m_textSelection.source, m_textSelection.endBoxIndex,
+                       m_textSelection.endCharIndex, !startIsFirst);
 }
 
 // =============================================================================
@@ -14669,19 +14892,35 @@ void DocumentViewport::renderTextSelectionOverlay(QPainter& painter, int pageInd
     // Highlight rectangles are stored in PDF coords for PDF-source selections
     // (need scaling) and in page coords for OCR-source selections (no scaling).
     const bool ocrSelection = (m_textSelection.source == TextSelection::Source::Ocr);
-    for (const QRectF& rect : m_textSelection.highlightRects) {
-        QRectF pageRect;
+    auto toPageRect = [ocrSelection](const QRectF& rect) {
         if (ocrSelection) {
-            pageRect = rect;
-        } else {
-            pageRect = QRectF(
-                rect.x() * PDF_TO_PAGE_SCALE,
-                rect.y() * PDF_TO_PAGE_SCALE,
-                rect.width() * PDF_TO_PAGE_SCALE,
-                rect.height() * PDF_TO_PAGE_SCALE
-            );
+            return rect;
         }
-        painter.drawRect(pageRect);
+        return QRectF(rect.x() * PDF_TO_PAGE_SCALE, rect.y() * PDF_TO_PAGE_SCALE,
+                      rect.width() * PDF_TO_PAGE_SCALE,
+                      rect.height() * PDF_TO_PAGE_SCALE);
+    };
+
+    for (const QRectF& rect : m_textSelection.highlightRects) {
+        painter.drawRect(toPageRect(rect));
+    }
+
+    // Adjust mode gets carets at the two ends, so it is obvious which edges a
+    // tap can move. updateSelectedTextAndRects() emits the rects in reading
+    // order, so the first rect's left edge is the range's start and the last
+    // rect's right edge is its end.
+    if (m_adjustSession.active && !m_textSelection.highlightRects.isEmpty()) {
+        const QRectF startRect = toPageRect(m_textSelection.highlightRects.first());
+        const QRectF endRect = toPageRect(m_textSelection.highlightRects.last());
+
+        QPen caretPen(QColor(0, 90, 190));
+        // Constant on-screen thickness: the painter carries the page transform.
+        caretPen.setWidthF(m_zoomLevel > 0.0 ? 2.0 / m_zoomLevel : 2.0);
+        caretPen.setCapStyle(Qt::FlatCap);
+        painter.setPen(caretPen);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawLine(startRect.topLeft(), startRect.bottomLeft());
+        painter.drawLine(endRect.topRight(), endRect.bottomRight());
     }
     
     painter.restore();
@@ -14792,26 +15031,7 @@ LinkObject* DocumentViewport::commitHighlightAnnotation()
         return nullptr;
     }
 
-    // Normalize the selection rects into the space the annotation stores:
-    // page coordinates when paged, document coordinates when edgeless. PDF text
-    // rects are 72 DPI and need scaling; OCR rects already match their
-    // container (see loadOcrBlocksForPage).
-    QVector<QRectF> regionRects;
-    regionRects.reserve(m_textSelection.highlightRects.size());
-    for (const QRectF& srcRect : m_textSelection.highlightRects) {
-        if (srcRect.width() < 0.1 || srcRect.height() < 0.1) {
-            continue;
-        }
-        if (ocrSelection) {
-            regionRects.append(srcRect);
-        } else {
-            regionRects.append(QRectF(
-                srcRect.x() * PDF_TO_PAGE_SCALE,
-                srcRect.y() * PDF_TO_PAGE_SCALE,
-                srcRect.width()  * PDF_TO_PAGE_SCALE,
-                srcRect.height() * PDF_TO_PAGE_SCALE));
-        }
-    }
+    const QVector<QRectF> regionRects = selectionRectsInContainerSpace();
 
     if (regionRects.isEmpty()) {
         m_textSelection.clear();
@@ -14837,6 +15057,424 @@ LinkObject* DocumentViewport::commitHighlightAnnotation()
 #endif
 
     return annotation;
+}
+
+// ============================================================================
+// Stage 3: Adjust mode - geometry helpers
+// ============================================================================
+
+QVector<QRectF> DocumentViewport::selectionRectsInContainerSpace() const
+{
+    // The space the annotation stores its region in: page coordinates when
+    // paged, document coordinates when edgeless. PDF text rects are 72 DPI and
+    // need scaling; OCR rects already match their container (see
+    // loadOcrBlocksForPage).
+    const bool ocrSelection =
+        (m_textSelection.source == TextSelection::Source::Ocr);
+
+    QVector<QRectF> out;
+    out.reserve(m_textSelection.highlightRects.size());
+    for (const QRectF& srcRect : m_textSelection.highlightRects) {
+        if (srcRect.width() < 0.1 || srcRect.height() < 0.1) {
+            continue;
+        }
+        if (ocrSelection) {
+            out.append(srcRect);
+        } else {
+            out.append(QRectF(srcRect.x() * PDF_TO_PAGE_SCALE,
+                              srcRect.y() * PDF_TO_PAGE_SCALE,
+                              srcRect.width() * PDF_TO_PAGE_SCALE,
+                              srcRect.height() * PDF_TO_PAGE_SCALE));
+        }
+    }
+    return out;
+}
+
+bool DocumentViewport::resolveRegionContainer(LinkObject* link, int* pageIndex,
+                                              QPointF* containerOrigin,
+                                              Document::TileCoord* tileCoordOut)
+{
+    if (!link || !m_document) {
+        return false;
+    }
+
+    Document::TileCoord tileCoord{};
+    Page* page = findPageContainingObject(link, &tileCoord);
+    if (!page) {
+        return false;
+    }
+    if (tileCoordOut) *tileCoordOut = tileCoord;
+
+    if (m_document->isEdgeless()) {
+        // The OCR cache is built in document space, but the annotation's rects
+        // are tile-local, so callers need the tile origin to bridge them.
+        if (pageIndex) *pageIndex = 0;
+        if (containerOrigin) {
+            *containerOrigin =
+                QPointF(tileCoord.first * Document::EDGELESS_TILE_SIZE,
+                        tileCoord.second * Document::EDGELESS_TILE_SIZE);
+        }
+        return true;
+    }
+
+    const int idx = m_document->pageIndexByUuid(page->uuid);
+    if (idx < 0) {
+        return false;
+    }
+    if (pageIndex) *pageIndex = idx;
+    if (containerOrigin) *containerOrigin = QPointF();
+    return true;
+}
+
+bool DocumentViewport::deriveRegionEndpoints(LinkObject* link,
+                                             TextSelection& out)
+{
+    if (!link || link->region.isEmpty() || !m_document) {
+        return false;
+    }
+
+    int pageIndex = -1;
+    QPointF containerOrigin;
+    if (!resolveRegionContainer(link, &pageIndex, &containerOrigin)) {
+        return false;
+    }
+
+    // Edgeless never had a PDF text layer to select from, so an edgeless region
+    // is OCR-sourced regardless of what an imported range claims.
+    const bool ocr = m_document->isEdgeless()
+                     || link->region.sourceRange.source
+                            == HighlightRegion::Source::Ocr;
+
+    out.clear();
+    out.source = ocr ? TextSelection::Source::Ocr : TextSelection::Source::Pdf;
+    out.pageIndex = pageIndex;
+
+    if (ocr) {
+        loadOcrBlocksForPage(pageIndex);
+    } else {
+        loadTextBoxesForPage(pageIndex);
+    }
+
+    // Probe the region's own geometry rather than trusting the stored indices.
+    // Box indices address a lazily rebuilt cache, and in edgeless the OCR cache
+    // is re-sorted across whichever tiles happen to be loaded, so a stored
+    // index can silently mean a different block than it did at commit time.
+    const QVector<QRectF> pageRects = link->regionRectsInPageSpace();
+    if (!pageRects.isEmpty()) {
+        auto probe = [&](const QRectF& rect, bool leftEdge) -> CharacterPosition {
+            QRectF r = rect.translated(containerOrigin);
+            // Nudge inward so the probe lands on a glyph rather than on the
+            // boundary between two of them.
+            const qreal inset = qMin(2.0, r.width() * 0.25);
+            const QPointF pt(leftEdge ? r.left() + inset : r.right() - inset,
+                             r.center().y());
+            if (ocr) {
+                return findOcrCharAtPoint(pt);
+            }
+            return findCharacterAtPoint(QPointF(pt.x() * PAGE_TO_PDF_SCALE,
+                                                pt.y() * PAGE_TO_PDF_SCALE));
+        };
+
+        const CharacterPosition first = probe(pageRects.first(), true);
+        const CharacterPosition last = probe(pageRects.last(), false);
+        if (first.isValid() && last.isValid()) {
+            out.startBoxIndex = first.boxIndex;
+            out.startCharIndex = first.charIndex;
+            out.endBoxIndex = last.boxIndex;
+            out.endCharIndex = last.charIndex;
+            return true;
+        }
+    }
+
+    // Geometry could not be resolved (missing PDF, OCR not run on this page,
+    // tiles not loaded). The stored range is the only remaining lead.
+    const HighlightRegion::SourceRange& stored = link->region.sourceRange;
+    if (stored.isUsable()) {
+        out.startBoxIndex = stored.startBoxIndex;
+        out.startCharIndex = stored.startCharIndex;
+        out.endBoxIndex = stored.endBoxIndex;
+        out.endCharIndex = stored.endCharIndex;
+        return true;
+    }
+
+    out.clear();
+    return false;
+}
+
+void DocumentViewport::snapEndpointToWord(TextSelection::Source source,
+                                          int boxIndex, int& charIndex,
+                                          bool toStart) const
+{
+    if (source == TextSelection::Source::Pdf) {
+        // MuPdfProvider emits one PdfTextBox per word, so the box *is* the word
+        // and snapping is just picking the right end of it.
+        if (boxIndex < 0 || boxIndex >= m_textBoxCache.size()) {
+            return;
+        }
+        const int len = m_textBoxCache[boxIndex].text.length();
+        if (len <= 0) {
+            return;
+        }
+        charIndex = toStart ? 0 : len - 1;
+        return;
+    }
+
+    // An OCR block is a whole paragraph, so word boundaries have to be found
+    // inside its text.
+    if (boxIndex < 0 || boxIndex >= m_ocrBlockCache.size()) {
+        return;
+    }
+    const QString& text = m_ocrBlockCache[boxIndex].text;
+    if (text.isEmpty()) {
+        return;
+    }
+
+    int i = qBound(0, charIndex, text.length() - 1);
+    // CJK is not space-separated: every glyph is its own word, so snapping
+    // outward would swallow the rest of the sentence.
+    if (isCjkLikeChar(text.at(i))) {
+        charIndex = i;
+        return;
+    }
+
+    auto isBoundary = [](QChar c) { return c.isSpace() || isCjkLikeChar(c); };
+    if (toStart) {
+        while (i > 0 && !isBoundary(text.at(i - 1))) --i;
+    } else {
+        while (i + 1 < text.length() && !isBoundary(text.at(i + 1))) ++i;
+    }
+    charIndex = i;
+}
+
+// ============================================================================
+// Stage 3: Adjust mode - session lifecycle
+// ============================================================================
+
+LinkObject* DocumentViewport::resolveAdjustTarget() const
+{
+    if (!m_adjustSession.active || !m_document) {
+        return nullptr;
+    }
+
+    Page* container = nullptr;
+    if (m_document->isEdgeless()) {
+        container = m_document->getTile(m_adjustSession.tileCoord.first,
+                                        m_adjustSession.tileCoord.second);
+    } else if (m_adjustSession.pageIndex >= 0
+               && m_adjustSession.pageIndex < m_document->pageCount()) {
+        container = m_document->page(m_adjustSession.pageIndex);
+    }
+    if (!container) {
+        return nullptr;
+    }
+
+    InsertedObject* object = container->objectById(m_adjustSession.objectId);
+    if (!object || object->type() != QLatin1String("link")) {
+        return nullptr;
+    }
+    return static_cast<LinkObject*>(object);
+}
+
+bool DocumentViewport::beginHighlightAdjust()
+{
+    if (m_adjustSession.active) {
+        return true;
+    }
+
+    LinkObject* link = selectedLinkForBar();
+    if (!link || link->region.isEmpty() || !m_document) {
+        return false;
+    }
+    if (link->locked) {
+        return false;
+    }
+
+    int pageIndex = -1;
+    Document::TileCoord tileCoord{};
+    if (!resolveRegionContainer(link, &pageIndex, nullptr, &tileCoord)) {
+        return false;
+    }
+
+    // Adjust is a text-range operation and needs the Highlighter's character
+    // caches and selection machinery, so it owns the mode. The guard keeps
+    // setCurrentTool()'s leave-ObjectSelect deselect from dropping our target.
+    if (m_currentTool != ToolType::Highlighter) {
+        m_enteringAdjustMode = true;
+        setCurrentTool(ToolType::Highlighter);
+        m_enteringAdjustMode = false;
+    }
+
+    m_adjustSession.clear();
+    m_adjustSession.objectId = link->id;
+    m_adjustSession.pageIndex = pageIndex;
+    m_adjustSession.tileCoord = tileCoord;
+    m_adjustSession.startRegion = link->region;
+    m_adjustSession.startPosition = link->position;
+    m_adjustSession.startSize = link->size;
+    m_adjustSession.active = true;
+
+    TextSelection derived;
+    if (deriveRegionEndpoints(link, derived)) {
+        m_textSelection = derived;
+        updateSelectedTextAndRects();
+        m_adjustSession.endpointsResolved =
+            !m_textSelection.highlightRects.isEmpty();
+    }
+    if (!m_adjustSession.endpointsResolved) {
+        // No live range recovered: there is no anchor for tap-moves-the-near-
+        // edge to hold, so only drag-redefine remains (the degradation path the
+        // design already specifies).
+        m_textSelection.clear();
+    }
+
+    syncLinkObjectBar();
+    updateHighlighterCursor();
+    update();
+    return true;
+}
+
+bool DocumentViewport::applyAdjustedRangeToRegion()
+{
+    LinkObject* link = resolveAdjustTarget();
+    if (!link || !m_document || !m_textSelection.isValid()) {
+        return false;
+    }
+
+    QVector<QRectF> rects = selectionRectsInContainerSpace();
+    if (rects.isEmpty()) {
+        return false;
+    }
+
+    if (m_document->isEdgeless()) {
+        // Region rects are stored tile-local, and the tile is fixed for the
+        // whole session; re-homing happens once at commit.
+        const QPointF tileOrigin(
+            m_adjustSession.tileCoord.first * Document::EDGELESS_TILE_SIZE,
+            m_adjustSession.tileCoord.second * Document::EDGELESS_TILE_SIZE);
+        for (QRectF& r : rects) {
+            r.translate(-tileOrigin);
+        }
+    }
+
+    const HighlightRegion::Style style = link->region.style;
+    const QColor color = link->region.color;
+    link->setRegionFromPageRects(rects);
+    link->region.style = style;
+    link->region.color = color;
+    link->region.sourceRange = buildHighlightSourceRange(
+        m_document->isEdgeless() ? 0 : m_adjustSession.pageIndex);
+
+    m_document->updateMaxObjectExtent(link);
+    if (m_document->isEdgeless()) {
+        m_document->markTileDirty(m_adjustSession.tileCoord);
+    } else if (m_adjustSession.pageIndex >= 0) {
+        m_document->markPageDirty(m_adjustSession.pageIndex);
+    }
+
+    updateLinkObjectBarGeometry();
+    return true;
+}
+
+void DocumentViewport::commitHighlightAdjust()
+{
+    if (!m_adjustSession.active) {
+        return;
+    }
+
+    LinkObject* link = resolveAdjustTarget();
+    const AdjustSession session = m_adjustSession;
+    m_adjustSession.clear();
+
+    if (link && m_document) {
+        const bool changed =
+            link->region.rects != session.startRegion.rects
+            || link->position != session.startPosition
+            || link->size != session.startSize;
+
+        if (changed) {
+            Document::TileCoord newTile = session.tileCoord;
+            if (m_document->isEdgeless()) {
+                // Re-ranging moves the bounding box, which is the object's
+                // position, so the mark may now belong to a different tile.
+                relocateObjectsToCorrectTiles();
+                for (const auto& coord : m_document->allLoadedTileCoords()) {
+                    Page* tile = m_document->getTile(coord.first, coord.second);
+                    if (tile && tile->objectById(link->id)) {
+                        newTile = coord;
+                        break;
+                    }
+                }
+            }
+
+            pushObjectRegionChangeUndo(link, session.startRegion,
+                                       session.startPosition, session.startSize,
+                                       session.pageIndex, session.tileCoord,
+                                       newTile);
+            markLinkContainerDirtyAndRefreshOutline(link);
+            emit documentModified();
+            if (!m_document->isEdgeless() && session.pageIndex >= 0) {
+                m_pendingThumbnailPages.insert(session.pageIndex);
+                emit pageModified(session.pageIndex);
+            }
+        }
+    }
+
+    if (m_textSelection.isValid()) {
+        m_textSelection.clear();
+        emit textSelectionChanged(false);
+    }
+
+    syncLinkObjectBar();
+    updateHighlighterCursor();
+    update();
+}
+
+void DocumentViewport::discardHighlightAdjust()
+{
+    if (!m_adjustSession.active) {
+        return;
+    }
+
+    // Neither commit nor revert: used when the target or the whole document is
+    // going away, where a region-change undo entry would be stray noise ahead
+    // of the delete and reverting would fight the delete's own snapshot.
+    m_adjustSession.clear();
+    if (m_textSelection.isValid()) {
+        m_textSelection.clear();
+        emit textSelectionChanged(false);
+    }
+}
+
+void DocumentViewport::cancelHighlightAdjust()
+{
+    if (!m_adjustSession.active) {
+        return;
+    }
+
+    LinkObject* link = resolveAdjustTarget();
+    const AdjustSession session = m_adjustSession;
+    m_adjustSession.clear();
+
+    if (link && m_document) {
+        link->region = session.startRegion;
+        link->position = session.startPosition;
+        link->size = session.startSize;
+        m_document->updateMaxObjectExtent(link);
+        if (m_document->isEdgeless()) {
+            m_document->markTileDirty(session.tileCoord);
+        } else if (session.pageIndex >= 0) {
+            m_document->markPageDirty(session.pageIndex);
+        }
+    }
+
+    if (m_textSelection.isValid()) {
+        m_textSelection.clear();
+        emit textSelectionChanged(false);
+    }
+
+    syncLinkObjectBar();
+    updateHighlighterCursor();
+    update();
 }
 
 void DocumentViewport::copySelectedTextToClipboard()
@@ -15915,6 +16553,75 @@ static void markObjDirty(Document* doc, const UndoAction& a)
         doc->markPageDirty(a.objectPageIndex);
 }
 
+/**
+ * @brief Apply one side of an ObjectRegionChange to its annotation.
+ * @param toOld true to restore the pre-Adjust snapshot, false for the new one.
+ *
+ * Re-ranging moves the region's bounding box, which is the object's position,
+ * so in edgeless mode an Adjust can push the annotation into a different tile.
+ * That is why this mirrors ObjectTextEdit's extract-and-rehome shape rather
+ * than mutating in place: the object has to physically leave its old tile.
+ */
+static void applyObjectRegionChange(Document* doc, const UndoAction& a, bool toOld)
+{
+    const HighlightRegion& region = toOld ? a.objectOldRegion : a.objectNewRegion;
+    const QPointF& pos = toOld ? a.objectOldPosition : a.objectNewPosition;
+    const QSizeF& size = toOld ? a.objectOldSize : a.objectNewSize;
+
+    auto assign = [](InsertedObject* obj, const HighlightRegion& r,
+                     const QPointF& p, const QSizeF& s) {
+        if (auto* link = dynamic_cast<LinkObject*>(obj)) {
+            link->region = r;
+            link->position = p;
+            link->size = s;
+        }
+    };
+
+    // Tile the object currently sits in is the one it was moved *to* by the
+    // direction being reversed, so undo pulls from newTile and redo from oldTile.
+    const Document::TileCoord from = toOld ? a.objectNewTile : a.objectOldTile;
+    const Document::TileCoord to = toOld ? a.objectOldTile : a.objectNewTile;
+
+    if (doc->isEdgeless() && from != to) {
+        Page* source = doc->getTile(from.first, from.second);
+        std::unique_ptr<InsertedObject> moved =
+            source ? source->extractObject(a.objectId) : nullptr;
+        if (!moved)
+            return;
+        assign(moved.get(), region, pos, size);
+        if (Page* target = doc->getOrCreateTile(to.first, to.second)) {
+            target->addObject(std::move(moved));
+            doc->markTileDirty(to);
+            doc->markTileDirty(from);
+            // Both tiles' cached outlines are now wrong: the annotation left one
+            // and arrived in the other.
+            doc->refreshLinkOutlineFor(to);
+            doc->refreshLinkOutlineFor(from);
+            doc->removeTileIfEmpty(from.first, from.second);
+        } else if (source) {
+            // Target tile could not be created; roll the object back into its
+            // old tile with the state it arrived with rather than dropping it.
+            assign(moved.get(),
+                   toOld ? a.objectNewRegion : a.objectOldRegion,
+                   toOld ? a.objectNewPosition : a.objectOldPosition,
+                   toOld ? a.objectNewSize : a.objectOldSize);
+            source->addObject(std::move(moved));
+        }
+        return;
+    }
+
+    if (Page* c = getObjContainer(doc, a, false)) {
+        assign(c->objectById(a.objectId), region, pos, size);
+        markObjDirty(doc, a);
+        // Re-ranging can change which annotation is topmost on the container,
+        // which is what pageLinkMarkers() reports, so the cache has to follow.
+        if (doc->isEdgeless())
+            doc->refreshLinkOutlineFor(a.objectTileCoord);
+        else if (a.objectPageIndex >= 0)
+            doc->refreshLinkOutlineFor(a.objectPageIndex);
+    }
+}
+
 static QSet<int> collectAffectedPages(const UndoAction& action)
 {
     QSet<int> pages;
@@ -15934,6 +16641,9 @@ void DocumentViewport::undo()
     finishTextBoxFormatInteraction(true);
     if (m_inlineEditSession.active)
         commitInlineTextEdit();
+    // Land the session's own entry on the stack before popping, so the first
+    // Ctrl+Z undoes the adjusting rather than whatever came before it.
+    commitHighlightAdjust();
     if (m_undoStack.isEmpty() || !m_document) return;
 
     UndoAction action = m_undoStack.pop();
@@ -15980,6 +16690,7 @@ void DocumentViewport::undo()
                            action.type == UndoAction::ObjectAffinityChange ||
                            action.type == UndoAction::ObjectResize ||
                            action.type == UndoAction::ObjectTextEdit ||
+                           action.type == UndoAction::ObjectRegionChange ||
                            action.type == UndoAction::OcrLockChange ||
                            action.type == UndoAction::OcrConvertToTextBox);
 
@@ -16206,6 +16917,11 @@ void DocumentViewport::undo()
                 }
                 break;
             }
+            case UndoAction::ObjectRegionChange: {
+                applyObjectRegionChange(m_document, action, true);
+                m_document->recalculateMaxObjectExtent();
+                break;
+            }
             case UndoAction::OcrLockChange: {
                 if (m_document->isEdgeless()) {
                     for (const auto& coord : m_document->allLoadedTileCoords()) {
@@ -16380,6 +17096,9 @@ void DocumentViewport::redo()
     finishTextBoxFormatInteraction(true);
     if (m_inlineEditSession.active)
         commitInlineTextEdit();
+    // Committing pushes onto the undo stack, which clears the redo stack, so an
+    // active session makes this redo a no-op by design.
+    commitHighlightAdjust();
     if (m_redoStack.isEmpty() || !m_document) return;
 
     UndoAction action = m_redoStack.pop();
@@ -16423,6 +17142,7 @@ void DocumentViewport::redo()
                            action.type == UndoAction::ObjectAffinityChange ||
                            action.type == UndoAction::ObjectResize ||
                            action.type == UndoAction::ObjectTextEdit ||
+                           action.type == UndoAction::ObjectRegionChange ||
                            action.type == UndoAction::OcrLockChange ||
                            action.type == UndoAction::OcrConvertToTextBox);
 
@@ -16650,6 +17370,11 @@ void DocumentViewport::redo()
                         markObjDirty(m_document, action);
                     }
                 }
+                break;
+            }
+            case UndoAction::ObjectRegionChange: {
+                applyObjectRegionChange(m_document, action, false);
+                m_document->recalculateMaxObjectExtent();
                 break;
             }
             case UndoAction::OcrLockChange: {
@@ -17002,6 +17727,31 @@ void DocumentViewport::pushObjectTextEditUndo(
     action.objectHasTextBoxState = true;
     action.objectOldTextBoxState = oldState;
     action.objectNewTextBoxState = newState;
+    action.objectPageIndex = pageIndex;
+    action.objectOldTile = oldTile;
+    action.objectNewTile = newTile;
+    action.objectTileCoord = newTile;
+    pushUndoAction(action);
+}
+
+void DocumentViewport::pushObjectRegionChangeUndo(
+    LinkObject* obj,
+    const HighlightRegion& oldRegion, const QPointF& oldPosition,
+    const QSizeF& oldSize, int pageIndex,
+    Document::TileCoord oldTile, Document::TileCoord newTile)
+{
+    if (!obj)
+        return;
+
+    UndoAction action;
+    action.type = UndoAction::ObjectRegionChange;
+    action.objectId = obj->id;
+    action.objectOldRegion = oldRegion;
+    action.objectNewRegion = obj->region;
+    action.objectOldPosition = oldPosition;
+    action.objectNewPosition = obj->position;
+    action.objectOldSize = oldSize;
+    action.objectNewSize = obj->size;
     action.objectPageIndex = pageIndex;
     action.objectOldTile = oldTile;
     action.objectNewTile = newTile;
