@@ -368,7 +368,7 @@ void HighlighterSubToolbar::applyAutoHighlightStyling()
 
     const bool dark = isDarkMode();
 
-    // Menu-item icons (matches ObjectSelectSubToolbar's dropdown UX).
+    // Menu-item icons (matches LinkObjectBar's dropdown UX).
     for (int i = 0; i < kNumStyles; ++i) {
         if (m_styleActions[i])
             m_styleActions[i]->setIcon(loadHighlightIcon(i, dark));

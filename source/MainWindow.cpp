@@ -16,7 +16,6 @@
 #include "ui/subtoolbars/PenSubToolbar.h"
 #include "ui/subtoolbars/MarkerSubToolbar.h"
 #include "ui/subtoolbars/HighlighterSubToolbar.h"
-#include "ui/subtoolbars/ObjectSelectSubToolbar.h"
 #include "ui/subtoolbars/EraserSubToolbar.h"
 #include "ui/actionbars/ActionBarContainer.h"
 #include "ui/actionbars/LassoActionBar.h"
@@ -984,7 +983,7 @@ void MainWindow::setupUi() {
 
         if (found) {
             vp->update();
-            updateLinkSlotButtons(vp);
+            vp->refreshLinkObjectBar();
         }
         refreshNotesOutline();
     });
@@ -1506,7 +1505,7 @@ void MainWindow::wireQActionDispatchers()
     // the underlying feature lands.
     wire("edit.undo", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
-            if (vp->textBoxFormatBarHasFocus()) {
+            if ((vp->textBoxFormatBarHasFocus() || vp->linkObjectBarHasFocus())) {
                 if (QLineEdit* edit = focusedEditableLineEdit()) {
                     edit->undo();
                     return;
@@ -1524,7 +1523,7 @@ void MainWindow::wireQActionDispatchers()
     });
     wire("edit.redo", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
-            if (vp->textBoxFormatBarHasFocus()) {
+            if ((vp->textBoxFormatBarHasFocus() || vp->linkObjectBarHasFocus())) {
                 if (QLineEdit* edit = focusedEditableLineEdit()) {
                     edit->redo();
                     return;
@@ -1545,7 +1544,7 @@ void MainWindow::wireQActionDispatchers()
     // NOT added to the macOS Edit menu (the menu shows the primary edit.redo only).
     wire("edit.redo_alt", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
-            if (vp->textBoxFormatBarHasFocus()) {
+            if ((vp->textBoxFormatBarHasFocus() || vp->linkObjectBarHasFocus())) {
                 if (QLineEdit* edit = focusedEditableLineEdit()) {
                     edit->redo();
                     return;
@@ -1563,7 +1562,7 @@ void MainWindow::wireQActionDispatchers()
     });
     wire("edit.copy", [](MainWindow* w){
         if (auto* vp = w->currentViewport();
-            vp && vp->textBoxFormatBarHasFocus()) {
+            vp && (vp->textBoxFormatBarHasFocus() || vp->linkObjectBarHasFocus())) {
             if (auto* edit = qobject_cast<QLineEdit*>(
                     QApplication::focusWidget()))
                 edit->copy();
@@ -1592,7 +1591,7 @@ void MainWindow::wireQActionDispatchers()
     });
     wire("edit.cut", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
-            if (vp->textBoxFormatBarHasFocus()) {
+            if ((vp->textBoxFormatBarHasFocus() || vp->linkObjectBarHasFocus())) {
                 if (auto* edit = qobject_cast<QLineEdit*>(
                         QApplication::focusWidget()))
                     edit->cut();
@@ -1610,7 +1609,7 @@ void MainWindow::wireQActionDispatchers()
     });
     wire("edit.paste", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
-            if (vp->textBoxFormatBarHasFocus()) {
+            if ((vp->textBoxFormatBarHasFocus() || vp->linkObjectBarHasFocus())) {
                 if (auto* edit = qobject_cast<QLineEdit*>(
                         QApplication::focusWidget()))
                     edit->paste();
@@ -1633,7 +1632,7 @@ void MainWindow::wireQActionDispatchers()
     });
     wire("edit.delete", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
-            if (vp->textBoxFormatBarHasFocus()) {
+            if ((vp->textBoxFormatBarHasFocus() || vp->linkObjectBarHasFocus())) {
                 if (auto* edit = qobject_cast<QLineEdit*>(
                         QApplication::focusWidget()))
                     edit->del();
@@ -2401,10 +2400,6 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_selectionChangedConn);
         m_selectionChangedConn = {};
     }
-    if (m_linkSlotsChangedConn) {
-        disconnect(m_linkSlotsChangedConn);
-        m_linkSlotsChangedConn = {};
-    }
     // Action Bar: Disconnect selection state connections
     if (m_lassoSelectionConn) {
         disconnect(m_lassoSelectionConn);
@@ -2485,6 +2480,10 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     if (m_linkObjectListConn) {
         disconnect(m_linkObjectListConn);
         m_linkObjectListConn = {};
+    }
+    if (m_linkAppearanceConn) {
+        disconnect(m_linkAppearanceConn);
+        m_linkAppearanceConn = {};
     }
     if (m_pdfSourcesConn) {
         disconnect(m_pdfSourcesConn);
@@ -2626,25 +2625,14 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     if (isActiveWindow())
         syncObjectModeCheckActions();
     
-    // Phase D: Connect object selection changed to update LinkSlot buttons
     m_selectionChangedConn = connect(viewport, &DocumentViewport::objectSelectionChanged,
-                                     this, [this, viewport]() {
-        updateLinkSlotButtons(viewport);
+                                     this, [this]() {
         // MAC.7: re-evaluate object Z-order + affinity menu enable state.
         // MAC.7 review fix: gate on isActiveWindow() so background-window
         // selection changes don't pollute the active window's QAction states.
         if (isActiveWindow()) updateObjectActionsEnabled();
     });
     
-    // Slot contents can change without the selection changing (adding a URL /
-    // markdown note, clearing a slot), so the buttons need this second trigger.
-    m_linkSlotsChangedConn = connect(viewport, &DocumentViewport::linkSlotsChanged,
-                                     this, [this, viewport]() {
-        updateLinkSlotButtons(viewport);
-    });
-    
-    // Also sync the current selection state to the subtoolbar
-    updateLinkSlotButtons(viewport);
     // MAC.7: initial sync for the new viewport's selection / tool state.
     // MAC.7 review fix: same isActiveWindow gate as the signal handlers above.
     if (isActiveWindow()) updateObjectActionsEnabled();
@@ -2978,6 +2966,21 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
             }
         });
 
+        // Only one LinkObject's description/color changed, so patch that row in
+        // place rather than rebuilding the tree, which would collapse expanded
+        // subtrees and drop focus.
+        m_linkAppearanceConn = connect(viewport, &DocumentViewport::linkObjectAppearanceChanged,
+                this, [this](const QString& linkObjectId, const QString& description,
+                             const QColor& color) {
+            if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
+                markdownNotesSidebar->updateLinkObject(linkObjectId, description, color);
+            }
+            // SB2: the marker's colour and tooltip come from the LinkObject.
+            if (m_splitViewManager) {
+                m_splitViewManager->updateScrollBarDocumentMap(currentViewport());
+            }
+        });
+
         // OCR: Restart debounce timer when strokes change
         m_strokesChangedConn = connect(viewport, &DocumentViewport::strokesChanged, this, [this]() {
             if (m_autoOcrEnabled && m_ocrDebounceTimer)
@@ -3026,54 +3029,6 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         showPdfSourcesDialog(viewport);
     });
     updatePdfSourceUi(viewport);
-}
-
-void MainWindow::updateLinkSlotButtons(DocumentViewport* viewport)
-{
-    // Phase D: Update ObjectSelectSubToolbar slot buttons based on selected LinkObject
-    if (!m_toolbar->objectSelectSubToolbar() || !viewport) {
-        return;
-    }
-    
-    const auto& selectedObjects = viewport->selectedObjects();
-    
-    // Check if exactly one LinkObject is selected
-    if (selectedObjects.size() == 1) {
-        LinkObject* link = dynamic_cast<LinkObject*>(selectedObjects.first());
-        if (link) {
-            // Convert LinkSlot::Type to LinkSlotState for each slot
-            LinkSlotState states[3];
-            for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
-                switch (link->linkSlots[i].type) {
-                    case LinkSlot::Type::Empty:
-                        states[i] = LinkSlotState::Empty;
-                        break;
-                    case LinkSlot::Type::Position:
-                        states[i] = LinkSlotState::Position;
-                        break;
-                    case LinkSlot::Type::Url:
-                        states[i] = LinkSlotState::Url;
-                        break;
-                    case LinkSlot::Type::Markdown:
-                        states[i] = LinkSlotState::Markdown;
-                        break;
-                }
-            }
-            m_toolbar->objectSelectSubToolbar()->updateSlotStates(states);
-            
-            // Show LinkObject color button
-            m_toolbar->objectSelectSubToolbar()->setLinkObjectColor(link->iconColor, true);
-            
-            // Show LinkObject description editor
-            m_toolbar->objectSelectSubToolbar()->setLinkObjectDescription(link->description, true);
-            return;
-        }
-    }
-    
-    // No LinkObject selected (or multiple objects selected) - clear slots and hide controls
-    m_toolbar->objectSelectSubToolbar()->clearSlotStates();
-    m_toolbar->objectSelectSubToolbar()->setLinkObjectColor(Qt::transparent, false);
-    m_toolbar->objectSelectSubToolbar()->setLinkObjectDescription(QString(), false);
 }
 
 void MainWindow::applySubToolbarValuesToViewport(ToolType tool)
@@ -5683,7 +5638,6 @@ void MainWindow::connectSubToolbarSignals()
     auto* penST = m_toolbar->penSubToolbar();
     auto* markerST = m_toolbar->markerSubToolbar();
     auto* highlighterST = m_toolbar->highlighterSubToolbar();
-    auto* objectST = m_toolbar->objectSelectSubToolbar();
     auto* eraserST = m_toolbar->eraserSubToolbar();
 
     // Pen
@@ -5727,13 +5681,8 @@ void MainWindow::connectSubToolbarSignals()
         }
     });
 
-    // LinkObject controls
-    connect(objectST, &ObjectSelectSubToolbar::slotActivated, this, [this](int index) {
-        if (DocumentViewport* vp = currentViewport()) vp->activateLinkSlot(index);
-    });
-    connect(objectST, &ObjectSelectSubToolbar::slotCleared, this, [this](int index) {
-        if (DocumentViewport* vp = currentViewport()) vp->clearLinkSlot(index);
-    });
+    // LinkObject controls live in a viewport-owned LinkObjectBar, which the
+    // viewport wires to its own handlers. Nothing to connect here.
 
     // Eraser
     connect(eraserST, &EraserSubToolbar::eraserSizeChanged, this, [this](qreal size) {
@@ -5742,67 +5691,6 @@ void MainWindow::connectSubToolbarSignals()
     connect(eraserST, &EraserSubToolbar::eraserModeChanged, this, [this](int mode) {
         if (DocumentViewport* vp = currentViewport())
             vp->setEraserMode(static_cast<DocumentViewport::EraserMode>(mode));
-    });
-
-    // LinkObject color
-    connect(objectST, &ObjectSelectSubToolbar::linkObjectColorChanged,
-            this, [this](const QColor& color) {
-        DocumentViewport* vp = currentViewport();
-        if (!vp) return;
-        const auto& selectedObjects = vp->selectedObjects();
-        if (selectedObjects.size() != 1) return;
-        LinkObject* link = dynamic_cast<LinkObject*>(selectedObjects.first());
-        if (!link) return;
-        link->iconColor = color;
-        if (Document* doc = vp->document()) {
-            Page* page = doc->page(vp->currentPageIndex());
-            if (page) {
-                int pageIndex = doc->pageIndexByUuid(page->uuid);
-                if (pageIndex >= 0) {
-                    doc->markPageDirty(pageIndex);
-                    // SB2: keep the marker cache in sync so the tick color
-                    // updates even after this page is later evicted.
-                    doc->refreshLinkOutlineFor(pageIndex);
-                }
-            }
-        }
-        vp->update();
-        if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-            // Phase M.8: update just this LinkObject in place (no preview reload,
-            // no collapse of expanded subtrees, no focus loss).
-            markdownNotesSidebar->updateLinkObject(link->id, link->description, color);
-        }
-        // SB2: recompute the scroll-bar document map (tick color changed).
-        if (m_splitViewManager) m_splitViewManager->updateScrollBarDocumentMap(vp);
-    });
-
-    // LinkObject description
-    connect(objectST, &ObjectSelectSubToolbar::linkObjectDescriptionChanged,
-            this, [this](const QString& description) {
-        DocumentViewport* vp = currentViewport();
-        if (!vp) return;
-        const auto& selectedObjects = vp->selectedObjects();
-        if (selectedObjects.size() != 1) return;
-        LinkObject* link = dynamic_cast<LinkObject*>(selectedObjects.first());
-        if (!link) return;
-        link->description = description;
-        if (Document* doc = vp->document()) {
-            Page* page = doc->page(vp->currentPageIndex());
-            if (page) {
-                int pageIndex = doc->pageIndexByUuid(page->uuid);
-                if (pageIndex >= 0) {
-                    doc->markPageDirty(pageIndex);
-                    // SB2: keep the marker cache in sync (tooltip text changed).
-                    doc->refreshLinkOutlineFor(pageIndex);
-                }
-            }
-        }
-        vp->update();
-        if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-            markdownNotesSidebar->updateLinkObject(link->id, description, link->iconColor);
-        }
-        // SB2: recompute the scroll-bar document map (marker tooltip changed).
-        if (m_splitViewManager) m_splitViewManager->updateScrollBarDocumentMap(vp);
     });
 
     // Tab changes: per-tab state management via Toolbar (keyed by unique tab IDs).

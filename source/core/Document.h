@@ -2056,6 +2056,9 @@ private:
      * @brief Extract a single Page*'s LinkObjects into outline entries.
      *        Factored out of `enumerateLinkOutline`'s previous lambda so
      *        both the rebuild path and the refresh path can share it.
+     * @param requireAnySlot Skip links whose 3 slots are all empty. The
+     *        scroll-bar markers use this so a highlight annotation nobody has
+     *        given content to yet does not tick the bar.
      */
     static QVector<LinkOutlineEntry>
     extractLinkOutlineFromPage(const Page* page,
@@ -2063,7 +2066,8 @@ private:
                                 int tileX,
                                 int tileY,
                                 bool edgeless,
-                                bool requireMarkdown = true);
+                                bool requireMarkdown = true,
+                                bool requireAnySlot = false);
 
     /**
      * @brief Read a tile's JSON on disk and extract just the LinkObject
@@ -2074,11 +2078,13 @@ private:
      * `m_tileIndex`).  Safe to call on const paths.
      */
     QVector<LinkOutlineEntry>
-    peekTileLinkOutlineFromDisk(TileCoord coord, bool requireMarkdown = true) const;
+    peekTileLinkOutlineFromDisk(TileCoord coord, bool requireMarkdown = true,
+                                bool requireAnySlot = false) const;
 
     /// Paged-mode counterpart of `peekTileLinkOutlineFromDisk`.
     QVector<LinkOutlineEntry>
-    peekPageLinkOutlineFromDisk(int pageIndex, bool requireMarkdown = true) const;
+    peekPageLinkOutlineFromDisk(int pageIndex, bool requireMarkdown = true,
+                                bool requireAnySlot = false) const;
 
     /**
      * @brief Shared JSON → outline-entry walker used by both peek helpers.
@@ -2093,7 +2099,8 @@ private:
                                        int  tileX,
                                        int  tileY,
                                        const QPointF& tileOrigin,
-                                       bool requireMarkdown = true);
+                                       bool requireMarkdown = true,
+                                       bool requireAnySlot = false);
 
     /// Cache contents, keyed by container.  Empty vectors are allowed
     /// and mean "container exists but has no markdown-backed links."

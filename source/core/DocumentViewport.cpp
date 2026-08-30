@@ -18,6 +18,7 @@
 #include "../objects/TextBoxObject.h"
 #include "../ui/banners/MissingPdfBanner.h"  // Phase R.3: Missing PDF notification
 #include "../ui/panels/InlineTextBoxEditor.h"
+#include "../ui/panels/LinkObjectBar.h"
 #include "../ui/panels/TextBoxFormatBar.h"
 #include "../../markdown/qmarkdowntextedit.h"
 
@@ -202,16 +203,24 @@ DocumentViewport::DocumentViewport(QWidget* parent)
             [this]() {
         updateInlineTextEditorGeometry();
         updateTextBoxFormatBarGeometry();
+        updateLinkObjectBarGeometry();
     });
     connect(this, &DocumentViewport::panChanged, this,
             [this]() {
         updateInlineTextEditorGeometry();
         updateTextBoxFormatBarGeometry();
+        updateLinkObjectBarGeometry();
     });
     connect(this, &DocumentViewport::objectSelectionChanged,
             this, &DocumentViewport::syncTextBoxFormatBar);
     connect(this, &DocumentViewport::textBoxLayoutCommitted,
             this, &DocumentViewport::syncTextBoxFormatBar);
+    connect(this, &DocumentViewport::objectSelectionChanged,
+            this, &DocumentViewport::syncLinkObjectBar);
+    // Slot contents can change without the selection changing (adding a URL or
+    // markdown note, clearing a slot), so the buttons need this second trigger.
+    connect(this, &DocumentViewport::linkSlotsChanged,
+            this, &DocumentViewport::syncLinkObjectBar);
 
     // Scroll-settle timer (SP1) - defers heavy housekeeping (preload/evict) until
     // the immediate-pan route (wheel/touchpad/scroll-bar) stops for a beat.
@@ -277,6 +286,7 @@ DocumentViewport::DocumentViewport(QWidget* parent)
 DocumentViewport::~DocumentViewport()
 {
     closeTextBoxFormatPopups(true);
+    closeLinkObjectBarPopups(true);
     finishTextBoxFormatInteraction(true);
     commitInlineTextEdit();
 
@@ -366,6 +376,7 @@ void DocumentViewport::setDocument(Document* doc)
     }
 
     closeTextBoxFormatPopups(true);
+    closeLinkObjectBarPopups(true);
     finishTextBoxFormatInteraction(true);
     commitInlineTextEdit();
     
@@ -491,6 +502,7 @@ void DocumentViewport::setDocument(Document* doc)
     emit currentPageChanged(m_currentPageIndex);
     emitScrollFractions();
     syncTextBoxFormatBar();
+    syncLinkObjectBar();
 }
 
 // ===== PDF source warning banner =====
@@ -559,9 +571,12 @@ void DocumentViewport::setDarkMode(bool dark)
 
     if (m_textBoxFormatBar)
         m_textBoxFormatBar->setDarkMode(dark);
+    if (m_linkObjectBar)
+        m_linkObjectBar->setDarkMode(dark);
     if (m_inlineTextBoxEditor && m_inlineEditSession.active)
         updateInlineTextEditorGeometry();
     updateTextBoxFormatBarGeometry();
+    updateLinkObjectBarGeometry();
 
     // Trigger repaint
     update();
@@ -2429,6 +2444,7 @@ void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
             // rotated object near an edge can never end up unreachable.
             clampObjectToPage(obj, m_resizeObjectPageIndex);
             updateTextBoxFormatBarGeometry();
+            updateLinkObjectBarGeometry();
             return;  // Don't apply resize logic below
         }
     
@@ -3390,6 +3406,7 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
         clampPanOffset();
         updateInlineTextEditorGeometry();
         updateTextBoxFormatBarGeometry();
+        updateLinkObjectBarGeometry();
         update();
         emitScrollFractions();
         return;
@@ -3438,6 +3455,7 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
     }
     updateInlineTextEditorGeometry();
     updateTextBoxFormatBarGeometry();
+    updateLinkObjectBarGeometry();
 }
 
 void DocumentViewport::mousePressEvent(QMouseEvent* event)
@@ -3466,6 +3484,7 @@ void DocumentViewport::mousePressEvent(QMouseEvent* event)
         closeTextBoxFormatPopups(true);
         finishTextBoxFormatInteraction(true);
     }
+    closeLinkObjectBarPopups(true);
 
     // Middle mouse button: start pan gesture (independent of active tool)
     if (event->button() == Qt::MiddleButton) {
@@ -3996,6 +4015,7 @@ void DocumentViewport::hideEvent(QHideEvent* event)
              << "wasActive:" << m_gesture.isActive();
 #endif
     closeTextBoxFormatPopups(true);
+    closeLinkObjectBarPopups(true);
     finishTextBoxFormatInteraction(true);
     if (m_inlineEditSession.active)
         commitInlineTextEdit();
@@ -4056,6 +4076,7 @@ void DocumentViewport::showEvent(QShowEvent* event)
     
     QWidget::showEvent(event);
     syncTextBoxFormatBar();
+    syncLinkObjectBar();
 }
 
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
@@ -4135,6 +4156,7 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
                 closeTextBoxFormatPopups(true);
                 finishTextBoxFormatInteraction(true);
             }
+            closeLinkObjectBarPopups(true);
             break;
         case QEvent::TabletMove:
             peType = PointerEvent::Move;
@@ -7326,6 +7348,7 @@ void DocumentViewport::clearObjectSelection()
         commitInlineTextEdit();
 
     closeTextBoxFormatPopups(true);
+    closeLinkObjectBarPopups(true);
     finishTextBoxFormatInteraction(true);
     cancelObjectPointerGesture();
 
@@ -7499,7 +7522,12 @@ QVector<DocumentViewport::PageRelocation> DocumentViewport::relocateObjectsToCor
 void DocumentViewport::selectObject(InsertedObject* obj, bool addToSelection)
 {
     if (!obj) return;
-    
+
+    // Commit a pending description edit while its object is still the selected
+    // one. Doing this after the selection moves would apply the text to the
+    // newly selected object instead.
+    closeLinkObjectBarPopups(true);
+
     bool changed = false;
     
     if (!addToSelection) {
@@ -7554,6 +7582,7 @@ void DocumentViewport::deselectObject(InsertedObject* obj)
     
     if (m_selectedObjects.contains(obj)) {
         closeTextBoxFormatPopups(true);
+        closeLinkObjectBarPopups(true);
         finishTextBoxFormatInteraction(true);
     }
     if (m_selectedObjects.removeOne(obj)) {
@@ -7577,6 +7606,7 @@ void DocumentViewport::deselectAllObjects()
     if (m_selectedObjects.isEmpty()) return;
 
     closeTextBoxFormatPopups(true);
+    closeLinkObjectBarPopups(true);
     finishTextBoxFormatInteraction(true);
     m_selectedObjects.clear();
     for (int p : m_pendingThumbnailPages)
@@ -7617,6 +7647,7 @@ void DocumentViewport::deselectObjectById(const QString& objectId)
     for (int i = static_cast<int>(m_selectedObjects.size()) - 1; i >= 0; --i) {
         if (m_selectedObjects[i] && m_selectedObjects[i]->id == objectId) {
             closeTextBoxFormatPopups(true);
+            closeLinkObjectBarPopups(true);
             finishTextBoxFormatInteraction(true);
             m_selectedObjects.removeAt(i);
             emit objectSelectionChanged();
@@ -7755,6 +7786,7 @@ void DocumentViewport::updateObjectDrag(const QPointF& totalDelta)
     // to avoid marking dirty on every micro-movement during drag.
     // Tile boundary crossing is handled in O2.3.4.
     updateTextBoxFormatBarGeometry();
+    updateLinkObjectBarGeometry();
     
     // Phase O4.1.3: Throttle updates to ~60fps
     // High-DPI mice/tablets can send 100s of events per second.
@@ -7779,6 +7811,7 @@ void DocumentViewport::moveSelectedObjects(const QPointF& delta)
         clampObjectToPage(obj, pageIndexForObject(obj));
     }
     updateTextBoxFormatBarGeometry();
+    updateLinkObjectBarGeometry();
     
     if (!m_dragUpdateTimer.isValid() || 
         m_dragUpdateTimer.elapsed() >= DRAG_UPDATE_INTERVAL_MS) {
@@ -8107,6 +8140,9 @@ void DocumentViewport::deleteSelectedObjects()
         return;
     }
     closeTextBoxFormatPopups(true);
+    // Discard: the object is about to be deleted, so committing text to it is
+    // pointless and would push a stray undo entry ahead of the delete.
+    closeLinkObjectBarPopups(false);
     finishTextBoxFormatInteraction(true);
     if (m_inlineEditSession.active) {
         endInlineTextEdit(false, true);
@@ -8377,6 +8413,10 @@ void DocumentViewport::forgetObject(const QString& objectId)
         closeTextBoxFormatPopups(false);
         finishTextBoxFormatInteraction(false);
     }
+
+    // The object is being destroyed, so a pending description edit has nowhere
+    // to land.
+    closeLinkObjectBarPopups(false);
 
     if (m_hoveredObject && m_hoveredObject->id == objectId)
         m_hoveredObject = nullptr;
@@ -9010,6 +9050,10 @@ void DocumentViewport::createLinkObjectForHighlight(int pageIndex)
 
         pushObjectInsertUndo(rawPtr, pageIndex, coord);
 
+        // Surface the annotation's controls straight away, without making the
+        // user switch to ObjectSelect and hunt for a 24x24 icon.
+        selectObject(rawPtr, false);
+
 #ifdef QT_DEBUG
         qDebug() << "Created LinkObject for highlight on edgeless tile"
                  << coord.first << coord.second
@@ -9042,6 +9086,10 @@ void DocumentViewport::createLinkObjectForHighlight(int pageIndex)
     // outline cache current and notify listeners (scroll bar + notes sidebar).
     m_document->refreshLinkOutlineFor(pageIndex);
     emit linkObjectListMayHaveChanged();
+
+    // Surface the annotation's controls straight away, without making the user
+    // switch to ObjectSelect and hunt for a 24x24 icon.
+    selectObject(rawPtr, false);
 
 #ifdef QT_DEBUG
     qDebug() << "Created LinkObject for highlight on page" << pageIndex
@@ -9342,6 +9390,10 @@ bool DocumentViewport::pointerOverTextOverlay(const QPointF& viewportPos) const
         && m_textBoxFormatBar->geometry().contains(pos)) {
         return true;
     }
+    if (m_linkObjectBar && m_linkObjectBar->isVisible()
+        && m_linkObjectBar->geometry().contains(pos)) {
+        return true;
+    }
     return m_inlineTextBoxEditor && m_inlineTextBoxEditor->isVisible()
         && m_inlineTextBoxEditor->geometry().contains(pos);
 }
@@ -9390,28 +9442,36 @@ void DocumentViewport::updateTextBoxFormatBarGeometry()
     const QRectF objectRect = rotatedViewportBounds(
         unrotated, unrotated.center(), textBox->rotation);
 
+    placeFloatingBar(m_textBoxFormatBar, objectRect);
+}
+
+void DocumentViewport::placeFloatingBar(QWidget* bar, const QRectF& anchorRect)
+{
+    if (!bar || anchorRect.isEmpty())
+        return;
+
     const int inset = 8;
     const qreal gap = 8.0;
     const QRectF available = QRectF(rect()).adjusted(
         inset, inset, -inset, -inset);
-    QSize size = m_textBoxFormatBar->sizeHint();
+    QSize size = bar->sizeHint();
     size.setWidth(qMin(size.width(),
                        qMax(1, available.toAlignedRect().width())));
     size.setHeight(qMin(size.height(),
                         qMax(1, available.toAlignedRect().height())));
 
-    const qreal centeredX = objectRect.center().x()
+    const qreal centeredX = anchorRect.center().x()
         - size.width() / 2.0;
-    const qreal centeredY = objectRect.center().y()
+    const qreal centeredY = anchorRect.center().y()
         - size.height() / 2.0;
     const QVector<QRectF> candidates = {
-        QRectF(centeredX, objectRect.top() - gap - size.height(),
+        QRectF(centeredX, anchorRect.top() - gap - size.height(),
                size.width(), size.height()),
-        QRectF(centeredX, objectRect.bottom() + gap,
+        QRectF(centeredX, anchorRect.bottom() + gap,
                size.width(), size.height()),
-        QRectF(objectRect.right() + gap, centeredY,
+        QRectF(anchorRect.right() + gap, centeredY,
                size.width(), size.height()),
-        QRectF(objectRect.left() - gap - size.width(), centeredY,
+        QRectF(anchorRect.left() - gap - size.width(), centeredY,
                size.width(), size.height())
     };
 
@@ -9445,8 +9505,135 @@ void DocumentViewport::updateTextBoxFormatBarGeometry()
                               available.bottom() - chosen.height()));
     }
 
-    m_textBoxFormatBar->setGeometry(chosen.toAlignedRect());
-    m_textBoxFormatBar->raise();
+    bar->setGeometry(chosen.toAlignedRect());
+    bar->raise();
+}
+
+// ===== LinkObject floating controls =====
+
+bool DocumentViewport::linkObjectBarHasFocus() const
+{
+    return m_linkObjectBar && m_linkObjectBar->controlHasFocus();
+}
+
+LinkObject* DocumentViewport::selectedLinkForBar() const
+{
+    if (!m_document || m_selectedObjects.size() != 1)
+        return nullptr;
+    InsertedObject* selected = m_selectedObjects.first();
+    if (!selected || selected->type() != QLatin1String("link"))
+        return nullptr;
+    return static_cast<LinkObject*>(selected);
+}
+
+void DocumentViewport::ensureLinkObjectBar()
+{
+    if (m_linkObjectBar)
+        return;
+
+    m_linkObjectBar = new LinkObjectBar(this);
+    m_linkObjectBar->setDarkMode(m_isDarkMode);
+    m_linkObjectBar->hide();
+
+    connect(m_linkObjectBar, &LinkObjectBar::slotActivated,
+            this, &DocumentViewport::activateLinkSlot);
+    connect(m_linkObjectBar, &LinkObjectBar::slotCleared,
+            this, &DocumentViewport::clearLinkSlot);
+    connect(m_linkObjectBar, &LinkObjectBar::linkObjectColorChanged,
+            this, &DocumentViewport::setSelectedLinkColor);
+    connect(m_linkObjectBar, &LinkObjectBar::linkObjectDescriptionChanged,
+            this, &DocumentViewport::setSelectedLinkDescription);
+}
+
+void DocumentViewport::syncLinkObjectBar()
+{
+    LinkObject* link = selectedLinkForBar();
+    if (!link) {
+        // Discard rather than commit: the selection has already moved on by the
+        // time this runs, so confirming here would write the text onto whatever
+        // object is selected now. The selection-mutating call sites commit
+        // first, while the correct object is still selected.
+        closeLinkObjectBarPopups(false);
+        if (m_linkObjectBar)
+            m_linkObjectBar->hide();
+        return;
+    }
+
+    ensureLinkObjectBar();
+
+    LinkSlotState states[LinkObject::SLOT_COUNT];
+    for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
+        switch (link->linkSlots[i].type) {
+            case LinkSlot::Type::Empty:    states[i] = LinkSlotState::Empty; break;
+            case LinkSlot::Type::Position: states[i] = LinkSlotState::Position; break;
+            case LinkSlot::Type::Url:      states[i] = LinkSlotState::Url; break;
+            case LinkSlot::Type::Markdown: states[i] = LinkSlotState::Markdown; break;
+        }
+    }
+
+    m_linkObjectBar->setValues(states, link->iconColor, link->description);
+    m_linkObjectBar->show();
+    updateLinkObjectBarGeometry();
+    m_linkObjectBar->raise();
+}
+
+void DocumentViewport::updateLinkObjectBarGeometry()
+{
+    if (!m_linkObjectBar || m_linkObjectBar->isHidden())
+        return;
+    LinkObject* link = selectedLinkForBar();
+    if (!link) {
+        m_linkObjectBar->hide();
+        return;
+    }
+
+    const QRectF unrotated = objectBoundsInViewport(link);
+    if (unrotated.isEmpty())
+        return;
+    placeFloatingBar(m_linkObjectBar,
+                     rotatedViewportBounds(unrotated, unrotated.center(),
+                                           link->rotation));
+}
+
+void DocumentViewport::closeLinkObjectBarPopups(bool acceptPreview)
+{
+    if (m_linkObjectBar)
+        m_linkObjectBar->closePopups(acceptPreview);
+}
+
+void DocumentViewport::refreshLinkObjectBar()
+{
+    syncLinkObjectBar();
+}
+
+void DocumentViewport::setSelectedLinkColor(const QColor& color)
+{
+    LinkObject* link = selectedLinkForBar();
+    if (!link || !color.isValid() || link->iconColor == color)
+        return;
+
+    link->iconColor = color;
+    // Keeps the marker cache in sync so the scroll-bar tick colour survives
+    // this page being evicted later.
+    markLinkContainerDirtyAndRefreshOutline(link);
+
+    emit documentModified();
+    emit linkObjectAppearanceChanged(link->id, link->description, color);
+    update();
+}
+
+void DocumentViewport::setSelectedLinkDescription(const QString& description)
+{
+    LinkObject* link = selectedLinkForBar();
+    if (!link || link->description == description)
+        return;
+
+    link->description = description;
+    markLinkContainerDirtyAndRefreshOutline(link);
+
+    emit documentModified();
+    emit linkObjectAppearanceChanged(link->id, description, link->iconColor);
+    update();
 }
 
 void DocumentViewport::beginTextBoxFormatInteraction()
@@ -10403,7 +10590,7 @@ void DocumentViewport::addLinkToSlot(int slotIndex)
 
 void DocumentViewport::clearLinkSlot(int slotIndex)
 {
-    // Phase D: Clear a LinkObject slot content (called from ObjectSelectSubToolbar)
+    // Phase D: Clear a LinkObject slot content (called from LinkObjectBar)
     
     if (m_selectedObjects.size() != 1) {
         #ifdef SPEEDYNOTE_DEBUG
@@ -11449,13 +11636,17 @@ void DocumentViewport::captureObjectDragBackground()
     // Phase O4.1.3: Start throttle timer for drag updates
     m_dragUpdateTimer.start();
     
-    // QWidget::grab() includes visible child widgets. The floating format bar
-    // remains live and follows the object during a drag, so including it in
-    // the cached canvas would leave a second, frozen copy at the drag origin.
+    // QWidget::grab() includes visible child widgets. The floating bars remain
+    // live and follow the object during a drag, so including one in the cached
+    // canvas would leave a second, frozen copy at the drag origin.
     const bool restoreFormatBar =
         m_textBoxFormatBar && !m_textBoxFormatBar->isHidden();
     if (restoreFormatBar)
         m_textBoxFormatBar->hide();
+    const bool restoreLinkBar =
+        m_linkObjectBar && !m_linkObjectBar->isHidden();
+    if (restoreLinkBar)
+        m_linkObjectBar->hide();
 
     // Temporarily disable selected object rendering
     m_skipSelectedObjectRendering = true;
@@ -11471,6 +11662,11 @@ void DocumentViewport::captureObjectDragBackground()
         m_textBoxFormatBar->show();
         updateTextBoxFormatBarGeometry();
         m_textBoxFormatBar->raise();
+    }
+    if (restoreLinkBar) {
+        m_linkObjectBar->show();
+        updateLinkObjectBarGeometry();
+        m_linkObjectBar->raise();
     }
     
     // Phase O4.1.2: Pre-render selected objects to cache at current zoom
@@ -13701,6 +13897,13 @@ void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
         }
     }
 
+    // A previous highlight leaves its annotation selected so its controls are
+    // reachable. Drop that selection now, or the bar would hover over the drag
+    // that is about to start.
+    if (!m_selectedObjects.isEmpty()) {
+        deselectAllObjects();
+    }
+
     // Load the appropriate cache for this page.
     if (ocrMode) {
         loadOcrBlocksForPage(hit.pageIndex);
@@ -14621,11 +14824,14 @@ QVector<QString> DocumentViewport::createHighlightStrokes()
             return createdIds;
         }
 
-        // Emit one UndoAction per highlight rect (line) so the undo
-        // granularity matches the paged path. A single logical highlight
-        // stroke (or for Dotted, its whole row of dots) may be split across
-        // multiple tiles; those segments are grouped into the same UndoAction
-        // so they undo together with a single Ctrl+Z.
+        // One UndoAction for the whole commit: every line, and for Dotted every
+        // dot, lands in the same action so a single Ctrl+Z removes the entire
+        // highlight. A logical stroke may also be split across several tiles,
+        // which just contributes more segments to the same action.
+        UndoAction undoAction;
+        undoAction.type = UndoAction::AddStroke;
+        undoAction.layerIndex = m_edgelessActiveLayerIndex;
+
         for (const QRectF& srcRect : m_textSelection.highlightRects) {
             if (srcRect.width() < 0.1 || srcRect.height() < 0.1) continue;
 
@@ -14639,10 +14845,6 @@ QVector<QString> DocumentViewport::createHighlightStrokes()
             }
             if (strokesForLine.isEmpty()) continue;
 
-            UndoAction undoAction;
-            undoAction.type = UndoAction::AddStroke;
-            undoAction.layerIndex = m_edgelessActiveLayerIndex;
-
             for (const auto& s : strokesForLine) {
                 auto addedSegments = addStrokeToEdgelessTiles(s, m_edgelessActiveLayerIndex);
                 if (addedSegments.isEmpty()) continue;
@@ -14655,10 +14857,10 @@ QVector<QString> DocumentViewport::createHighlightStrokes()
                     createdIds.append(pair.second.id);
                 }
             }
-
-            if (!undoAction.segments.isEmpty())
-                pushUndoAction(undoAction);
         }
+
+        if (!undoAction.segments.isEmpty())
+            pushUndoAction(undoAction);
 
         // Create LinkObject on the tile containing the first highlight rect.
         if (!createdIds.isEmpty()) {
@@ -14689,6 +14891,10 @@ QVector<QString> DocumentViewport::createHighlightStrokes()
     // Convert each highlight rect to one (Cover/Underline) or many (Dotted)
     // strokes. PDF-source rects are in PDF coords (72 DPI) and need scaling
     // to page coords (96 DPI). OCR-source rects are already in page coords.
+    //
+    // Every stroke is collected first and pushed as one grouped undo action
+    // below, so a multi-line highlight is a single Ctrl+Z.
+    QVector<VectorStroke> committedStrokes;
     for (const QRectF& srcRect : m_textSelection.highlightRects) {
         if (srcRect.width() < 0.1 || srcRect.height() < 0.1) {
             continue;
@@ -14710,19 +14916,22 @@ QVector<QString> DocumentViewport::createHighlightStrokes()
             QVector<VectorStroke> dots = createDottedUnderlineStrokes(pageRect, m_highlighterColor);
             if (dots.isEmpty()) continue;
 
-            // Append dots to the layer and push a single grouped undo per line
-            // so Ctrl+Z removes the whole dotted row at once.
             for (const auto& d : dots) {
                 layer->addStroke(d);
+                committedStrokes.append(d);
                 createdIds.append(d.id);
             }
-            pushPageStrokesUndo(pageIndex, UndoAction::AddStroke, dots, page->activeLayerIndex);
         } else {
             VectorStroke stroke = createHighlightStroke(pageRect, m_highlighterColor, style);
             layer->addStroke(stroke);
-            pushPageStrokeUndo(pageIndex, UndoAction::AddStroke, stroke, page->activeLayerIndex);
+            committedStrokes.append(stroke);
             createdIds.append(stroke.id);
         }
+    }
+
+    if (!committedStrokes.isEmpty()) {
+        pushPageStrokesUndo(pageIndex, UndoAction::AddStroke, committedStrokes,
+                            page->activeLayerIndex);
     }
 
     // Invalidate stroke cache for this page
@@ -15843,6 +16052,7 @@ static QSet<int> collectAffectedPages(const UndoAction& action)
 void DocumentViewport::undo()
 {
     closeTextBoxFormatPopups(true);
+    closeLinkObjectBarPopups(true);
     finishTextBoxFormatInteraction(true);
     if (m_inlineEditSession.active)
         commitInlineTextEdit();
@@ -16288,6 +16498,7 @@ void DocumentViewport::undo()
 void DocumentViewport::redo()
 {
     closeTextBoxFormatPopups(true);
+    closeLinkObjectBarPopups(true);
     finishTextBoxFormatInteraction(true);
     if (m_inlineEditSession.active)
         commitInlineTextEdit();

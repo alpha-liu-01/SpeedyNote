@@ -392,7 +392,6 @@ private slots:
     void showPdfSourcesDialog(DocumentViewport* viewport);
     void updatePdfSourceUi(DocumentViewport* viewport);
     void showExportDialog();
-    void updateLinkSlotButtons(DocumentViewport* viewport);  // Phase D: Update subtoolbar slot buttons
     void applySubToolbarValuesToViewport(ToolType tool);  // Phase D: Apply subtoolbar presets to viewport (via signals)
     void applyAllSubToolbarValuesToViewport(DocumentViewport* viewport);  // Phase D: Apply ALL tool presets directly
     
@@ -763,10 +762,6 @@ private:
     QMetaObject::Connection m_insertModeConn;
     QMetaObject::Connection m_actionModeConn;
     QMetaObject::Connection m_selectionChangedConn;
-    /// Slot-content sync: refreshes the ObjectSelect subtoolbar slot buttons
-    /// when the selected LinkObject's slots are mutated (link added/cleared)
-    /// without the selection itself changing.
-    QMetaObject::Connection m_linkSlotsChangedConn;
     
     // Action Bar: Selection state connections (viewport → action bar container)
     QMetaObject::Connection m_lassoSelectionConn;
@@ -808,6 +803,7 @@ private:
     QMetaObject::Connection m_markdownNoteOpenConn;   // Phase M.5: For requestOpenMarkdownNote
     QMetaObject::Connection m_userWarningConn;        // For viewport userWarning → QMessageBox
     QMetaObject::Connection m_linkObjectListConn;     // M.7.3: For linkObjectListMayHaveChanged
+    QMetaObject::Connection m_linkAppearanceConn;     // For linkObjectAppearanceChanged
     QMetaObject::Connection m_pdfSourcesConn;
     QMetaObject::Connection m_strokesChangedConn;      // OCR: For strokesChanged → debounce
     QMetaObject::Connection m_ocrConvertConn;          // For convertOcrTextRequested

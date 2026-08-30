@@ -12,10 +12,13 @@
 #include "ObjectConstraints.h"
 #include "Page.h"
 #include "../objects/ImageObject.h"
+#include "../objects/LinkObject.h"
 #include "../objects/OcrTextObject.h"
 #include "../ui/panels/InlineTextBoxEditor.h"
+#include "../ui/panels/LinkObjectBar.h"
 #include "../ui/panels/TextBoxFormatBar.h"
 #include "../ui/widgets/ColorPresetButton.h"
+#include "../ui/widgets/LinkSlotButton.h"
 #include "../../markdown/qmarkdowntextedit.h"
 #include "../strokes/VectorStroke.h"
 #include "../strokes/StrokePoint.h"
@@ -33,6 +36,7 @@
 #include <QJsonObject>
 #include <QDoubleSpinBox>
 #include <QFontComboBox>
+#include <QLineEdit>
 #include <QMouseEvent>
 #include <QTemporaryDir>
 #include <QSignalSpy>
@@ -2536,6 +2540,189 @@ public:
         return true;
     }
 
+    /**
+     * @brief LinkObject controls float in the viewport, one bar per viewport.
+     *
+     * The bar replaces the old toolbar subtoolbar, so it has to inherit the
+     * behaviour the text box format bar established: anchored placement that
+     * stays inside the viewport, tracking zoom, staying out of the drag
+     * snapshot, and hiding for anything that is not a single LinkObject.
+     *
+     * Also covers the two behaviours that make the bar reachable after a
+     * highlight: the commit selects its own annotation, and it collapses to two
+     * undo entries instead of one per highlighted line.
+     */
+    static bool testLinkObjectBar() {
+        printf("  testLinkObjectBar... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto doc = Document::createNew("Link bar");
+        DocumentViewport viewport;
+        viewport.resize(1100, 820);
+        viewport.setDocument(doc.get());
+        viewport.setCurrentTool(ToolType::ObjectSelect);
+        Page* page = doc->page(0);
+        if (!page)
+            return fail("missing link bar test page");
+
+        auto linkPtr = std::make_unique<LinkObject>();
+        linkPtr->position = QPointF(180.0, 250.0);
+        linkPtr->description = QStringLiteral("anchor");
+        LinkObject* link = linkPtr.get();
+        page->addObject(std::move(linkPtr));
+
+        if (viewport.m_linkObjectBar)
+            return fail("link bar was built before anything selected it");
+
+        // An annotation with all 3 slots empty has nothing worth opening, so it
+        // must not tick the scroll bar.
+        if (!doc->pageLinkMarkers().isEmpty())
+            return fail("slotless annotation produced a scroll-bar marker");
+
+        viewport.selectObject(link, false);
+        if (!viewport.m_linkObjectBar
+            || viewport.m_linkObjectBar->isHidden()
+            || viewport.m_linkObjectBar->parentWidget() != &viewport)
+            return fail("single selected LinkObject did not show owned bar");
+
+        const QRect inset(8, 8, viewport.width() - 16, viewport.height() - 16);
+        if (!inset.contains(viewport.m_linkObjectBar->geometry()))
+            return fail("link bar was not clamped to viewport");
+
+        auto* colorButton =
+            viewport.m_linkObjectBar->findChild<ColorPresetButton*>();
+        const auto slotButtons =
+            viewport.m_linkObjectBar->findChildren<LinkSlotButton*>();
+        auto* descriptionEdit =
+            viewport.m_linkObjectBar->findChild<QLineEdit*>();
+        if (!colorButton || !descriptionEdit
+            || slotButtons.size() != LinkObject::SLOT_COUNT)
+            return fail("link bar was missing its controls");
+        if (colorButton->color() != link->iconColor
+            || descriptionEdit->text() != link->description)
+            return fail("link bar did not seed from the selected object");
+
+        link->iconColor = QColor(10, 120, 200);
+        link->linkSlots[1].type = LinkSlot::Type::Url;
+        link->linkSlots[1].url = QStringLiteral("https://example.invalid");
+        viewport.refreshLinkObjectBar();
+        if (colorButton->color() != link->iconColor
+            || slotButtons[1]->state() != LinkSlotState::Url)
+            return fail("link bar did not pick up slot/colour changes");
+        if (doc->pageLinkMarkers().size() != 1)
+            return fail("annotation with a filled slot produced no marker");
+
+        const QRect initialGeometry = viewport.m_linkObjectBar->geometry();
+        viewport.setZoomLevel(1.4);
+        if (viewport.m_linkObjectBar->geometry() == initialGeometry)
+            return fail("link bar did not track zoom");
+
+        viewport.captureObjectDragBackground();
+        if (viewport.m_linkObjectBar->isHidden()
+            || viewport.m_objectDragBackgroundSnapshot.isNull())
+            return fail("drag capture did not restore the live link bar");
+        viewport.m_objectDragBackgroundSnapshot = QPixmap();
+        viewport.m_dragObjectRenderedCache = QPixmap();
+
+        viewport.setZoomLevel(1.0);
+        link->position = QPointF(0.0, 0.0);
+        viewport.updateLinkObjectBarGeometry();
+        if (!inset.contains(viewport.m_linkObjectBar->geometry()))
+            return fail("top-left annotation overflowed the viewport");
+        viewport.resize(420, 700);
+        viewport.updateLinkObjectBarGeometry();
+        if (!QRect(8, 8, viewport.width() - 16, viewport.height() - 16)
+                 .contains(viewport.m_linkObjectBar->geometry()))
+            return fail("narrow viewport did not clamp the link bar");
+        viewport.resize(1100, 820);
+        link->position = QPointF(180.0, 250.0);
+        viewport.updateLinkObjectBarGeometry();
+
+        // Stylus events land on the deepest child and propagate back up, so the
+        // canvas has to treat the bar's area as off limits or the pen cannot
+        // reach the controls. A child of an unshown parent is never isVisible(),
+        // so map the viewport offscreen to exercise the real gating path.
+        viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+        viewport.show();
+        QApplication::processEvents();
+        viewport.updateLinkObjectBarGeometry();
+        if (!viewport.pointerOverTextOverlay(
+                QRectF(viewport.m_linkObjectBar->geometry()).center()))
+            return fail("link bar area was not excluded from canvas input");
+        viewport.hide();
+
+        auto ocr = std::make_unique<OcrTextObject>();
+        ocr->text = QStringLiteral("OCR");
+        OcrTextObject* ocrRaw = ocr.get();
+        page->addObject(std::move(ocr));
+        viewport.selectObject(ocrRaw, false);
+        if (!viewport.m_linkObjectBar->isHidden())
+            return fail("OCR object incorrectly showed the link bar");
+        viewport.selectObject(link, false);
+        viewport.selectObject(ocrRaw, true);
+        if (!viewport.m_linkObjectBar->isHidden())
+            return fail("multi-selection incorrectly showed the link bar");
+        viewport.deselectAllObjects();
+        if (!viewport.m_linkObjectBar->isHidden())
+            return fail("deselecting left the link bar visible");
+
+        viewport.selectObject(link, false);
+        QSignalSpy appearanceSpy(
+            &viewport, &DocumentViewport::linkObjectAppearanceChanged);
+        viewport.setSelectedLinkDescription(QStringLiteral("edited"));
+        viewport.setSelectedLinkColor(QColor(200, 30, 40));
+        if (link->description != QStringLiteral("edited")
+            || link->iconColor != QColor(200, 30, 40)
+            || appearanceSpy.count() != 2)
+            return fail("viewport link handlers did not apply or notify");
+
+        // A 3-line highlight is one Ctrl+Z for the strokes and one for the
+        // annotation, not one per line.
+        viewport.deselectAllObjects();
+        viewport.m_undoStack.clear();
+        viewport.m_redoStack.clear();
+        viewport.setCurrentTool(ToolType::Highlighter);
+        viewport.m_autoHighlightStyle = DocumentViewport::HighlightStyle::Cover;
+        viewport.m_textSelection.clear();
+        viewport.m_textSelection.source =
+            DocumentViewport::TextSelection::Source::Ocr;
+        viewport.m_textSelection.pageIndex = 0;
+        viewport.m_textSelection.startBoxIndex = 0;
+        viewport.m_textSelection.endBoxIndex = 0;
+        viewport.m_textSelection.selectedText = QStringLiteral("three lines");
+        viewport.m_textSelection.highlightRects = {
+            QRectF(100.0, 400.0, 200.0, 14.0),
+            QRectF(100.0, 420.0, 200.0, 14.0),
+            QRectF(100.0, 440.0, 200.0, 14.0)
+        };
+        const QVector<QString> created = viewport.createHighlightStrokes();
+        if (created.size() != 3)
+            return fail("cover highlight did not make one stroke per line");
+        if (viewport.m_undoStack.size() != 2)
+            return fail("highlight commit did not collapse to 2 undo entries");
+
+        if (viewport.m_selectedObjects.size() != 1
+            || viewport.m_selectedObjects.first()->type()
+                   != QLatin1String("link")
+            || viewport.m_selectedObjects.first() == link)
+            return fail("highlight commit did not select its own annotation");
+        if (viewport.m_linkObjectBar->isHidden())
+            return fail("highlight commit did not surface the link bar");
+
+        viewport.undo();
+        viewport.undo();
+        if (!viewport.m_undoStack.isEmpty())
+            return fail("two undos did not unwind the highlight commit");
+
+        viewport.setDocument(nullptr);
+        printf("PASSED\n");
+        return true;
+    }
+
     static bool testOcrTextBoxConversion() {
         printf("  testOcrTextBoxConversion... ");
 
@@ -2885,6 +3072,8 @@ public:
                 "testTextBoxThemeDefaults");
         runTest(testTextOverlayLifecycle,
                 "testTextOverlayLifecycle");
+        runTest(testLinkObjectBar,
+                "testLinkObjectBar");
         runTest(testOcrTextBoxConversion,
                 "testOcrTextBoxConversion");
         

@@ -40,6 +40,7 @@ enum class TouchGestureMode {
 class QContextMenuEvent;
 class ImageObject;
 class InlineTextBoxEditor;
+class LinkObjectBar;
 class OcrTextObject;
 class TextBoxFormatBar;
 
@@ -1129,8 +1130,27 @@ public:
     bool hasActiveInlineTextEdit() const;
     bool inlineTextEditorHasFocus() const;
     bool textBoxFormatBarHasFocus() const;
+    bool linkObjectBarHasFocus() const;
     void commitInlineTextEdit();
     void cancelInlineTextEdit();
+
+    /**
+     * @brief Re-read the selected LinkObject's state into the floating bar.
+     *
+     * For callers that mutate a LinkObject from outside the viewport (the
+     * markdown notes sidebar clearing a slot, for instance).
+     */
+    void refreshLinkObjectBar();
+
+    /**
+     * @brief Apply a new icon color to the selected LinkObject.
+     */
+    void setSelectedLinkColor(const QColor& color);
+
+    /**
+     * @brief Apply a new description to the selected LinkObject.
+     */
+    void setSelectedLinkDescription(const QString& description);
     
     /**
      * @brief Check if a lasso selection exists.
@@ -1485,7 +1505,7 @@ public:
      * @brief Clear the content of a LinkObject slot.
      * @param slotIndex The slot index (0-2) to clear.
      * 
-     * Phase D: Called from ObjectSelectSubToolbar after long-press delete
+     * Phase D: Called from LinkObjectBar after long-press delete
      * confirmation. Clears the slot content (Position/URL/Markdown) without
      * deleting the entire LinkObject.
      */
@@ -1650,6 +1670,25 @@ public:
      */
     bool pointerOverTextOverlay(const QPointF& viewportPos) const;
     void updateTextBoxFormatBarGeometry();
+
+    /**
+     * @brief Position a floating control bar next to an anchor rect.
+     * @param bar The bar to move (a child widget of this viewport).
+     * @param anchorRect The anchor, in viewport coordinates.
+     *
+     * Tries above, below, right and left in that order, takes the first
+     * placement that fits, and otherwise picks the least-overflowing candidate
+     * and clamps it inside the viewport. Shared by the text box format bar and
+     * the LinkObject bar.
+     */
+    void placeFloatingBar(QWidget* bar, const QRectF& anchorRect);
+
+    LinkObject* selectedLinkForBar() const;
+    void ensureLinkObjectBar();
+    void syncLinkObjectBar();
+    void updateLinkObjectBarGeometry();
+    void closeLinkObjectBarPopups(bool acceptPreview);
+
     void beginTextBoxFormatInteraction();
     void applyTextBoxFormatPreview(TextBoxFormatChange change,
                                    const QVariant& value);
@@ -2185,10 +2224,22 @@ signals:
      * @brief Emitted when the slot contents of the selected LinkObject change.
      *
      * Narrower than linkObjectListMayHaveChanged(): the set of LinkObjects is
-     * unchanged, only the 3 slots of one object. Drives the ObjectSelect
-     * subtoolbar slot buttons.
+     * unchanged, only the 3 slots of one object. Drives the LinkObject bar's
+     * slot buttons.
      */
     void linkSlotsChanged();
+
+    /**
+     * @brief Emitted when one LinkObject's description or icon color changes.
+     *
+     * Narrower still: nothing about the set of LinkObjects or their slots has
+     * changed, only how this one presents itself. Lets the notes sidebar patch
+     * the single row in place instead of rebuilding the tree, which would
+     * collapse expanded subtrees and drop focus.
+     */
+    void linkObjectAppearanceChanged(const QString& linkObjectId,
+                                     const QString& description,
+                                     const QColor& color);
 
     /**
      * @brief Emitted when the current tool changes.
@@ -2792,6 +2843,9 @@ private:
     QString m_contextMenuObjectId;
     TextBoxFormatBar* m_textBoxFormatBar = nullptr;
     TextBoxFormatTransaction m_textBoxFormatTransaction;
+    /// Floating controls for the selected LinkObject (color, description, 3
+    /// slots). Created lazily, one per viewport, and anchored to the object.
+    LinkObjectBar* m_linkObjectBar = nullptr;
     
     /**
      * @brief Whether we're currently dragging selected objects.
