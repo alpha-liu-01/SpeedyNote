@@ -98,7 +98,7 @@
 | Platform    | Minimum                  | Recommended      |
 | ----------- | ------------------------ | ---------------- |
 | **Windows** | Windows 7 SP1          | Windows 11       |
-| **macOS**   | macOS 13                 | macOS 15+        |
+| **macOS**   | macOS 14                 | macOS 15+        |
 | **Linux**   | Ubuntu 22.04 / Fedora 38 | Any with Qt 6.4+ |
 | **Android** | Android 9 (API 28)       | Android 13+      |
 | **iPadOS**  | iPadOS 16.0              | iPadOS 17+       |
