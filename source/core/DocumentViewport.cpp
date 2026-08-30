@@ -2323,12 +2323,19 @@ DocumentViewport::HandleHit DocumentViewport::objectHandleAtPoint(const QPointF&
         return HandleHit::None;
     }
     
+    // Annotations expose no handles. updateObjectResize() has always rejected
+    // them, and a highlight's bounds are its text rects: resizing or rotating
+    // them would detach the mark from the text it annotates.
+    if (obj->type() == QLatin1String("link")) {
+        return HandleHit::None;
+    }
+
     // Get unrotated object bounds in viewport coordinates
     QRectF objRect = objectBoundsInViewport(obj);
     if (objRect.isEmpty()) {
         return HandleHit::None;
     }
-    
+
     // Helper to rotate a point around center
     auto rotatePoint = [](const QPointF& pt, const QPointF& center, qreal angleDegrees) -> QPointF {
         if (qAbs(angleDegrees) < 0.01) return pt;
@@ -2406,8 +2413,9 @@ void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
     InsertedObject* obj = m_selectedObjects.first();
     if (!obj) return;
     
-    // Phase C.2.2: LinkObject doesn't resize - only move is allowed
-    // LinkObject has fixed icon size (24x24), resize would distort it
+    // Annotations don't resize - only move is allowed. An icon-only annotation
+    // has a fixed 24x24 badge, and a highlight's bounds are its text rects, so
+    // either way resizing would only distort it.
     if (obj->type() == "link") {
         return;
     }
@@ -6826,8 +6834,9 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
         if (handle != HandleHit::None && handle != HandleHit::Inside) {
             InsertedObject* obj = m_selectedObjects.first();
             
-            // Phase C.2.2: LinkObject doesn't resize - skip resize handle interaction
-            // Allow the click to fall through to drag logic instead
+            // Annotations don't resize. objectHandleAtPoint() already returns
+            // None for them, so this is belt and braces; the click falls
+            // through to drag logic.
             if (obj->type() != "link") {
                 // Start resize operation (non-LinkObject only)
             m_isResizingObject = true;
@@ -8984,36 +8993,39 @@ void DocumentViewport::pasteObjects()
 
 // ===== LinkObject Creation (Phase C.3.2 & C.4.5) =====
 
-void DocumentViewport::createLinkObjectForHighlight(int pageIndex)
+HighlightRegion::SourceRange
+DocumentViewport::buildHighlightSourceRange(int pageIndex) const
 {
-    // Phase C.3.2: Create LinkObject for text highlight
-    if (!m_document || m_textSelection.highlightRects.isEmpty()) {
-        return;
+    HighlightRegion::SourceRange range;
+    range.source = static_cast<HighlightRegion::Source>(m_textSelection.source);
+    range.startBoxIndex = m_textSelection.startBoxIndex;
+    range.startCharIndex = m_textSelection.startCharIndex;
+    range.endBoxIndex = m_textSelection.endBoxIndex;
+    range.endCharIndex = m_textSelection.endCharIndex;
+
+    // Paged only: the page is identified by UUID, never by index, so the range
+    // survives page reordering. Edgeless addresses its OCR cache by tile and
+    // has no page UUID to record.
+    if (m_document && !m_document->isEdgeless()) {
+        if (const Page* page = m_document->page(pageIndex)) {
+            range.pageUuid = page->uuid;
+        }
+    }
+    return range;
+}
+
+LinkObject* DocumentViewport::createLinkObjectForHighlight(
+    int pageIndex, const QVector<QRectF>& regionRects)
+{
+    if (!m_document || regionRects.isEmpty()) {
+        return nullptr;
     }
 
-    const bool ocrSelection = (m_textSelection.source == TextSelection::Source::Ocr);
     const bool edgeless = m_document->isEdgeless();
 
-    // Resolve the anchor position in DOCUMENT-space (for edgeless) or
-    // PAGE-space (for paged).
-    QRectF firstRect = m_textSelection.highlightRects[0];
-    qreal firstRectX;
-    qreal firstRectY;
-    if (ocrSelection) {
-        firstRectX = firstRect.x();
-        firstRectY = firstRect.y();
-    } else {
-        firstRectX = firstRect.x() * PDF_TO_PAGE_SCALE;
-        firstRectY = firstRect.y() * PDF_TO_PAGE_SCALE;
-    }
-
-    // Place icon to the LEFT of the first highlight rect (in the margin).
-    // Paged mode pulls it back onto the page below; in edgeless the canvas is
-    // infinite (negative coords are legal), so nothing constrains it.
-    constexpr qreal MARGIN_PADDING = 4.0;
-    qreal iconX = firstRectX - LinkObject::ICON_SIZE - MARGIN_PADDING;
-
     auto linkObj = std::make_unique<LinkObject>();
+    // Auto-derived from the selection, so descriptionUserEdited stays false and
+    // the annotation counts as "nothing worth opening" until the user acts.
     linkObj->description = m_textSelection.selectedText;
 
     // Use a DARKER version of highlighter color for visibility on white pages.
@@ -9024,20 +9036,36 @@ void DocumentViewport::createLinkObjectForHighlight(int pageIndex)
     darkened.setAlpha(255);
     linkObj->iconColor = darkened;
 
+    linkObj->region.style =
+        static_cast<HighlightRegion::Style>(m_autoHighlightStyle);
+    linkObj->region.color = m_highlighterColor;
+    linkObj->region.sourceRange = buildHighlightSourceRange(pageIndex);
+
     if (edgeless) {
-        // Find the tile containing the anchor point. In edgeless, positions
-        // are stored tile-local, and the object's hit tests are done in
-        // document space (tileOrigin + obj.position).
-        QPointF docAnchor(iconX, firstRectY);
-        auto coord = m_document->tileCoordForPoint(docAnchor);
-        Page* targetTile = m_document->getOrCreateTile(coord.first, coord.second);
-        if (!targetTile) {
-            return;
+        // Positions are stored tile-local, so rebase the document-space rects
+        // onto the tile that owns the region's top-left corner. The region may
+        // extend past that tile; objects render unclipped and both the render
+        // and hit-test paths widen their tile query by maxObjectExtent(), which
+        // the updateMaxObjectExtent() call below keeps current.
+        QRectF bounds;
+        for (const QRectF& r : regionRects) {
+            bounds = bounds.isNull() ? r : bounds.united(r);
         }
 
-        QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
-                           coord.second * Document::EDGELESS_TILE_SIZE);
-        linkObj->position = docAnchor - tileOrigin;
+        auto coord = m_document->tileCoordForPoint(bounds.topLeft());
+        Page* targetTile = m_document->getOrCreateTile(coord.first, coord.second);
+        if (!targetTile) {
+            return nullptr;
+        }
+
+        const QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
+                                 coord.second * Document::EDGELESS_TILE_SIZE);
+        QVector<QRectF> tileRects;
+        tileRects.reserve(regionRects.size());
+        for (const QRectF& r : regionRects) {
+            tileRects.append(r.translated(-tileOrigin));
+        }
+        linkObj->setRegionFromPageRects(tileRects);
 
         int activeLayer = m_edgelessActiveLayerIndex;
         int defaultAffinity = activeLayer - 1;
@@ -9047,29 +9075,36 @@ void DocumentViewport::createLinkObjectForHighlight(int pageIndex)
         LinkObject* rawPtr = linkObj.get();
         targetTile->addObject(std::move(linkObj));
         m_document->markTileDirty(coord);
+        m_document->updateMaxObjectExtent(rawPtr);
 
         pushObjectInsertUndo(rawPtr, pageIndex, coord);
 
         // Surface the annotation's controls straight away, without making the
-        // user switch to ObjectSelect and hunt for a 24x24 icon.
+        // user switch to ObjectSelect and hunt for a badge.
         selectObject(rawPtr, false);
 
 #ifdef QT_DEBUG
-        qDebug() << "Created LinkObject for highlight on edgeless tile"
+        qDebug() << "Created highlight annotation on edgeless tile"
                  << coord.first << coord.second
+                 << "rects:" << rawPtr->region.rects.size()
                  << "description:" << rawPtr->description.left(30);
 #endif
-        return;
+        return rawPtr;
     }
 
-    // ---------- Paged path (original behavior) ----------
+    // ---------- Paged path ----------
     Page* page = m_document->page(pageIndex);
     if (!page) {
-        return;
+        return nullptr;
     }
 
-    linkObj->position = clampObjectPositionToPage(
-        pageIndex, QPointF(iconX, firstRectY), linkObj->size);
+    // Deliberately NOT clamped to the page. ObjectConstraints::clampAxis()
+    // centres anything wider than the page and otherwise shifts it inward,
+    // either of which would drag the mark off the text it annotates. The rects
+    // come from text inside the page, so only the badge overhangs, and
+    // objectAtPoint()'s neighbour-page sweep already reaches overhanging
+    // objects.
+    linkObj->setRegionFromPageRects(regionRects);
 
     int activeLayer = page->activeLayerIndex;
     int defaultAffinity = activeLayer - 1;
@@ -9079,22 +9114,26 @@ void DocumentViewport::createLinkObjectForHighlight(int pageIndex)
     LinkObject* rawPtr = linkObj.get();
     page->addObject(std::move(linkObj));
     m_document->markPageDirty(pageIndex);
+    m_document->updateMaxObjectExtent(rawPtr);
 
     pushObjectInsertUndo(rawPtr, pageIndex, {});
 
-    // SB2: a highlight-created LinkObject adds a scroll-bar marker; keep the
-    // outline cache current and notify listeners (scroll bar + notes sidebar).
+    // SB2: keep the outline cache current and notify listeners (scroll bar +
+    // notes sidebar). A brand-new highlight has no filled slot and no
+    // user-written description, so the marker filter drops it until it does.
     m_document->refreshLinkOutlineFor(pageIndex);
     emit linkObjectListMayHaveChanged();
 
     // Surface the annotation's controls straight away, without making the user
-    // switch to ObjectSelect and hunt for a 24x24 icon.
+    // switch to ObjectSelect and hunt for a badge.
     selectObject(rawPtr, false);
 
 #ifdef QT_DEBUG
-    qDebug() << "Created LinkObject for highlight on page" << pageIndex
+    qDebug() << "Created highlight annotation on page" << pageIndex
+             << "rects:" << rawPtr->region.rects.size()
              << "description:" << rawPtr->description.left(30);
 #endif
+    return rawPtr;
 }
 
 void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& pagePos, const QPointF& viewportPos)
@@ -9629,6 +9668,10 @@ void DocumentViewport::setSelectedLinkDescription(const QString& description)
         return;
 
     link->description = description;
+    // This is the only path a user can type a description through, so it is
+    // also where the auto-derived / hand-written distinction is recorded.
+    // Clearing the text back to empty gives up the claim again.
+    link->descriptionUserEdited = !description.isEmpty();
     markLinkContainerDirtyAndRefreshOutline(link);
 
     emit documentModified();
@@ -10559,20 +10602,10 @@ void DocumentViewport::addLinkToSlot(int slotIndex)
             link->linkSlots[slotIndex].type = LinkSlot::Type::Url;
             link->linkSlots[slotIndex].url = url;
             
-            // Mark page dirty - find which page contains this object
-            Document::TileCoord tileCoord;
-            Page* page = findPageContainingObject(link, &tileCoord);
-            if (page && m_document) {
-                if (m_document->isEdgeless()) {
-                    m_document->markTileDirty(tileCoord);
-                } else {
-                    // Use cached UUID→index lookup (O(1) from Phase C.0.2)
-                    int pageIndex = m_document->pageIndexByUuid(page->uuid);
-                    if (pageIndex >= 0) {
-                        m_document->markPageDirty(pageIndex);
-                    }
-                }
-            }
+            // Marks the container dirty and refreshes the outline cache, so
+            // filling the first slot on a highlight makes its scroll-bar
+            // marker appear rather than waiting for a reload.
+            markLinkContainerDirtyAndRefreshOutline(link);
             
             emit documentModified();
             emit linkSlotsChanged();
@@ -11347,6 +11380,14 @@ void DocumentViewport::renderObjectSelection(QPainter& painter)
     // ===== Draw handles for single selection =====
     if (m_selectedObjects.size() == 1) {
         InsertedObject* obj = m_selectedObjects.first();
+        // Annotations are neither resizable nor rotatable (see
+        // objectHandleAtPoint), so drawing handles would only advertise
+        // gestures that do nothing. The dashed outline still marks the
+        // selection.
+        if (obj && obj->type() == QLatin1String("link")) {
+            painter.restore();
+            return;
+        }
         if (obj && (!m_inlineEditSession.active
                     || obj->id != m_inlineEditSession.objectId)) {
             // Get axis-aligned bounding box in viewport coordinates
@@ -14054,10 +14095,10 @@ void DocumentViewport::handlePointerRelease_Highlighter(const PointerEvent& pe)
     if (m_textSelection.isValid()) {
         finalizeTextSelection();
         
-        // Auto-create strokes if a highlight style is selected
+        // Commit the selection as a highlight annotation if a style is selected
         if (m_autoHighlightStyle != HighlightStyle::None) {
-            createHighlightStrokes();
-            // Note: createHighlightStrokes() already clears m_textSelection
+            commitHighlightAnnotation();
+            // Note: commitHighlightAnnotation() already clears m_textSelection
         }
     }
     
@@ -14719,246 +14760,83 @@ void DocumentViewport::renderSearchMatchesOverlayEdgeless(QPainter& painter)
     painter.restore();
 }
 
-VectorStroke DocumentViewport::createHighlightStroke(const QRectF& rect,
-                                                     const QColor& color,
-                                                     HighlightStyle style) const
+LinkObject* DocumentViewport::commitHighlightAnnotation()
 {
-    VectorStroke stroke;
-    stroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    stroke.color = color;
-
-    // Geometry depends on style:
-    //  - Cover:     horizontal line through the center, thickness = rect height
-    //               (original "marker covers the text" behavior).
-    //  - Underline: thin horizontal line along the bottom edge.
-    //  - DottedUnderline is routed through createDottedUnderlineStrokes() and
-    //    is never passed to this helper; we treat it as Underline just so a
-    //    stray caller still produces something visible rather than a 0-thick
-    //    stroke.
-    qreal y = rect.center().y();
-    qreal thickness = rect.height();
-    if (style == HighlightStyle::Underline || style == HighlightStyle::DottedUnderline) {
-        thickness = qMax(qreal(1.5), rect.height() * qreal(0.10));
-        y = rect.bottom() - thickness * qreal(0.5);
-    }
-    stroke.baseThickness = thickness;
-
-    StrokePoint startPoint;
-    startPoint.pos = QPointF(rect.left(), y);
-    startPoint.pressure = 1.0;
-
-    StrokePoint endPoint;
-    endPoint.pos = QPointF(rect.right(), y);
-    endPoint.pressure = 1.0;
-
-    stroke.points.append(startPoint);
-    stroke.points.append(endPoint);
-
-    stroke.updateBoundingBox();
-    return stroke;
-}
-
-QVector<VectorStroke> DocumentViewport::createDottedUnderlineStrokes(const QRectF& rect,
-                                                                      const QColor& color) const
-{
-    QVector<VectorStroke> dots;
-
-    // Dot thickness scales with text height; center-to-center spacing is 3x
-    // thickness (dot + two-dot gap). Line sits on the bottom edge of the rect.
-    const qreal thickness = qMax(qreal(1.5), rect.height() * qreal(0.10));
-    const qreal step      = thickness * qreal(3.0);
-    const qreal y         = rect.bottom() - thickness * qreal(0.5);
-    const qreal firstX    = rect.left()  + thickness * qreal(0.5);
-    const qreal lastX     = rect.right() - thickness * qreal(0.5);
-    if (lastX < firstX || step <= 0.0) {
-        return dots;  // Rect too narrow for even one dot.
-    }
-
-    dots.reserve(static_cast<int>((lastX - firstX) / step) + 1);
-    for (qreal x = firstX; x <= lastX; x += step) {
-        VectorStroke dot;
-        dot.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        dot.color = color;
-        dot.baseThickness = thickness;
-        StrokePoint p;
-        p.pos = QPointF(x, y);
-        p.pressure = 1.0;
-        dot.points.append(p);
-        dot.updateBoundingBox();
-        dots.append(dot);
-    }
-    return dots;
-}
-
-QVector<QString> DocumentViewport::createHighlightStrokes()
-{
-    QVector<QString> createdIds;
-
     // Validate selection
     if (!m_textSelection.isValid() || m_textSelection.highlightRects.isEmpty()) {
-        return createdIds;
+        return nullptr;
     }
 
     if (!m_document) {
-        return createdIds;
+        return nullptr;
     }
 
     // Nothing to do if caller reached here with None (defensive; the release
     // handler guards this, but we stay safe for future call sites).
     if (m_autoHighlightStyle == HighlightStyle::None) {
         m_textSelection.clear();
-        return createdIds;
+        return nullptr;
     }
 
     const bool ocrSelection = (m_textSelection.source == TextSelection::Source::Ocr);
     const bool edgeless     = m_document->isEdgeless();
-    const bool dotted       = (m_autoHighlightStyle == HighlightStyle::DottedUnderline);
     const int pageIndex     = m_textSelection.pageIndex;
-    const HighlightStyle style = m_autoHighlightStyle;
 
-    // ---------- Edgeless path: strokes are split across tiles ----------
-    if (edgeless) {
-        // Only OCR selections reach here in edgeless (PDF mode is disabled).
-        if (!ocrSelection) {
-            m_textSelection.clear();
-            return createdIds;
-        }
-
-        // One UndoAction for the whole commit: every line, and for Dotted every
-        // dot, lands in the same action so a single Ctrl+Z removes the entire
-        // highlight. A logical stroke may also be split across several tiles,
-        // which just contributes more segments to the same action.
-        UndoAction undoAction;
-        undoAction.type = UndoAction::AddStroke;
-        undoAction.layerIndex = m_edgelessActiveLayerIndex;
-
-        for (const QRectF& srcRect : m_textSelection.highlightRects) {
-            if (srcRect.width() < 0.1 || srcRect.height() < 0.1) continue;
-
-            // OCR selection rects are already in document-space for edgeless
-            // (see loadOcrBlocksForPage edgeless branch).
-            QVector<VectorStroke> strokesForLine;
-            if (dotted) {
-                strokesForLine = createDottedUnderlineStrokes(srcRect, m_highlighterColor);
-            } else {
-                strokesForLine.append(createHighlightStroke(srcRect, m_highlighterColor, style));
-            }
-            if (strokesForLine.isEmpty()) continue;
-
-            for (const auto& s : strokesForLine) {
-                auto addedSegments = addStrokeToEdgelessTiles(s, m_edgelessActiveLayerIndex);
-                if (addedSegments.isEmpty()) continue;
-                undoAction.segments.reserve(undoAction.segments.size() + addedSegments.size());
-                for (const auto& pair : addedSegments) {
-                    UndoAction::StrokeSegment seg;
-                    seg.tileCoord = pair.first;
-                    seg.stroke    = pair.second;
-                    undoAction.segments.append(seg);
-                    createdIds.append(pair.second.id);
-                }
-            }
-        }
-
-        if (!undoAction.segments.isEmpty())
-            pushUndoAction(undoAction);
-
-        // Create LinkObject on the tile containing the first highlight rect.
-        if (!createdIds.isEmpty()) {
-            createLinkObjectForHighlight(pageIndex);
-        }
-
+    // Only OCR selections reach here in edgeless (PDF mode is disabled).
+    if (edgeless && !ocrSelection) {
         m_textSelection.clear();
-
-        if (!createdIds.isEmpty()) {
-            emit documentModified();
-            update();
-        }
-        return createdIds;
+        return nullptr;
     }
 
-    // ---------- Paged path ----------
-    Page* page = m_document->page(pageIndex);
-    if (!page) {
-        return createdIds;
+    if (!edgeless && !m_document->page(pageIndex)) {
+        return nullptr;
     }
 
-    // Get the active layer for this page
-    VectorLayer* layer = page->activeLayer();
-    if (!layer) {
-        return createdIds;
-    }
-
-    // Convert each highlight rect to one (Cover/Underline) or many (Dotted)
-    // strokes. PDF-source rects are in PDF coords (72 DPI) and need scaling
-    // to page coords (96 DPI). OCR-source rects are already in page coords.
-    //
-    // Every stroke is collected first and pushed as one grouped undo action
-    // below, so a multi-line highlight is a single Ctrl+Z.
-    QVector<VectorStroke> committedStrokes;
+    // Normalize the selection rects into the space the annotation stores:
+    // page coordinates when paged, document coordinates when edgeless. PDF text
+    // rects are 72 DPI and need scaling; OCR rects already match their
+    // container (see loadOcrBlocksForPage).
+    QVector<QRectF> regionRects;
+    regionRects.reserve(m_textSelection.highlightRects.size());
     for (const QRectF& srcRect : m_textSelection.highlightRects) {
         if (srcRect.width() < 0.1 || srcRect.height() < 0.1) {
             continue;
         }
-
-        QRectF pageRect;
         if (ocrSelection) {
-            pageRect = srcRect;
+            regionRects.append(srcRect);
         } else {
-            pageRect = QRectF(
+            regionRects.append(QRectF(
                 srcRect.x() * PDF_TO_PAGE_SCALE,
                 srcRect.y() * PDF_TO_PAGE_SCALE,
                 srcRect.width()  * PDF_TO_PAGE_SCALE,
-                srcRect.height() * PDF_TO_PAGE_SCALE
-            );
-        }
-
-        if (dotted) {
-            QVector<VectorStroke> dots = createDottedUnderlineStrokes(pageRect, m_highlighterColor);
-            if (dots.isEmpty()) continue;
-
-            for (const auto& d : dots) {
-                layer->addStroke(d);
-                committedStrokes.append(d);
-                createdIds.append(d.id);
-            }
-        } else {
-            VectorStroke stroke = createHighlightStroke(pageRect, m_highlighterColor, style);
-            layer->addStroke(stroke);
-            committedStrokes.append(stroke);
-            createdIds.append(stroke.id);
+                srcRect.height() * PDF_TO_PAGE_SCALE));
         }
     }
 
-    if (!committedStrokes.isEmpty()) {
-        pushPageStrokesUndo(pageIndex, UndoAction::AddStroke, committedStrokes,
-                            page->activeLayerIndex);
+    if (regionRects.isEmpty()) {
+        m_textSelection.clear();
+        return nullptr;
     }
 
-    // Invalidate stroke cache for this page
-    layer->invalidateStrokeCache();
-
-    // Mark page dirty for lazy save
-    if (!createdIds.isEmpty()) {
-        m_document->markPageDirty(pageIndex);
-    }
-
-    // Create LinkObject alongside highlight strokes
-    if (!createdIds.isEmpty() && !m_textSelection.highlightRects.isEmpty()) {
-        createLinkObjectForHighlight(pageIndex);
-    }
+    // No ink is emitted: the annotation owns the geometry, so the entire commit
+    // is one ObjectInsert entry and undo can never leave half a highlight
+    // behind.
+    LinkObject* annotation = createLinkObjectForHighlight(pageIndex, regionRects);
 
     // Clear the text selection
     m_textSelection.clear();
 
-    if (!createdIds.isEmpty()) {
+    if (annotation) {
         emit documentModified();
+        update();
     }
 
 #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "Created" << createdIds.size() << "highlight strokes on page" << pageIndex;
+    qDebug() << "Committed highlight annotation with" << regionRects.size()
+             << "rects on page" << pageIndex;
 #endif
 
-    return createdIds;
+    return annotation;
 }
 
 void DocumentViewport::copySelectedTextToClipboard()

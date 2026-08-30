@@ -2549,8 +2549,8 @@ public:
      * snapshot, and hiding for anything that is not a single LinkObject.
      *
      * Also covers the two behaviours that make the bar reachable after a
-     * highlight: the commit selects its own annotation, and it collapses to two
-     * undo entries instead of one per highlighted line.
+     * highlight: the commit selects its own annotation, and because the mark
+     * and its slots are one record the whole commit is a single undo entry.
      */
     static bool testLinkObjectBar() {
         printf("  testLinkObjectBar... ");
@@ -2680,8 +2680,8 @@ public:
             || appearanceSpy.count() != 2)
             return fail("viewport link handlers did not apply or notify");
 
-        // A 3-line highlight is one Ctrl+Z for the strokes and one for the
-        // annotation, not one per line.
+        // A multi-line highlight is a single record, so a single Ctrl+Z, and it
+        // emits no ink at all.
         viewport.deselectAllObjects();
         viewport.m_undoStack.clear();
         viewport.m_redoStack.clear();
@@ -2699,11 +2699,36 @@ public:
             QRectF(100.0, 420.0, 200.0, 14.0),
             QRectF(100.0, 440.0, 200.0, 14.0)
         };
-        const QVector<QString> created = viewport.createHighlightStrokes();
-        if (created.size() != 3)
-            return fail("cover highlight did not make one stroke per line");
-        if (viewport.m_undoStack.size() != 2)
-            return fail("highlight commit did not collapse to 2 undo entries");
+        const int strokesBefore =
+            page->activeLayer() ? page->activeLayer()->strokes().size() : -1;
+        LinkObject* annotation = viewport.commitHighlightAnnotation();
+        if (!annotation)
+            return fail("cover highlight did not commit an annotation");
+        if (page->activeLayer()
+            && page->activeLayer()->strokes().size() != strokesBefore)
+            return fail("highlight commit still emitted ink");
+        if (viewport.m_undoStack.size() != 1)
+            return fail("highlight commit was not a single undo entry");
+
+        // position/size are the region bounding box, which is what makes
+        // Document::maxObjectExtent cover a multi-tile highlight.
+        if (annotation->region.rects.size() != 3)
+            return fail("annotation did not adopt one rect per line");
+        if (annotation->position != QPointF(100.0, 400.0)
+            || annotation->size != QSizeF(200.0, 54.0))
+            return fail("annotation bounds are not the region bounding box");
+        if (annotation->region.rects.first() != QRectF(0.0, 0.0, 200.0, 14.0))
+            return fail("region rects are not object-local");
+        if (annotation->region.style != HighlightRegion::Style::Cover
+            || annotation->region.sourceRange.source
+                   != HighlightRegion::Source::Ocr)
+            return fail("annotation did not record style and selection source");
+        if (annotation->region.sourceRange.pageUuid != page->uuid)
+            return fail("annotation did not record its page uuid");
+        if (annotation->descriptionUserEdited)
+            return fail("auto-derived description was marked user-edited");
+        if (viewport.m_document->maxObjectExtent() < 200)
+            return fail("region growth did not widen the object extent");
 
         if (viewport.m_selectedObjects.size() != 1
             || viewport.m_selectedObjects.first()->type()
@@ -2714,11 +2739,293 @@ public:
             return fail("highlight commit did not surface the link bar");
 
         viewport.undo();
-        viewport.undo();
         if (!viewport.m_undoStack.isEmpty())
-            return fail("two undos did not unwind the highlight commit");
+            return fail("one undo did not unwind the highlight commit");
 
         viewport.setDocument(nullptr);
+        printf("PASSED\n");
+        return true;
+    }
+
+    /**
+     * @brief The annotation owns its highlight, so its geometry is the mark.
+     *
+     * Covers the consequences of that: the page clamp must not pull a mark off
+     * its text, the region rather than a 24x24 icon is the hit target (including
+     * across edgeless tiles, which relies on maxObjectExtent), handles are not
+     * offered for something that cannot be resized, the scroll-bar filter reads
+     * `descriptionUserEdited` rather than mere non-emptiness, and a
+     * cross-notebook page copy remaps or stales the source range without ever
+     * dropping the rects.
+     */
+    static bool testHighlightAnnotationGeometry() {
+        printf("  testHighlightAnnotationGeometry... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto commitOcrHighlight = [](DocumentViewport& vp, int pageIndex,
+                                     const QVector<QRectF>& rects,
+                                     const QString& text) -> LinkObject* {
+            vp.m_textSelection.clear();
+            vp.m_textSelection.source =
+                DocumentViewport::TextSelection::Source::Ocr;
+            vp.m_textSelection.pageIndex = pageIndex;
+            vp.m_textSelection.startBoxIndex = 0;
+            vp.m_textSelection.startCharIndex = 0;
+            vp.m_textSelection.endBoxIndex = 0;
+            vp.m_textSelection.endCharIndex = text.size();
+            vp.m_textSelection.selectedText = text;
+            vp.m_textSelection.highlightRects = rects;
+            return vp.commitHighlightAnnotation();
+        };
+
+        // ===== Paged: the mark stays on its text =====
+        {
+            auto doc = Document::createNew("Highlight geometry");
+            DocumentViewport viewport;
+            viewport.resize(1100, 820);
+            viewport.setDocument(doc.get());
+            viewport.setCurrentTool(ToolType::Highlighter);
+            viewport.m_autoHighlightStyle =
+                DocumentViewport::HighlightStyle::Underline;
+            Page* page = doc->page(0);
+            if (!page)
+                return fail("missing highlight test page");
+
+            // Text hugging the left edge: the badge would land at x = -26, and
+            // clamping the object to the page would shove the whole mark right,
+            // off the words it annotates.
+            LinkObject* edgeMark = commitOcrHighlight(
+                viewport, 0, {QRectF(2.0, 40.0, 300.0, 14.0)},
+                QStringLiteral("flush left"));
+            if (!edgeMark)
+                return fail("left-edge highlight did not commit");
+            if (edgeMark->position != QPointF(2.0, 40.0))
+                return fail("page clamping dragged the mark off its text");
+            if (edgeMark->iconRect().left() >= 0.0)
+                return fail("badge should be free to sit in the page margin");
+
+            // A page-wide mark is the case clampAxis() would have centred.
+            const QSizeF pageSize = doc->pageSizeAt(0);
+            LinkObject* wideMark = commitOcrHighlight(
+                viewport, 0,
+                {QRectF(0.0, 100.0, pageSize.width() + 40.0, 14.0)},
+                QStringLiteral("wider than the page"));
+            if (!wideMark || wideMark->position != QPointF(0.0, 100.0))
+                return fail("an over-wide mark was re-centred by the clamp");
+
+            // Selected annotations offer no handles: resize has always been a
+            // no-op for them, and rotating text rects is meaningless.
+            viewport.setCurrentTool(ToolType::ObjectSelect);
+            viewport.selectObject(edgeMark, false);
+            const QRectF bounds = viewport.objectBoundsInViewport(edgeMark);
+            if (bounds.isEmpty())
+                return fail("selected annotation had no viewport bounds");
+            for (const QPointF& corner : {bounds.topLeft(), bounds.topRight(),
+                                          bounds.bottomLeft(),
+                                          bounds.bottomRight()}) {
+                if (viewport.objectHandleAtPoint(corner)
+                    != DocumentViewport::HandleHit::None)
+                    return fail("annotation offered a resize handle");
+            }
+            if (viewport.objectHandleAtPoint(
+                    QPointF(bounds.center().x(),
+                            bounds.top() - DocumentViewport::ROTATE_HANDLE_OFFSET))
+                != DocumentViewport::HandleHit::None)
+                return fail("annotation offered a rotation handle");
+
+            // The mark is the hit target, not its bounding box. A two-line
+            // selection has a gap inside the box that must not respond, which a
+            // single-line mark could not distinguish.
+            viewport.setCurrentTool(ToolType::Highlighter);
+            LinkObject* twoLine = commitOcrHighlight(
+                viewport, 0,
+                {QRectF(60.0, 200.0, 200.0, 14.0),
+                 QRectF(60.0, 230.0, 200.0, 14.0)},
+                QStringLiteral("two lines"));
+            if (!twoLine)
+                return fail("two-line highlight did not commit");
+            viewport.setCurrentTool(ToolType::ObjectSelect);
+            viewport.deselectAllObjects();
+
+            const QPointF pageOrigin = viewport.pagePosition(0);
+            if (viewport.objectAtPoint(pageOrigin + QPointF(150.0, 206.0))
+                != twoLine)
+                return fail("a tap on the highlight body did not find it");
+            if (viewport.objectAtPoint(pageOrigin + QPointF(150.0, 236.0))
+                != twoLine)
+                return fail("a tap on the second line did not find it");
+            if (viewport.objectAtPoint(pageOrigin + QPointF(150.0, 222.0))
+                == twoLine)
+                return fail("the gap between two lines was still a hit target");
+            if (viewport.objectAtPoint(pageOrigin + QPointF(150.0, 260.0))
+                == twoLine)
+                return fail("a tap below the mark still hit the annotation");
+
+            // Scroll-bar markers: an auto-derived description is not content,
+            // but one the user typed is.
+            if (!doc->pageLinkMarkers().isEmpty())
+                return fail("auto-described highlights ticked the scroll bar");
+            viewport.selectObject(edgeMark, false);
+            viewport.setSelectedLinkDescription(QStringLiteral("mine"));
+            if (!edgeMark->descriptionUserEdited)
+                return fail("typing a description did not record the edit");
+            if (doc->pageLinkMarkers().size() != 1)
+                return fail("a user-written description produced no marker");
+            viewport.setSelectedLinkDescription(QString());
+            if (edgeMark->descriptionUserEdited
+                || !doc->pageLinkMarkers().isEmpty())
+                return fail("clearing the description did not give up the marker");
+
+            viewport.setDocument(nullptr);
+        }
+
+        // ===== Edgeless: a mark spanning two tiles stays tappable =====
+        {
+            auto doc = Document::createNew("Edgeless highlight",
+                                           Document::Mode::Edgeless);
+            DocumentViewport viewport;
+            viewport.resize(1100, 820);
+            viewport.setDocument(doc.get());
+            viewport.setCurrentTool(ToolType::Highlighter);
+            viewport.m_autoHighlightStyle =
+                DocumentViewport::HighlightStyle::Cover;
+
+            // Starts in tile (0,0) and runs well past its 1024pt right edge.
+            const qreal tileSize = Document::EDGELESS_TILE_SIZE;
+            const QRectF wide(900.0, 300.0, tileSize, 20.0);
+            LinkObject* mark = commitOcrHighlight(viewport, 0, {wide},
+                                                 QStringLiteral("two tiles"));
+            if (!mark)
+                return fail("edgeless highlight did not commit");
+            if (mark->position != QPointF(900.0, 300.0))
+                return fail("edgeless mark was not rebased onto its owner tile");
+            if (doc->maxObjectExtent() < static_cast<int>(tileSize))
+                return fail("edgeless region did not widen the object extent");
+
+            // The far end lives in the neighbouring tile. objectAtPoint() only
+            // reaches it because it widens its tile sweep by maxObjectExtent().
+            const QPointF farEnd(wide.right() - 10.0, wide.center().y());
+            if (doc->tileCoordForPoint(farEnd)
+                == doc->tileCoordForPoint(wide.topLeft()))
+                return fail("test rect did not actually span two tiles");
+            if (viewport.objectAtPoint(farEnd) != mark)
+                return fail("the far end of a tile-spanning mark was untappable");
+
+            viewport.setDocument(nullptr);
+        }
+
+        // ===== Page copy: the range is remapped, or staled but never dropped =====
+        {
+            auto srcDoc = Document::createNew("Copy source");
+            Page* srcPage = srcDoc->page(0);
+            if (!srcPage)
+                return fail("missing copy-source page");
+
+            auto makeMark = [](const QString& rangeUuid) {
+                auto mark = std::make_unique<LinkObject>();
+                mark->setRegionFromPageRects({QRectF(50, 60, 120, 14)});
+                mark->region.style = HighlightRegion::Style::Cover;
+                mark->region.color = QColor(255, 255, 0, 128);
+                mark->region.sourceRange.pageUuid = rangeUuid;
+                mark->region.sourceRange.startBoxIndex = 1;
+                mark->region.sourceRange.endBoxIndex = 1;
+                return mark;
+            };
+
+            auto inSet = makeMark(srcPage->uuid);
+            const QString inSetId = inSet->id;
+            srcPage->addObject(std::move(inSet));
+
+            auto outOfSet = makeMark(
+                QUuid::createUuid().toString(QUuid::WithoutBraces));
+            const QString outOfSetId = outOfSet->id;
+            srcPage->addObject(std::move(outOfSet));
+
+            auto destDoc = Document::createNew("Copy destination");
+            const PageImportResult result =
+                destDoc->importPagesFrom(srcDoc.get(), {srcPage->uuid},
+                                         destDoc->pageCount());
+            if (result.destStartIndex < 0)
+                return fail("page import did not insert anything");
+
+            Page* copied = destDoc->page(result.destStartIndex);
+            if (!copied)
+                return fail("imported page did not load");
+
+            auto findMark = [&](const QString& oldId) -> LinkObject* {
+                const QString newId = result.objectIdMap.value(oldId);
+                if (newId.isEmpty()) return nullptr;
+                return dynamic_cast<LinkObject*>(copied->objectById(newId));
+            };
+
+            LinkObject* copiedInSet = findMark(inSetId);
+            if (!copiedInSet)
+                return fail("in-set annotation did not survive the copy");
+            if (copiedInSet->region.rects.size() != 1)
+                return fail("copy dropped the region rects");
+            if (copiedInSet->region.sourceRange.pageUuid != copied->uuid)
+                return fail("in-set source range was not remapped");
+            if (copiedInSet->region.sourceRange.stale)
+                return fail("a remappable range was needlessly staled");
+
+            LinkObject* copiedOutOfSet = findMark(outOfSetId);
+            if (!copiedOutOfSet)
+                return fail("out-of-set annotation did not survive the copy");
+            if (copiedOutOfSet->region.rects.size() != 1)
+                return fail("an unresolvable range dropped the highlight");
+            if (!copiedOutOfSet->region.sourceRange.stale
+                || copiedOutOfSet->region.sourceRange.isUsable())
+                return fail("out-of-set source range was not staled");
+        }
+
+        // ===== The disk-peek marker filter reads the same flag =====
+        {
+            QTemporaryDir dir;
+            if (!dir.isValid())
+                return fail("could not create a bundle directory");
+
+            auto doc = Document::createNew("Peek markers");
+            Page* page = doc->page(0);
+            if (!page)
+                return fail("missing peek test page");
+
+            auto bare = std::make_unique<LinkObject>();
+            bare->setRegionFromPageRects({QRectF(40, 50, 100, 14)});
+            bare->description = QStringLiteral("auto-derived");
+            page->addObject(std::move(bare));
+
+            const QString bundle = dir.filePath(QStringLiteral("peek.snb"));
+            if (!doc->saveBundle(bundle))
+                return fail("could not save the peek bundle");
+            doc->evictPage(0);
+            if (doc->isPageLoaded(0))
+                return fail("page stayed loaded, so the peek path is untested");
+            if (!doc->pageLinkMarkers().isEmpty())
+                return fail("disk peek ticked the bar for an auto-described mark");
+
+            // Same annotation, now with the flag set on disk.
+            Page* reloaded = doc->page(0);
+            if (!reloaded)
+                return fail("could not reload the peek page");
+            for (const auto& object : reloaded->objects) {
+                if (auto* link = dynamic_cast<LinkObject*>(object.get()))
+                    link->descriptionUserEdited = true;
+            }
+            doc->markPageDirty(0);
+            if (!doc->saveBundle(bundle))
+                return fail("could not re-save the peek bundle");
+            doc->evictPage(0);
+            doc->refreshLinkOutlineFor(0);
+            if (doc->isPageLoaded(0))
+                return fail("page stayed loaded on the second peek");
+            if (doc->pageLinkMarkers().size() != 1)
+                return fail("disk peek ignored descriptionUserEdited");
+        }
+
         printf("PASSED\n");
         return true;
     }
@@ -3074,6 +3381,8 @@ public:
                 "testTextOverlayLifecycle");
         runTest(testLinkObjectBar,
                 "testLinkObjectBar");
+        runTest(testHighlightAnnotationGeometry,
+                "testHighlightAnnotationGeometry");
         runTest(testOcrTextBoxConversion,
                 "testOcrTextBoxConversion");
         

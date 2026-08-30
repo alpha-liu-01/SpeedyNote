@@ -89,6 +89,14 @@ void LinkObject::render(QPainter& painter, qreal zoom) const
 {
     if (!visible) return;
     
+    if (!region.isEmpty()) {
+        renderRegion(painter, zoom);
+    }
+    
+    if (!shouldShowIcon()) {
+        return;
+    }
+    
     ensureIconLoaded();
     
     // Get device pixel ratio for high DPI support
@@ -104,8 +112,75 @@ void LinkObject::render(QPainter& painter, qreal zoom) const
     QPixmap icon = tintedIcon(iconColor, physicalSize);
     icon.setDevicePixelRatio(dpr);  // Tell Qt this pixmap is at high DPI
     
-    QPointF drawPos(position.x() * zoom, position.y() * zoom);
+    const QPointF iconTopLeft = iconRect().topLeft();
+    QPointF drawPos(iconTopLeft.x() * zoom, iconTopLeft.y() * zoom);
     painter.drawPixmap(drawPos.toPoint(), icon);
+}
+
+void LinkObject::renderRegion(QPainter& painter, qreal zoom) const
+{
+    if (region.style == HighlightRegion::Style::None || !region.color.isValid()) {
+        return;
+    }
+    
+    // Thicknesses are derived in unzoomed document units, matching the
+    // baseThickness the retired highlight strokes used, then scaled once.
+    auto underlineThickness = [](const QRectF& r) {
+        return qMax(qreal(1.5), r.height() * qreal(0.10));
+    };
+    
+    painter.save();
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(region.color);
+    
+    for (const QRectF& localRect : region.rects) {
+        if (localRect.width() < 0.1 || localRect.height() < 0.1) continue;
+        
+        // Object-local -> page/tile space, then to the painter's scaled space.
+        const QRectF pageRect = localRect.translated(position);
+        const QRectF r(pageRect.x() * zoom, pageRect.y() * zoom,
+                       pageRect.width() * zoom, pageRect.height() * zoom);
+        
+        switch (region.style) {
+            case HighlightRegion::Style::Cover:
+                // Marker covering the whole line height.
+                painter.drawRect(r);
+                break;
+            
+            case HighlightRegion::Style::Underline: {
+                const qreal t = underlineThickness(localRect) * zoom;
+                painter.drawRect(QRectF(r.left(), r.bottom() - t, r.width(), t));
+                break;
+            }
+            
+            case HighlightRegion::Style::DottedUnderline: {
+                // Dot diameter scales with text height; centre-to-centre spacing
+                // is 3x the diameter (dot plus a two-dot gap).
+                const qreal t = underlineThickness(localRect) * zoom;
+                const qreal step = t * qreal(3.0);
+                if (step <= 0.0) break;
+                
+                const qreal y = r.bottom() - t * qreal(0.5);
+                const qreal firstX = r.left() + t * qreal(0.5);
+                const qreal lastX = r.right() - t * qreal(0.5);
+                if (lastX < firstX) break;
+                
+                const bool wasAntialiased =
+                    painter.renderHints().testFlag(QPainter::Antialiasing);
+                painter.setRenderHint(QPainter::Antialiasing, true);
+                for (qreal x = firstX; x <= lastX; x += step) {
+                    painter.drawEllipse(QPointF(x, y), t * 0.5, t * 0.5);
+                }
+                painter.setRenderHint(QPainter::Antialiasing, wasAntialiased);
+                break;
+            }
+            
+            case HighlightRegion::Style::None:
+                break;
+        }
+    }
+    
+    painter.restore();
 }
 
 void LinkObject::ensureIconLoaded() const
@@ -171,9 +246,71 @@ QPixmap LinkObject::tintedIcon(const QColor& color, qreal size) const
 
 bool LinkObject::containsPoint(const QPointF& pt) const
 {
-    // Use icon bounds for hit testing
-    QRectF iconRect(position, QSizeF(ICON_SIZE, ICON_SIZE));
-    return iconRect.contains(pt);
+    // The highlight body is the primary handle once a region exists; the badge
+    // stays hit-testable so an annotation is never unreachable, and an empty
+    // region reduces this to the historical 24x24 icon test.
+    if (!region.isEmpty() && region.containsLocalPoint(pt - position)) {
+        return true;
+    }
+    return shouldShowIcon() && iconRect().contains(pt);
+}
+
+void LinkObject::setRegionFromPageRects(const QVector<QRectF>& pageRects)
+{
+    region.rects.clear();
+
+    if (pageRects.isEmpty()) {
+        region.sourceRange = HighlightRegion::SourceRange();
+        size = QSizeF(ICON_SIZE, ICON_SIZE);
+        return;
+    }
+
+    QRectF bounds;
+    for (const QRectF& r : pageRects) {
+        bounds = bounds.isNull() ? r : bounds.united(r);
+    }
+
+    // Rects are stored object-local so a later move is a single position change.
+    const QPointF origin = bounds.topLeft();
+    region.rects.reserve(pageRects.size());
+    for (const QRectF& r : pageRects) {
+        region.rects.append(r.translated(-origin));
+    }
+
+    position = origin;
+    size = bounds.size();
+}
+
+QVector<QRectF> LinkObject::regionRectsInPageSpace() const
+{
+    QVector<QRectF> out;
+    out.reserve(region.rects.size());
+    for (const QRectF& r : region.rects) {
+        out.append(r.translated(position));
+    }
+    return out;
+}
+
+QRectF LinkObject::iconRect() const
+{
+    // Empty region: position is the icon anchor (pre-region behaviour).
+    // Region present: position anchors the highlight, so the badge goes in the
+    // margin beside it.
+    const QPointF topLeft = region.isEmpty()
+                                ? position
+                                : position - QPointF(ICON_SIZE + ICON_GAP, 0.0);
+    return QRectF(topLeft, QSizeF(ICON_SIZE, ICON_SIZE));
+}
+
+bool LinkObject::shouldShowIcon() const
+{
+    // An empty-region annotation has no other handle, so its badge is
+    // unconditional -- which is also why no icon disappears from a document
+    // saved before regions existed.
+    if (region.isEmpty()) {
+        return true;
+    }
+    return filledSlotCount() > 0 || descriptionUserEdited;
 }
 
 QJsonObject LinkObject::toJson() const
@@ -182,12 +319,21 @@ QJsonObject LinkObject::toJson() const
     
     obj["description"] = description;
     obj["iconColor"] = iconColor.name(QColor::HexArgb);
+    if (descriptionUserEdited) {
+        obj["descriptionUserEdited"] = true;
+    }
     
     QJsonArray slotsArray;
     for (int i = 0; i < SLOT_COUNT; i++) {
         slotsArray.append(linkSlots[i].toJson());
     }
     obj["slots"] = slotsArray;
+    
+    // Omitted when empty so a standalone link icon serializes exactly as it did
+    // before regions existed.
+    if (!region.isEmpty()) {
+        obj["region"] = region.toJson();
+    }
     
     return obj;
 }
@@ -201,10 +347,17 @@ void LinkObject::loadFromJson(const QJsonObject& obj)
     if (!iconColor.isValid()) {
         iconColor = QColor(100, 100, 100, 180);
     }
+    descriptionUserEdited = obj["descriptionUserEdited"].toBool(false);
     
     QJsonArray slotsArray = obj["slots"].toArray();
     for (int i = 0; i < SLOT_COUNT && i < slotsArray.size(); i++) {
         linkSlots[i] = LinkSlot::fromJson(slotsArray[i].toObject());
+    }
+    
+    if (obj.contains("region")) {
+        region = HighlightRegion::fromJson(obj["region"].toObject());
+    } else {
+        region = HighlightRegion();
     }
 }
 
@@ -235,6 +388,9 @@ std::unique_ptr<LinkObject> LinkObject::cloneWithBackLink(const QString& sourceP
     auto copy = std::make_unique<LinkObject>();
     copy->description = description;
     copy->iconColor = iconColor;
+    copy->descriptionUserEdited = descriptionUserEdited;
+    copy->region = region;
+    copy->size = size;
     // Note: position will be set by caller
     
     // Auto-fill slot 0 with back-link to original position (paged mode)
@@ -251,6 +407,9 @@ std::unique_ptr<LinkObject> LinkObject::cloneWithBackLinkEdgeless(int tileX, int
     auto copy = std::make_unique<LinkObject>();
     copy->description = description;
     copy->iconColor = iconColor;
+    copy->descriptionUserEdited = descriptionUserEdited;
+    copy->region = region;
+    copy->size = size;
     // Note: position will be set by caller
     
     // Auto-fill slot 0 with back-link to original position (edgeless mode)

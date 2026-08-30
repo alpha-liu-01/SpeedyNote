@@ -29,6 +29,7 @@ enum class TouchGestureMode {
 #include "Page.h"
 #include "ToolType.h"
 #include "ViewportPerfMonitor.h"
+#include "../objects/HighlightRegion.h"
 #include "../objects/TextBoxObject.h"
 #include "../strokes/VectorStroke.h"
 #include "../pdf/PdfProvider.h"
@@ -1710,14 +1711,29 @@ public:
                                     const QRectF& anchorViewportRect);
 
     /**
-     * @brief Create a LinkObject for a text highlight.
-     * @param pageIndex Index of the page containing the highlight.
-     * 
-     * Phase C.3.2: Creates a LinkObject positioned at the start of the
-     * first highlight rect, with description set to the selected text
-     * and icon color matching the highlighter color.
+     * @brief Create the annotation that owns a text highlight.
+     * @param pageIndex   Index of the page the selection came from.
+     * @param regionRects Per-line rects, in page coordinates for paged mode or
+     *                    document coordinates for edgeless mode.
+     * @return The created annotation, or nullptr on failure.
+     *
+     * The annotation's `position`/`size` become the region's bounding box, so
+     * Document::maxObjectExtent() covers a highlight that spans several
+     * edgeless tiles, and the icon becomes a badge beside the mark. The
+     * description is auto-derived from the selected text and therefore leaves
+     * `descriptionUserEdited` false.
      */
-    void createLinkObjectForHighlight(int pageIndex);
+    LinkObject* createLinkObjectForHighlight(int pageIndex,
+                                             const QVector<QRectF>& regionRects);
+
+    /**
+     * @brief Build the source range describing the current text selection.
+     *
+     * Stored alongside the region rects as the *edit* affordance for Adjust
+     * mode. The rects remain the rendering truth, so this range is allowed to
+     * be absent or stale.
+     */
+    HighlightRegion::SourceRange buildHighlightSourceRange(int pageIndex) const;
     
     /**
      * @brief Get the list of pages currently visible in the viewport.
@@ -3983,52 +3999,21 @@ private:
     void renderSearchMatchesOverlayEdgeless(QPainter& painter);
     
     /**
-     * @brief Create a marker-style stroke for a highlight rectangle.
+     * @brief Commit the current text selection as a highlight annotation.
      *
-     * For HighlightStyle::Cover, produces a horizontal stroke through the
-     * center of the rectangle with thickness equal to the rectangle height
-     * (original cover-the-text behavior). For HighlightStyle::Underline,
-     * produces a thin horizontal stroke along the bottom of the rectangle.
+     * A highlight is no longer ink. The selection's per-line rects are
+     * converted into the owning container's coordinate space and handed to
+     * createLinkObjectForHighlight(), which stores them as the annotation's
+     * HighlightRegion. Because the mark and its slots are one record, the
+     * whole commit is a single ObjectInsert undo entry, and neither half can be
+     * removed without the other.
      *
-     * HighlightStyle::DottedUnderline is handled separately by
-     * createDottedUnderlineStrokes() since it produces multiple strokes.
+     * Clears the text selection either way.
      *
-     * @param rect  Rectangle in page coordinates (96 DPI).
-     * @param color Highlight color (typically m_highlighterColor).
-     * @param style Either Cover or Underline. (DottedUnderline is routed
-     *              through createDottedUnderlineStrokes() instead.)
-     * @return VectorStroke configured as a horizontal marker.
+     * @return The created annotation, or nullptr when nothing was committed
+     *         (no valid selection, style None, or edgeless PDF selection).
      */
-    VectorStroke createHighlightStroke(const QRectF& rect,
-                                       const QColor& color,
-                                       HighlightStyle style) const;
-
-    /**
-     * @brief Create the sequence of dot strokes that make up a dotted underline.
-     *
-     * Dots are evenly spaced along the bottom edge of @p rect. Dot thickness
-     * scales with @p rect height (~10%), and center-to-center spacing is
-     * 3x the thickness. Each dot is an ordinary single-point `VectorStroke`,
-     * which keeps the renderer, serializer, and exporter unchanged.
-     *
-     * @param rect  Rectangle in page coordinates (96 DPI).
-     * @param color Highlight color.
-     * @return Vector of dot strokes (possibly empty if rect is too narrow).
-     */
-    QVector<VectorStroke> createDottedUnderlineStrokes(const QRectF& rect,
-                                                       const QColor& color) const;
-    
-    /**
-     * @brief Create highlight strokes from current text selection (Phase B.3).
-     * 
-     * Converts each rectangle in m_textSelection.highlightRects to a VectorStroke
-     * and adds it to the current layer on the selection's page.
-     * Each stroke gets its own undo action (can be undone individually).
-     * Clears the text selection after creating strokes.
-     * 
-     * @return List of created stroke IDs.
-     */
-    QVector<QString> createHighlightStrokes();
+    LinkObject* commitHighlightAnnotation();
     
     /**
      * @brief Update cursor based on Highlighter tool availability.
