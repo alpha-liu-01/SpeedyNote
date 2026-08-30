@@ -3,7 +3,7 @@
 
 ### 准备工作
 
-- Macintosh (macOS 13+(?)), ARM64 或 x86-64
+- Macintosh (macOS 14+), ARM64 或 x86-64。brew不再支持macOS 13. 
 
 ---
 
@@ -17,12 +17,9 @@
 
 ```zsh
 brew install qt@6
-brew install poppler
+brew install mupdf
 
 ```
-##### 额外库
-
-由于 `poppler-qt6` 在 `brew` 中不可用，我自己编译了它，您可以在我们的 QQ 群或网站 `speedynote.org` 的社区页面找到。将这个 `poppler-qt6` 文件夹放入 `/opt/` 目录中。或者您可以运行 `build_poppler_qt6.sh` 脚本从源代码构建 poppler-qt6，它会自动放置在 /opt/ 目录下。
 
 ### 构建
 
@@ -30,6 +27,6 @@ brew install poppler
 
 ## 已知问题
 
-本文档可能无法反映 SpeedyNote 在基于 arm64 的 Mac 上的构建过程。GitHub 上提供的 dmg 文件仅适用于 x86-64 架构，因此可能无法在基于 ARM 的机器上运行。对于 Apple Silicon Mac 用户，我强烈建议您编译一个 arm64 原生二进制文件，步骤应该相似甚至相同。
+~~本文档可能无法反映 SpeedyNote 在基于 arm64 的 Mac 上的构建过程。GitHub 上提供的 dmg 文件仅适用于 x86-64 架构，因此可能无法在基于 ARM 的机器上运行。对于 Apple Silicon Mac 用户，我强烈建议您编译一个 arm64 原生二进制文件，步骤应该相似甚至相同。~~ SpeedyNote已经被确认可以在arm64的Mac上正常构建和运行。
 
 
