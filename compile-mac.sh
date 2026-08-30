@@ -17,7 +17,7 @@ NC='\033[0m' # No Color
 # Configuration
 PKGNAME="SpeedyNote"
 APP_BUNDLE="${PKGNAME}.app"
-MIN_MACOS_VERSION="12.0"
+MIN_MACOS_VERSION="14.0"
 
 # Command line options
 PACKAGE_ONLY=false
