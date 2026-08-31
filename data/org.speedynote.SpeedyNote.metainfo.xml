@@ -79,6 +79,21 @@
 
 
   <releases type="embedded">
+    <release version="1.6.0" date="2026-08-31">
+      <description>
+        <p>New Features:</p>
+        <ul>
+          <li>New LinkObject/Highlighter UX with region style selection, color override, and region selection.</li>
+          <li>New position link object feature to link to a specific position in a document.</li>
+          <li>Region outside of pages in paged mode now acts as the pan tool when any tool is selected.</li>
+        </ul>
+        <p>Bug Fixes and Improvements:</p>
+        <ul>
+          <li>Repositioned the LinkObjectBar to be more accessible and intuitive.</li>
+          <li>Repositioned the search button and the search bar for easier access.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.5.3" date="2026-08-28">
       <description>
         <p>New Features:</p>
