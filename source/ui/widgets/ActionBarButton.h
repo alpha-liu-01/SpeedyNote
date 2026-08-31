@@ -25,6 +25,10 @@ class ActionBarButton : public QWidget {
     Q_PROPERTY(bool enabled READ isEnabled WRITE setEnabled)
 
 public:
+    /// Fixed side length in logical pixels. Public so callers that must
+    /// reserve space for a button before creating it agree with sizeHint().
+    static constexpr int BUTTON_SIZE = 36;
+
     explicit ActionBarButton(QWidget* parent = nullptr);
     
     /**
@@ -138,7 +142,6 @@ private:
     bool m_pressed = false;
     bool m_hovered = false;
     
-    static constexpr int BUTTON_SIZE = 36;
     static constexpr int ICON_SIZE = 20;
 };
 

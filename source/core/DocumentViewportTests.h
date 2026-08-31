@@ -17,6 +17,7 @@
 #include "../ui/panels/InlineTextBoxEditor.h"
 #include "../ui/panels/LinkObjectBar.h"
 #include "../ui/panels/TextBoxFormatBar.h"
+#include "../ui/widgets/ActionBarButton.h"
 #include "../ui/widgets/ColorPresetButton.h"
 #include "../ui/widgets/LinkSlotButton.h"
 #include "../ui/widgets/ToggleButton.h"  // Contains SubToolbarToggle
@@ -2851,7 +2852,7 @@ public:
         viewport.show();
         QApplication::processEvents();
         viewport.updateLinkObjectBarGeometry();
-        if (!viewport.pointerOverTextOverlay(
+        if (!viewport.pointerOverViewportWidget(
                 QRectF(viewport.m_linkObjectBar->geometry()).center()))
             return fail("link bar area was not excluded from canvas input");
         viewport.hide();
@@ -4843,6 +4844,142 @@ public:
         return true;
     }
 
+    /**
+     * @brief The add-page button anchored under the last page.
+     *
+     * The load-bearing property is that the reserved band lives in
+     * totalContentSize() and not in the page layout cache: the cache is also
+     * pageTrackFraction()'s denominator, so putting the band there would drag
+     * every scroll bar accent and marker off its page.
+     */
+    static bool testAddPageButton() {
+        printf("  testAddPageButton... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+        auto close = [](qreal a, qreal b) { return qAbs(a - b) < 0.5; };
+
+        auto doc = Document::createNew("Add page button");
+        doc->addPage();
+        doc->addPage();
+
+        DocumentViewport viewport;
+        viewport.resize(900, 700);
+        // A child of an unshown parent is never isVisible(), and the stylus
+        // pass-through check below depends on visibility.
+        viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+        viewport.show();
+        QApplication::processEvents();
+        viewport.setDocument(doc.get());
+        viewport.setZoomLevel(1.0);
+        viewport.setLayoutMode(LayoutMode::SingleColumn);
+
+        if (!viewport.m_addPageButton || viewport.m_addPageButton->isHidden())
+            return fail("a paged document did not get an add-page button");
+
+        // ----- The reserved band -----
+        const qreal footprint =
+            2 * DocumentViewport::ADD_PAGE_BUTTON_GAP + ActionBarButton::BUTTON_SIZE;
+        const qreal pagesBottom = viewport.pageRect(doc->pageCount() - 1).bottom();
+        if (!close(viewport.totalContentSize().height(), pagesBottom + footprint))
+            return fail("the band is missing from the scroll extent at 1.0 zoom");
+
+        // Measured in viewport pixels, so it halves in document units when the
+        // zoom doubles and the button keeps fitting inside it.
+        viewport.setZoomLevel(2.0);
+        if (!close(viewport.totalContentSize().height(), pagesBottom + footprint / 2.0))
+            return fail("the band did not track zoom");
+        viewport.setZoomLevel(1.0);
+
+        // The regression the design exists to avoid: the band must not reach
+        // the layout cache, which is what page positions are measured against.
+        const qreal expectedTrack = viewport.pageRect(1).top() / pagesBottom;
+        if (!close(viewport.pageTrackFraction(1), expectedTrack))
+            return fail("the band leaked into pageTrackFraction");
+
+        // ----- Fully on screen at the scroll bar's maximum -----
+        // Without the band this is exactly where the button would be invisible.
+        const qreal viewHeight = viewport.height() / viewport.zoomLevel();
+        viewport.setPanOffset(
+            QPointF(0, viewport.totalContentSize().height() - viewHeight));
+        if (!viewport.rect().contains(viewport.m_addPageButton->geometry()))
+            return fail("the button is not fully visible at maximum scroll");
+
+        // ----- Placement, single column -----
+        auto expectedGeometry = [&](const QRectF& row) {
+            const QPointF anchor =
+                viewport.documentToViewport(QPointF(row.center().x(), row.bottom()));
+            const int size = ActionBarButton::BUTTON_SIZE;
+            return QRect(qRound(anchor.x()) - size / 2,
+                         qRound(anchor.y()) + DocumentViewport::ADD_PAGE_BUTTON_GAP,
+                         size, size);
+        };
+        const QRectF lastPage = viewport.pageRect(doc->pageCount() - 1);
+        if (viewport.m_addPageButton->geometry() != expectedGeometry(lastPage))
+            return fail("single column did not centre the button on the last page");
+
+        // ----- Placement, two column with an odd count -----
+        // Page index 2 is even, so it sits alone and the row is just that page.
+        viewport.setLayoutMode(LayoutMode::TwoColumn);
+        if (viewport.m_addPageButton->geometry()
+            != expectedGeometry(viewport.pageRect(2)))
+            return fail("a lone last page did not anchor the button to itself");
+
+        // ----- Placement, two column with an even count -----
+        // Page index 3 is the right half of a full row, so the row spans both.
+        doc->addPage();
+        viewport.notifyDocumentStructureChanged();
+        const QRectF spread = viewport.pageRect(2).united(viewport.pageRect(3));
+        if (viewport.m_addPageButton->geometry() != expectedGeometry(spread))
+            return fail("a full last row did not centre the button on the spread");
+        if (viewport.m_addPageButton->geometry()
+            == expectedGeometry(viewport.pageRect(3)))
+            return fail("the button anchored to the right page instead of the row");
+
+        // ----- Stylus pass-through -----
+        // A pen press over the button propagates up to the canvas, which has to
+        // leave it unhandled so Qt synthesizes a mouse event for the button.
+        if (!viewport.pointerOverViewportWidget(
+                QRectF(viewport.m_addPageButton->geometry()).center()))
+            return fail("the button area was not excluded from canvas input");
+
+        // ----- The request reaches the signal -----
+        QSignalSpy requested(&viewport, &DocumentViewport::addPageRequested);
+        ActionBarButton* button = viewport.m_addPageButton;
+        const QPointF centre(button->width() / 2.0, button->height() / 2.0);
+        QMouseEvent press(QEvent::MouseButtonPress, centre, centre,
+                          Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, centre, centre,
+                            Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(button, &press);
+        QApplication::sendEvent(button, &release);
+        if (requested.count() != 1)
+            return fail("clicking the button did not request a page");
+
+        // ----- Documents with nothing to append to -----
+        auto edgeless = Document::createNew("Edgeless", Document::Mode::Edgeless);
+        viewport.setDocument(edgeless.get());
+        if (!viewport.m_addPageButton->isHidden())
+            return fail("an edgeless document showed the add-page button");
+        if (viewport.addPageBandHeight() != 0.0)
+            return fail("an edgeless document reserved a band");
+
+        Document pageless;
+        viewport.setDocument(&pageless);
+        if (!viewport.m_addPageButton->isHidden())
+            return fail("a document with no pages showed the add-page button");
+
+        viewport.setDocument(nullptr);
+        if (!viewport.m_addPageButton->isHidden())
+            return fail("a viewport with no document showed the add-page button");
+
+        viewport.hide();
+        printf("PASSED\n");
+        return true;
+    }
+
     // ===== Run All Unit Tests =====
     
     static bool runUnitTests() {
@@ -4863,6 +5000,7 @@ public:
         runTest(testViewportCreation, "testViewportCreation");
         runTest(testZoomBounds, "testZoomBounds");
         runTest(testLayoutEngine, "testLayoutEngine");
+        runTest(testAddPageButton, "testAddPageButton");
         runTest(testCoordinateTransforms, "testCoordinateTransforms");
         runTest(testPageHitDetection, "testPageHitDetection");
         runTest(testVisiblePages, "testVisiblePages");

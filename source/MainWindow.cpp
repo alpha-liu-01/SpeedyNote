@@ -468,10 +468,10 @@ MainWindow::MainWindow(QWidget *parent)
     auto wireViewportTransferSignals = [this]() {
         m_splitViewManager->forEachTabManager([this](TabManager* tm, SplitViewManager::Pane){
             connect(tm, &TabManager::viewportCreated,
-                    this, &MainWindow::connectViewportTransferSignal,
+                    this, &MainWindow::connectPerViewportSignals,
                     Qt::UniqueConnection);
             for (int i = 0; i < tm->tabCount(); ++i) {
-                connectViewportTransferSignal(tm->viewportAt(i));
+                connectPerViewportSignals(tm->viewportAt(i));
             }
         });
     };
@@ -4083,55 +4083,77 @@ void MainWindow::loadDocument()
     }
 }
 
+bool MainWindow::appendPageToViewport(DocumentViewport* viewport)
+{
+    if (!viewport) {
+        return false;
+    }
+    Document* doc = viewport->document();
+    if (!doc) {
+        return false;
+    }
+
+    if (!doc->addPage()) {
+        return false;
+    }
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "appendPageToViewport: Added page" << doc->pageCount()
+             << "to document" << doc->name;
+#endif
+
+    // Invalidates the layout cache, repositions the add-page button and repaints.
+    viewport->notifyDocumentStructureChanged();
+
+    // Mark the owning tab, in whichever pane it lives. Resolving through the
+    // active tab manager instead would mark the wrong tab when the request came
+    // from a background pane's viewport.
+    if (m_splitViewManager) {
+        m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane) {
+            for (int i = 0; i < tm->tabCount(); ++i) {
+                if (tm->viewportAt(i) == viewport) {
+                    tm->markTabModified(i, true);
+                    return;
+                }
+            }
+        });
+    }
+
+    // The page panel is bound to the active document, so it is only this
+    // document's panel when this viewport is the active one.
+    if (viewport == currentViewport()) {
+        notifyPageStructureChanged(doc);
+    }
+
+    // The scroll bar's page map gained a row. Targeted at this viewport so it
+    // refreshes even when it sits in the inactive pane.
+    if (m_splitViewManager) {
+        m_splitViewManager->updateScrollBarDocumentMap(viewport);
+    }
+
+    // No outline work, unlike a cross-document import: a blank appended page
+    // introduces no PDF source and makes no absent outline target reachable,
+    // and updateOutlinePanelForDocument() is an uncached TOC parse.
+    return true;
+}
+
 void MainWindow::addPageToDocument()
 {
-    // Phase doc-1.0: Add new page at end of document
-    // Required for multi-page save/load testing
-    
+    // Phase doc-1.0: Add new page at end of document (Ctrl+Shift+A)
     if (!tabManager()) {
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "addPageToDocument: No tab manager";
 #endif
         return;
     }
-    
-    DocumentViewport* viewport = tabManager()->currentViewport();
-    if (!viewport) {
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "addPageToDocument: No current viewport";
-#endif
-        return;
-    }
-    
-    Document* doc = viewport->document();
-    if (!doc) {
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "addPageToDocument: No document in viewport";
-#endif
-        return;
-    }
-    
-    // Add page at end
-    Page* newPage = doc->addPage();
-    if (newPage) {
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "addPageToDocument: Added page" << doc->pageCount() 
-                 << "to document" << doc->name;
-#endif
-    
-        // CRITICAL: Notify viewport that document structure changed
-        // This invalidates layout cache and triggers repaint
-        viewport->notifyDocumentStructureChanged();
-        
-        // Mark tab as modified
-        int currentIndex = tabManager()->currentIndex();
-        if (currentIndex >= 0) {
-            tabManager()->markTabModified(currentIndex, true);
-        }
-        
-        // Update PagePanel and action bar
-        notifyPageStructureChanged(doc);
-    }
+    appendPageToViewport(tabManager()->currentViewport());
+}
+
+void MainWindow::handleAddPageRequest()
+{
+    // The button lives on a specific viewport, which in split view need not be
+    // the active one, so the request is resolved from the sender rather than
+    // from the active pane.
+    appendPageToViewport(qobject_cast<DocumentViewport*>(sender()));
 }
 
 void MainWindow::insertPageInDocument()
@@ -4442,7 +4464,7 @@ void MainWindow::copyPagesToOtherDocument(const QList<int>& srcRows)
 // Plan D2: cross-document page-transfer drag-and-drop
 // ============================================================================
 
-void MainWindow::connectViewportTransferSignal(DocumentViewport* vp)
+void MainWindow::connectPerViewportSignals(DocumentViewport* vp)
 {
     if (!vp) {
         return;
@@ -4450,6 +4472,9 @@ void MainWindow::connectViewportTransferSignal(DocumentViewport* vp)
     // Idempotent: safe to call for viewports that are already wired.
     connect(vp, &DocumentViewport::pageTransferDropped,
             this, &MainWindow::handlePageTransferDrop,
+            Qt::UniqueConnection);
+    connect(vp, &DocumentViewport::addPageRequested,
+            this, &MainWindow::handleAddPageRequest,
             Qt::UniqueConnection);
 }
 
@@ -7661,15 +7686,10 @@ void MainWindow::setupPagePanelActionBar()
     // Page management signals
     // -------------------------------------------------------------------------
     
-    // Add Page: Add a new page at the end
+    // Add Page: Add a new page at the end. Deliberately does not scroll there,
+    // matching Ctrl+Shift+A: the user usually still wants the page they are on.
     connect(m_pagePanelActionBar, &PagePanelActionBar::addPageClicked, this, [this]() {
-        addPageToDocument();
-        // Scroll to the newly added page (at end)
-        if (DocumentViewport* vp = currentViewport()) {
-            if (Document* doc = vp->document()) {
-                vp->scrollToPage(doc->pageCount() - 1);
-            }
-        }
+        appendPageToViewport(currentViewport());
     });
     
     // Insert Page: Insert a new page after the current page
