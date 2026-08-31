@@ -79,6 +79,19 @@
 
 
   <releases type="embedded">
+    <release version="1.6.1" date="2026-09-01">
+      <description>
+        <p>New Features:</p>
+        <ul>
+          <li>Added a new right click menu for LinkObjects for copying text and deleting the LinkObject.</li>
+          <li>Extra add page button positioned below the last page in paged mode.</li>
+        </ul>
+        <p>Bug Fixes and Improvements:</p>
+        <ul>
+          <li>Corrected the behavior of the copy button on the object select action bar so that it copies the text of the annotation, instead of the linkobject itself.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.6.0" date="2026-08-31">
       <description>
         <p>New Features:</p>
