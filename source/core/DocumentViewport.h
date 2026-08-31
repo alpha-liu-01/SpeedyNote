@@ -40,6 +40,7 @@ enum class TouchGestureMode {
 
 class QContextMenuEvent;
 class QMenu;
+class ActionBarButton;
 class ImageObject;
 class InlineTextBoxEditor;
 class LinkObjectBar;
@@ -1044,10 +1045,24 @@ public:
     QRectF pageRect(int pageIndex) const;
     
     /**
-     * @brief Get the total size of all pages (bounding box).
-     * @return Size of the content area containing all pages.
+     * @brief Get the scrollable extent of the document.
+     *
+     * The bounding box of all pages plus @ref addPageBandHeight, so scrolling
+     * to the bottom reveals the add-page button instead of leaving it in
+     * overscroll. Not the same as the pure page bounding box that
+     * @ref pageTrackFraction measures against.
      */
     QSizeF totalContentSize() const;
+
+    /**
+     * @brief Height reserved below the last page for the add-page button.
+     * @return Document-space height, or 0 when there is no button to reserve
+     *         for (no document, edgeless, or no pages).
+     *
+     * Zoom-dependent: the band is the button's fixed on-screen footprint
+     * converted to document units, so the button always fits inside it.
+     */
+    qreal addPageBandHeight() const;
 
     /**
      * @brief Normalized track position (0.0-1.0) of a page's top edge.
@@ -2033,15 +2048,31 @@ public:
     void ensureTextBoxFormatBar();
     void syncTextBoxFormatBar();
     /**
-     * @brief Whether a viewport point belongs to a text overlay widget.
+     * @brief Whether a viewport point belongs to one of the child widgets the
+     *        viewport floats over its canvas.
      *
-     * Stylus events are delivered to the deepest child and propagate back up
-     * when that child does not handle them. Consuming those here would make
-     * the canvas react to overlay interactions and would suppress the
-     * synthesized mouse events the overlay widgets rely on.
+     * Covers the inline text editor, the two object bars and the add-page
+     * button. Stylus events are delivered to the deepest child and propagate
+     * back up when that child does not handle them. Consuming those here would
+     * make the canvas react to overlay interactions and would suppress the
+     * synthesized mouse events those widgets rely on.
      */
-    bool pointerOverTextOverlay(const QPointF& viewportPos) const;
+    bool pointerOverViewportWidget(const QPointF& viewportPos) const;
     void updateTextBoxFormatBarGeometry();
+
+    // ===== Add-page affordance =====
+
+    /**
+     * @brief Document-space bounds of the last row of pages.
+     *
+     * One page in single-column mode; in two-column mode the last page plus
+     * its left partner when that page is the right half of a full row.
+     */
+    QRectF lastRowRect() const;
+    void ensureAddPageButton();
+    /// Show the button iff there is a paged document to append to, and place it.
+    void syncAddPageButton();
+    void updateAddPageButtonGeometry();
 
     /**
      * @brief Position a floating control bar next to an anchor rect.
@@ -2690,6 +2721,15 @@ signals:
      * @param destIndex 0-based insertion index in this document.
      */
     void pageTransferDropped(const QString& srcToken, const QStringList& srcUuids, int destIndex);
+
+    /**
+     * @brief Emitted when the add-page button below the last page is pressed.
+     *
+     * The viewport only asks. MainWindow performs the append, because that also
+     * has to mark the owning tab modified and refresh the page panel, and
+     * because in split view the sender may not be the active viewport.
+     */
+    void addPageRequested();
     
     /**
      * @brief Emitted when the object selection changes.
@@ -3297,6 +3337,14 @@ private:
     /// Floating controls for the selected LinkObject (color, description, 3
     /// slots). Created lazily, one per viewport, and anchored to the object.
     LinkObjectBar* m_linkObjectBar = nullptr;
+
+    // ===== Add-page affordance =====
+    /// Anchored below the last page in paged mode so appending a page does not
+    /// require the page panel or a keyboard. Created lazily, one per viewport.
+    ActionBarButton* m_addPageButton = nullptr;
+    /// Clearance above and below the button, in viewport pixels. Also sizes the
+    /// band reserved for it, so the two cannot drift apart.
+    static constexpr int ADD_PAGE_BUTTON_GAP = 12;
     
     /**
      * @brief Whether we're currently dragging selected objects.

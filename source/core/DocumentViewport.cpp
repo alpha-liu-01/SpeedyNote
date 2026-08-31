@@ -20,6 +20,7 @@
 #include "../ui/panels/InlineTextBoxEditor.h"
 #include "../ui/panels/LinkObjectBar.h"
 #include "../ui/panels/TextBoxFormatBar.h"
+#include "../ui/widgets/ActionBarButton.h"
 #include "../../markdown/qmarkdowntextedit.h"
 
 #include <QPainter>
@@ -204,12 +205,14 @@ DocumentViewport::DocumentViewport(QWidget* parent)
         updateInlineTextEditorGeometry();
         updateTextBoxFormatBarGeometry();
         updateLinkObjectBarGeometry();
+        updateAddPageButtonGeometry();
     });
     connect(this, &DocumentViewport::panChanged, this,
             [this]() {
         updateInlineTextEditorGeometry();
         updateTextBoxFormatBarGeometry();
         updateLinkObjectBarGeometry();
+        updateAddPageButtonGeometry();
     });
     connect(this, &DocumentViewport::objectSelectionChanged,
             this, &DocumentViewport::syncTextBoxFormatBar);
@@ -509,6 +512,9 @@ void DocumentViewport::setDocument(Document* doc)
     emitScrollFractions();
     syncTextBoxFormatBar();
     syncLinkObjectBar();
+    // Paged and edgeless documents disagree about whether the button exists at
+    // all, so a document swap has to re-decide rather than just reposition.
+    syncAddPageButton();
 }
 
 // ===== PDF source warning banner =====
@@ -599,10 +605,13 @@ void DocumentViewport::setDarkMode(bool dark)
         m_textBoxFormatBar->setDarkMode(dark);
     if (m_linkObjectBar)
         m_linkObjectBar->setDarkMode(dark);
+    if (m_addPageButton)
+        m_addPageButton->setDarkMode(dark);
     if (m_inlineTextBoxEditor && m_inlineEditSession.active)
         updateInlineTextEditorGeometry();
     updateTextBoxFormatBarGeometry();
     updateLinkObjectBarGeometry();
+    updateAddPageButtonGeometry();
 
     // Trigger repaint
     update();
@@ -678,6 +687,9 @@ void DocumentViewport::setLayoutMode(LayoutMode mode)
     
     // Recalculate layout and repaint
     clampPanOffset();
+    // The button anchors to the last row, which is a different shape and place
+    // in the other layout mode.
+    updateAddPageButtonGeometry();
     update();
     emitScrollFractions();
 }
@@ -802,6 +814,10 @@ void DocumentViewport::notifyDocumentStructureChanged()
 {
     // Invalidate layout cache - page count or sizes changed
     invalidatePageLayoutCache();
+    
+    // The last page moved, and the count may have crossed zero in either
+    // direction, so re-decide rather than just reposition.
+    syncAddPageButton();
     
     // Trigger repaint to show new/removed pages
     update();
@@ -1926,6 +1942,22 @@ QRectF DocumentViewport::pageRect(int pageIndex) const
     return QRectF(pos, pageSize);
 }
 
+qreal DocumentViewport::addPageBandHeight() const
+{
+    // Returning zero when there is no affordance keeps the reserved space and
+    // the button itself from ever disagreeing about whether they exist:
+    // syncAddPageButton() shows the button on exactly this condition.
+    if (!m_document || m_document->isEdgeless() || m_document->pageCount() == 0) {
+        return 0.0;
+    }
+    // Measured in viewport pixels and divided by zoom, so the band is exactly
+    // the button's on-screen footprint at every zoom level. A fixed
+    // document-space height would be shorter on screen than the button below
+    // roughly 0.7x zoom, leaving the button outside the space reserved for it.
+    const qreal zoom = m_zoomLevel > 0 ? m_zoomLevel : 1.0;
+    return (2 * ADD_PAGE_BUTTON_GAP + ActionBarButton::BUTTON_SIZE) / zoom;
+}
+
 QSizeF DocumentViewport::totalContentSize() const
 {
     if (!m_document || m_document->pageCount() == 0) {
@@ -1943,7 +1975,13 @@ QSizeF DocumentViewport::totalContentSize() const
     // ensurePageLayoutCache() computes both page Y positions AND total content size
     // in a single O(n) pass, avoiding repeated O(n) iterations on every scroll.
     ensurePageLayoutCache();
-    return m_cachedContentSize;
+    QSizeF size = m_cachedContentSize;
+    // The band is added here rather than in the layout cache on purpose. The
+    // cache is also pageTrackFraction()'s denominator, which places the scroll
+    // bar's PDF accents and link markers, and it has to stay zoom-independent
+    // because only document and layout changes invalidate it.
+    size.setHeight(size.height() + addPageBandHeight());
+    return size;
 }
 
 qreal DocumentViewport::pageTrackFraction(int pageIndex) const
@@ -2290,6 +2328,92 @@ InsertedObject* DocumentViewport::objectAtPoint(const QPointF& docPoint) const
     }
     
     return nullptr;
+}
+
+// ===== Add-page affordance =====
+//
+// A round button anchored under the last page, so appending a page does not
+// require opening the page panel or having a keyboard attached. Built as a
+// viewport-owned child widget rather than painted canvas chrome, following
+// TextBoxFormatBar and LinkObjectBar: a widget receives its own clicks, so the
+// press pipeline, the per-tool dispatch and off-page pan arming are untouched.
+//
+// The viewport only asks for a page. MainWindow owns the append itself, since
+// that also has to mark the owning tab modified and refresh the page panel.
+
+QRectF DocumentViewport::lastRowRect() const
+{
+    if (!m_document || m_document->isEdgeless()) {
+        return QRectF();
+    }
+    const int count = m_document->pageCount();
+    if (count <= 0) {
+        return QRectF();
+    }
+    QRectF row = pageRect(count - 1);
+    // An odd index in two-column mode means the last page is the right half of
+    // a full row, so the row spans its left partner too. An even index means it
+    // sits alone and the row is just that page.
+    if (m_layoutMode == LayoutMode::TwoColumn && (count - 1) % 2 == 1) {
+        const QRectF partner = pageRect(count - 2);
+        if (!partner.isEmpty()) {
+            row = row.united(partner);
+        }
+    }
+    return row;
+}
+
+void DocumentViewport::ensureAddPageButton()
+{
+    if (m_addPageButton)
+        return;
+
+    m_addPageButton = new ActionBarButton(this);
+    m_addPageButton->setIconName(QStringLiteral("addtab"));
+    // Same string as PagePanelActionBar's button, so the two share a translation.
+    m_addPageButton->setToolTip(tr("Add Page at End"));
+    m_addPageButton->setDarkMode(m_isDarkMode);
+    m_addPageButton->hide();
+
+    connect(m_addPageButton, &ActionBarButton::clicked,
+            this, &DocumentViewport::addPageRequested);
+}
+
+void DocumentViewport::syncAddPageButton()
+{
+    // Same predicate as the reserved band, so the button never appears without
+    // room to scroll to it and the band is never reserved for nothing.
+    if (addPageBandHeight() <= 0.0) {
+        if (m_addPageButton)
+            m_addPageButton->hide();
+        return;
+    }
+
+    ensureAddPageButton();
+    m_addPageButton->show();
+    updateAddPageButtonGeometry();
+    m_addPageButton->raise();
+}
+
+void DocumentViewport::updateAddPageButtonGeometry()
+{
+    if (!m_addPageButton || m_addPageButton->isHidden())
+        return;
+
+    const QRectF row = lastRowRect();
+    if (row.isEmpty()) {
+        m_addPageButton->hide();
+        return;
+    }
+
+    // Deliberately not clamped into the viewport the way placeFloatingBar()
+    // clamps the object bars: this button belongs to the document's end and
+    // should scroll away with it. Qt clips it to the viewport on its own.
+    const QPointF anchor = documentToViewport(QPointF(row.center().x(), row.bottom()));
+    const int size = ActionBarButton::BUTTON_SIZE;
+    m_addPageButton->setGeometry(qRound(anchor.x()) - size / 2,
+                                 qRound(anchor.y()) + ADD_PAGE_BUTTON_GAP,
+                                 size, size);
 }
 
 // ===== Object Resize (Phase O3.1) =====
@@ -3459,6 +3583,7 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
         updateInlineTextEditorGeometry();
         updateTextBoxFormatBarGeometry();
         updateLinkObjectBarGeometry();
+        updateAddPageButtonGeometry();
         update();
         emitScrollFractions();
         return;
@@ -3508,6 +3633,7 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
     updateInlineTextEditorGeometry();
     updateTextBoxFormatBarGeometry();
     updateLinkObjectBarGeometry();
+    updateAddPageButtonGeometry();
 }
 
 void DocumentViewport::mousePressEvent(QMouseEvent* event)
@@ -4305,10 +4431,11 @@ void DocumentViewport::leaveEvent(QEvent* event)
 
 void DocumentViewport::tabletEvent(QTabletEvent* event)
 {
-    // Stylus events over the inline editor or the formatting bar arrive here
-    // by propagation. Leave them unhandled so Qt synthesizes mouse events for
-    // those widgets instead of treating the pen as a canvas interaction.
-    if (!m_pointerActive && pointerOverTextOverlay(SN_EVENT_POS(event))) {
+    // Stylus events over the inline editor, the formatting bars or the add-page
+    // button arrive here by propagation. Leave them unhandled so Qt synthesizes
+    // mouse events for those widgets instead of treating the pen as a canvas
+    // interaction.
+    if (!m_pointerActive && pointerOverViewportWidget(SN_EVENT_POS(event))) {
         event->ignore();
         return;
     }
@@ -9631,11 +9758,15 @@ void DocumentViewport::syncTextBoxFormatBar()
     m_textBoxFormatBar->raise();
 }
 
-bool DocumentViewport::pointerOverTextOverlay(const QPointF& viewportPos) const
+bool DocumentViewport::pointerOverViewportWidget(const QPointF& viewportPos) const
 {
     const QPoint pos = viewportPos.toPoint();
     if (m_textBoxFormatBar && m_textBoxFormatBar->isVisible()
         && m_textBoxFormatBar->geometry().contains(pos)) {
+        return true;
+    }
+    if (m_addPageButton && m_addPageButton->isVisible()
+        && m_addPageButton->geometry().contains(pos)) {
         return true;
     }
     if (m_linkObjectBar && m_linkObjectBar->isVisible()
@@ -12363,7 +12494,9 @@ void DocumentViewport::captureObjectDragBackground()
     
     // QWidget::grab() includes visible child widgets. The floating bars remain
     // live and follow the object during a drag, so including one in the cached
-    // canvas would leave a second, frozen copy at the drag origin.
+    // canvas would leave a second, frozen copy at the drag origin. The add-page
+    // button is stationary, but it would still be baked in and then drawn again
+    // on top, doubling its shadow.
     const bool restoreFormatBar =
         m_textBoxFormatBar && !m_textBoxFormatBar->isHidden();
     if (restoreFormatBar)
@@ -12372,6 +12505,10 @@ void DocumentViewport::captureObjectDragBackground()
         m_linkObjectBar && !m_linkObjectBar->isHidden();
     if (restoreLinkBar)
         m_linkObjectBar->hide();
+    const bool restoreAddPage =
+        m_addPageButton && !m_addPageButton->isHidden();
+    if (restoreAddPage)
+        m_addPageButton->hide();
 
     // Temporarily disable selected object rendering
     m_skipSelectedObjectRendering = true;
@@ -12392,6 +12529,11 @@ void DocumentViewport::captureObjectDragBackground()
         m_linkObjectBar->show();
         updateLinkObjectBarGeometry();
         m_linkObjectBar->raise();
+    }
+    if (restoreAddPage) {
+        m_addPageButton->show();
+        updateAddPageButtonGeometry();
+        m_addPageButton->raise();
     }
     
     // Phase O4.1.2: Pre-render selected objects to cache at current zoom

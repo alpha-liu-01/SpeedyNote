@@ -404,6 +404,13 @@ private slots:
     void saveDocumentAs();        // MAC.3: Always prompt for new path (Ctrl+Shift+S)
     void loadDocument();          // doc-1.2: Load document from JSON file (Ctrl+O)
     void addPageToDocument();     // doc-1.0: Add page at end of document (Ctrl+Shift+A)
+    /// Append a blank page to @p viewport's document and refresh everything
+    /// that depends on the page count. Works for a viewport in either pane,
+    /// active or not. Returns false when there was nothing to append to.
+    bool appendPageToViewport(DocumentViewport* viewport);
+    /// Handle DocumentViewport::addPageRequested from the in-canvas button by
+    /// appending to the requesting viewport, wherever it lives.
+    void handleAddPageRequest();
     void insertPageInDocument();  // Phase 3: Insert page after current (Ctrl+Shift+I)
     void deletePageInDocument();  // Phase 3B: Delete current page (Ctrl+Shift+D)
 #ifdef SPEEDYNOTE_DEBUG
@@ -413,9 +420,10 @@ private slots:
     // document) into another open document chosen via a dialog.
     void copyPagesToOtherDocument(const QList<int>& srcRows);
 
-    // Plan D2: cross-document page-transfer drag-and-drop.
-    // Connect a viewport's pageTransferDropped signal (idempotent).
-    void connectViewportTransferSignal(DocumentViewport* vp);
+    // Connect the signals every viewport carries, in every pane, including
+    // background ones: page-transfer drops (Plan D2) and add-page requests.
+    // Idempotent, so it is safe to re-run for already-wired viewports.
+    void connectPerViewportSignals(DocumentViewport* vp);
     // Handle a drop: resolve srcToken -> live Document, copy + refresh.
     void handlePageTransferDrop(const QString& srcToken, const QStringList& srcUuids, int destIndex);
     // Shared post-import refresh of a (possibly non-active) destination viewport.
