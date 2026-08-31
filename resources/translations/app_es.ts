@@ -1165,6 +1165,16 @@ NOTA: En Android, los cuadernos importados se añaden automáticamente a la bibl
         <translation>Distancia que se mueve la vista por cada clic de la rueda del ratón, en unidades de documento. Se aplica al desplazamiento vertical (rueda / `+rueda) y al desplazamiento horizontal (Shift+rueda). No afecta al desplazamiento mediante panel táctil.</translation>
     </message>
     <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1133"/>
+        <source>Pan the view by dragging the empty space around pages</source>
+        <translation>Desplazar la vista arrastrando el espacio vacío alrededor de las páginas</translation>
+    </message>
+    <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1139"/>
+        <source>Lets you move the view with a stylus alone, without holding a key or switching to the hand tool. Drawing tools are unaffected because they only work on the pages themselves. A tap in the empty space still clears the current selection, and a drag that starts on a page always continues as drawing. Does not apply to the edgeless canvas.</source>
+        <translation>Permite mover la vista solo con el lápiz, sin mantener pulsada una tecla ni cambiar a la herramienta mano. Las herramientas de dibujo no se ven afectadas, ya que solo funcionan sobre las páginas. Un toque en el espacio vacío sigue borrando la selección actual, y un arrastre que empieza en una página siempre continúa como dibujo. No se aplica al lienzo sin bordes.</translation>
+    </message>
+    <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1129"/>
         <source>OCR (Handwriting Recognition)</source>
         <translation>OCR (Reconocimiento de escritura)</translation>

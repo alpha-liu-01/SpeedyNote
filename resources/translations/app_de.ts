@@ -1165,6 +1165,16 @@ HINWEIS: Auf Android werden importierte Notizbücher automatisch zur Bibliothek 
         <translation>Distanz, um die sich der Ansichtsbereich pro Mausradklick bewegt, in Dokumenteinheiten. Gilt für vertikales Schwenken (Rad / `+Rad) und horizontales Schwenken (Shift+Rad). Beeinflusst nicht das Scrollen per Touchpad.</translation>
     </message>
     <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1133"/>
+        <source>Pan the view by dragging the empty space around pages</source>
+        <translation>Ansicht durch Ziehen des leeren Bereichs um die Seiten verschieben</translation>
+    </message>
+    <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1139"/>
+        <source>Lets you move the view with a stylus alone, without holding a key or switching to the hand tool. Drawing tools are unaffected because they only work on the pages themselves. A tap in the empty space still clears the current selection, and a drag that starts on a page always continues as drawing. Does not apply to the edgeless canvas.</source>
+        <translation>Ermöglicht das Verschieben der Ansicht allein mit dem Stift, ohne eine Taste zu halten oder zum Hand-Werkzeug zu wechseln. Zeichenwerkzeuge sind nicht betroffen, da sie nur auf den Seiten selbst wirken. Ein Tippen in den leeren Bereich hebt weiterhin die aktuelle Auswahl auf, und ein Zug, der auf einer Seite beginnt, wird immer als Zeichnen fortgesetzt. Gilt nicht für die randlose Leinwand.</translation>
+    </message>
+    <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1129"/>
         <source>OCR (Handwriting Recognition)</source>
         <translation>OCR (Handschrifterkennung)</translation>

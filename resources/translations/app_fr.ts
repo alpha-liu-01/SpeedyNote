@@ -1165,6 +1165,16 @@ NOTE : Sur Android, les carnets importés sont automatiquement ajoutés à la bi
         <translation>Distance de déplacement de la vue par clic de molette, en unités de document. S&apos;applique au défilement vertical (molette / `+molette) et horizontal (Maj+molette). N&apos;affecte pas le défilement sur pavé tactile.</translation>
     </message>
     <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1133"/>
+        <source>Pan the view by dragging the empty space around pages</source>
+        <translation>Déplacer la vue en faisant glisser l&apos;espace vide autour des pages</translation>
+    </message>
+    <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1139"/>
+        <source>Lets you move the view with a stylus alone, without holding a key or switching to the hand tool. Drawing tools are unaffected because they only work on the pages themselves. A tap in the empty space still clears the current selection, and a drag that starts on a page always continues as drawing. Does not apply to the edgeless canvas.</source>
+        <translation>Permet de déplacer la vue avec le stylet seul, sans maintenir de touche ni passer à l&apos;outil main. Les outils de dessin ne sont pas affectés car ils n&apos;agissent que sur les pages elles-mêmes. Une tape dans l&apos;espace vide efface toujours la sélection en cours, et un glissement commencé sur une page se poursuit toujours comme un tracé. Ne s&apos;applique pas au canevas sans bords.</translation>
+    </message>
+    <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1129"/>
         <source>OCR (Handwriting Recognition)</source>
         <translation>OCR (Reconnaissance d&apos;écriture manuscrite)</translation>

@@ -1070,6 +1070,16 @@ NOTE: On Android, imported notebooks are automatically added to the library.
         <translation type="unfinished">鼠标滚轮滚一个齿儿，视窗移动的距离，以文档单位计。同时适用于纵向滚动（滚轮，或者`键+滚轮）和横向滚动（Shift键+滚轮）。不影响触摸手势。</translation>
     </message>
     <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1133"/>
+        <source>Pan the view by dragging the empty space around pages</source>
+        <translation type="unfinished">拖动页面周围的空白区域来平移视图</translation>
+    </message>
+    <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1139"/>
+        <source>Lets you move the view with a stylus alone, without holding a key or switching to the hand tool. Drawing tools are unaffected because they only work on the pages themselves. A tap in the empty space still clears the current selection, and a drag that starts on a page always continues as drawing. Does not apply to the edgeless canvas.</source>
+        <translation type="unfinished">让你只用手写笔就能平移视图，无需按住按键或切换到抓手工具。绘图工具不受影响，因为它们只在页面内生效。在空白区域点击一下仍然会取消当前选择；从页面上开始的拖动始终按绘图处理。此选项不适用于无边画布。</translation>
+    </message>
+    <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1129"/>
         <source>OCR (Handwriting Recognition)</source>
         <translation type="unfinished">OCR (手写识别)</translation>
