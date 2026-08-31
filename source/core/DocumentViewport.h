@@ -1351,7 +1351,14 @@ public:
     /**
      * @brief Handle Cut action based on current context.
      * 
-     * Currently only works for Lasso tool (cut selected strokes).
+     * Behavior depends on current tool:
+     * - Lasso: Cut selected strokes
+     * - ObjectSelect: Copy then delete the selected objects
+     *
+     * Gated on the same condition as the context menu's Cut entry, so the key
+     * and the menu are available on exactly the same selections. A selected
+     * link object is excluded from both: cutting is an object operation, and a
+     * link has none.
      */
     void handleCutAction();
     
@@ -1600,6 +1607,10 @@ public:
      * 
      * Phase O2.6: Serializes each selected object to JSON and stores
      * in s_objectClipboard. Does not modify selection.
+     *
+     * Recognized text and link objects are skipped: neither is meaningful at a
+     * second location. If that leaves nothing to copy, the previous clipboard
+     * contents are kept rather than replaced with an empty list.
      */
     void copySelectedObjects();
     
@@ -1918,9 +1929,10 @@ public:
      * Writes all three representations the design calls for: the object id,
      * which survives the target being dragged, the coordinate that navigation
      * actually runs off, and the far slot index that makes the pairing
-     * releasable from either end. The coordinate is the object's centre,
-     * matching MainWindow::navigateToLinkObject rather than
-     * cloneWithBackLink's top-left, so a highlight lands centred on its mark.
+     * releasable from either end. The coordinate is the object's centre rather
+     * than its top-left, matching MainWindow::navigateToLinkObject, so a
+     * highlight lands centred on its mark rather than on the corner of its
+     * bounding box.
      *
      * @param targetSlotIndex The partner slot on @p target, or -1 for a one-way
      *        link to an object that holds no return path.

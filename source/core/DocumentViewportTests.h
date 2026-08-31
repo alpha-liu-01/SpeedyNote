@@ -4225,6 +4225,10 @@ public:
      * only place the behaviour is defined. What matters is that a selected
      * annotation copies its text rather than the object, in either tool, and
      * that a text selection still copies its text when nothing is selected.
+     *
+     * Also covers what object copy does with a link now that it has no clone
+     * path: it skips it, and skips it without discarding the clipboard when
+     * that leaves nothing to copy.
      */
     static bool testAnnotationCopyDelete() {
         printf("  testAnnotationCopyDelete... ");
@@ -4286,15 +4290,62 @@ public:
         if (clipboard->text() != QStringLiteral("loose words"))
             return fail("a bare text selection did not copy its text");
 
-        // Delete used to be a no-op under the Highlighter, which left the only
-        // route to removing a tapped annotation in the other tool.
+        // Object copy skips links, the way it already skips recognized text.
+        // Only a multi-selection reaches this: a lone annotation is handled by
+        // the description copy above and never gets to copySelectedObjects().
+        auto secondMarkPtr = std::make_unique<LinkObject>();
+        secondMarkPtr->setRegionFromPageRects({QRectF(60.0, 120.0, 140.0, 14.0)});
+        secondMarkPtr->description = QStringLiteral("another sentence");
+        LinkObject* secondMark = secondMarkPtr.get();
+        page->addObject(std::move(secondMarkPtr));
+
+        auto imagePtr = std::make_unique<ImageObject>();
+        QImage swatch(16, 16, QImage::Format_ARGB32);
+        swatch.fill(Qt::cyan);
+        imagePtr->setSourceImage(swatch);
+        imagePtr->position = QPointF(60.0, 400.0);
+        ImageObject* image = imagePtr.get();
+        page->addObject(std::move(imagePtr));
+
+        viewport.setCurrentTool(ToolType::ObjectSelect);
         viewport.clearObjectSelection();
         viewport.selectObject(mark, false);
+        viewport.selectObject(image, true);
+        viewport.copySelectedObjects();
+        if (DocumentViewport::s_objectClipboard.size() != 1)
+            return fail("a link plus an image did not copy exactly one object");
+        if (DocumentViewport::s_objectClipboard.first()
+                .value(QStringLiteral("type")).toString()
+            != QStringLiteral("image"))
+            return fail("the object copied alongside a link was not the image");
+
+        // A selection with nothing copyable must leave the clipboard alone:
+        // whatever is on it is still the last thing the user actually copied.
+        viewport.clearObjectSelection();
+        viewport.selectObject(mark, false);
+        viewport.selectObject(secondMark, true);
+        viewport.copySelectedObjects();
+        if (!viewport.hasObjectsInClipboard())
+            return fail("a links-only copy emptied the object clipboard");
+        if (DocumentViewport::s_objectClipboard.size() != 1
+            || DocumentViewport::s_objectClipboard.first()
+                   .value(QStringLiteral("type")).toString()
+               != QStringLiteral("image"))
+            return fail("a links-only copy replaced the previous clipboard");
+
+        // Delete used to be a no-op under the Highlighter, which left the only
+        // route to removing a tapped annotation in the other tool.
+        viewport.setCurrentTool(ToolType::Highlighter);
+        viewport.clearObjectSelection();
+        viewport.selectObject(mark, false);
+        // Taken before the delete: removeObject destroys the object, so mark is
+        // a dangling pointer by the time the lookup below runs.
+        const QString markId = mark->id;
         const int objectsBeforeDelete = static_cast<int>(page->objects.size());
         viewport.handleDeleteAction();
         if (static_cast<int>(page->objects.size()) != objectsBeforeDelete - 1)
             return fail("Delete under the Highlighter left the annotation");
-        if (page->objectById(mark->id))
+        if (page->objectById(markId))
             return fail("the deleted annotation is still reachable");
 
         printf("PASSED\n");

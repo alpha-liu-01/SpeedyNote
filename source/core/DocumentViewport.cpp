@@ -13,7 +13,7 @@
 #include "../layers/VectorLayer.h"
 #include "../pdf/PdfProvider.h"     // Use abstract interface, not concrete impl
 #include "../objects/ImageObject.h"
-#include "../objects/LinkObject.h"  // Phase C.2.3: For cloneWithBackLink
+#include "../objects/LinkObject.h"
 #include "../objects/OcrTextObject.h"  // Phase 1D: OCR text object deletion
 #include "../objects/TextBoxObject.h"
 #include "../ui/banners/MissingPdfBanner.h"  // Phase R.3: Missing PDF notification
@@ -8920,93 +8920,55 @@ void DocumentViewport::copySelectedObjects()
         return;
     }
     
-    // Clear previous clipboard contents
-    s_objectClipboard.clear();
-    s_objectClipboardAssets.clear();
+    // Built locally so a selection holding nothing copyable can leave the
+    // existing clipboard alone rather than silently emptying it.
+    QList<QJsonObject> copied;
+    QMap<QString, ClipboardImageAsset> copiedAssets;
     
     // Serialize each selected object to JSON
     for (InsertedObject* obj : m_selectedObjects) {
         if (!obj) continue;
         if (obj->type() == QStringLiteral("ocr_text")) continue;
+        // A link object is not meaningful at a second location: its slots point
+        // at places, and a duplicated markdown note would be one file under two
+        // annotations. Its copyable content is its text, which Copy reaches
+        // through copyAnnotationText() instead.
+        if (obj->type() == QStringLiteral("link")) continue;
         
-        // Phase C.2.3: For LinkObject, use cloneWithBackLink to auto-fill slot 0
-        // with a back-link to the original position
-        if (auto* link = dynamic_cast<LinkObject*>(obj)) {
-            if (m_document->isEdgeless()) {
-                // Edgeless mode: find the tile containing this object
-                // and create back-link with tile coordinates + document position
-                bool foundTile = false;
-                for (const auto& coord : m_document->allLoadedTileCoords()) {
-                    Page* tile = m_document->getTile(coord.first, coord.second);
-                    if (tile && tile->objectById(link->id)) {
-                        // Found the tile - calculate document coordinates
-                        QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
-                                           coord.second * Document::EDGELESS_TILE_SIZE);
-                        QPointF docPos = tileOrigin + link->position;
-                        
-#ifdef SPEEDYNOTE_DEBUG
-                        qDebug() << "copySelectedObjects (edgeless): link->id =" << link->id
-                                 << "tile coord =" << coord.first << "," << coord.second
-                                 << "tileOrigin =" << tileOrigin
-                                 << "link->position (tile-local) =" << link->position
-                                 << "docPos (calculated) =" << docPos;
-#endif
-                        
-                        // Create clone with back-link to this position
-                        auto clone = link->cloneWithBackLinkEdgeless(coord.first, coord.second, docPos);
-#ifdef SPEEDYNOTE_DEBUG
-                        qDebug() << "  Back-link slot will store: tileX =" << coord.first 
-                                 << "tileY =" << coord.second
-                                 << "targetPosition =" << clone->linkSlots[0].targetPosition;
-#endif
-                        s_objectClipboard.append(clone->toJson());
-                        foundTile = true;
-                        break;
+        copied.append(obj->toJson());
+        
+        // Cache image assets for cross-document paste
+        if (auto* img = dynamic_cast<ImageObject*>(obj)) {
+            if (img->isLoaded() && !img->imagePath.isEmpty()) {
+                ClipboardImageAsset asset;
+                asset.pixmap = img->pixmap();
+                asset.encodedData = img->encodedAssetData();
+                asset.format = img->assetFormat();
+                constexpr qint64 MAX_CLIPBOARD_SOURCE_BYTES =
+                    64LL * 1024 * 1024;
+                if (asset.encodedData.isEmpty() && m_document
+                    && !m_document->bundlePath().isEmpty()) {
+                    QFile source(img->fullPath(m_document->bundlePath()));
+                    if (source.size() <= MAX_CLIPBOARD_SOURCE_BYTES
+                        && source.open(QIODevice::ReadOnly)) {
+                        asset.encodedData = source.readAll();
                     }
                 }
-                if (!foundTile) {
-                    // Fallback: copy without back-link if tile not found
-#ifdef SPEEDYNOTE_DEBUG
-                    qDebug() << "copySelectedObjects (edgeless): tile not found for link->id =" << link->id;
-#endif
-                    s_objectClipboard.append(link->toJson());
-                }
-            } else {
-                // Paged mode: use page UUID
-                QString sourcePageUuid;
-                Page* currentPage = m_document->page(m_currentPageIndex);
-                if (currentPage) {
-                    sourcePageUuid = currentPage->uuid;
-                }
-                
-                auto clone = link->cloneWithBackLink(sourcePageUuid);
-                s_objectClipboard.append(clone->toJson());
-            }
-        } else {
-            s_objectClipboard.append(obj->toJson());
-            
-            // Cache image assets for cross-document paste
-            if (auto* img = dynamic_cast<ImageObject*>(obj)) {
-                if (img->isLoaded() && !img->imagePath.isEmpty()) {
-                    ClipboardImageAsset asset;
-                    asset.pixmap = img->pixmap();
-                    asset.encodedData = img->encodedAssetData();
-                    asset.format = img->assetFormat();
-                    constexpr qint64 MAX_CLIPBOARD_SOURCE_BYTES =
-                        64LL * 1024 * 1024;
-                    if (asset.encodedData.isEmpty() && m_document
-                        && !m_document->bundlePath().isEmpty()) {
-                        QFile source(img->fullPath(m_document->bundlePath()));
-                        if (source.size() <= MAX_CLIPBOARD_SOURCE_BYTES
-                            && source.open(QIODevice::ReadOnly)) {
-                            asset.encodedData = source.readAll();
-                        }
-                    }
-                    s_objectClipboardAssets[img->imagePath] = std::move(asset);
-                }
+                copiedAssets[img->imagePath] = std::move(asset);
             }
         }
     }
+    
+    if (copied.isEmpty()) {
+        // Nothing was copyable, so whatever was on the clipboard is still the
+        // most recent thing the user actually copied. A selection of only links
+        // or only recognized text lands here, and so does the plain-text step
+        // below, since a text box would have been copied above.
+        return;
+    }
+    
+    s_objectClipboard = std::move(copied);
+    s_objectClipboardAssets = std::move(copiedAssets);
     
     #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "copySelectedObjects: Copied" << s_objectClipboard.size() << "objects to internal clipboard";
@@ -10952,7 +10914,8 @@ void DocumentViewport::addLinkToSlot(int slotIndex)
     }
     
     // Simple context menu (TEMPORARY UI)
-    QMenu menu;
+    QMenu menu(this);
+    ThemeColors::styleMenu(&menu, m_isDarkMode);
 
     // The position entry depends on whether a link is already half-made, and on
     // whether this is the annotation it was started from. Only one of start /
@@ -13684,9 +13647,26 @@ void DocumentViewport::handleCopyAction()
 
 void DocumentViewport::handleCutAction()
 {
-    // Cut currently only works for Lasso tool
-    if (m_currentTool == ToolType::Lasso && m_lassoSelection.isValid()) {
-        cutSelection();
+    switch (m_currentTool) {
+        case ToolType::Lasso:
+            if (m_lassoSelection.isValid()) {
+                cutSelection();
+            }
+            break;
+            
+        case ToolType::ObjectSelect:
+            // Gated the way the context menu's Cut is, so the key and the menu
+            // offer it on exactly the same selections. A link is excluded
+            // because cutting is an object operation and a link has none; its
+            // text is reachable through Copy.
+            if (!selectedLinkForBar() && hasSelectedObjects()) {
+                handleCopyAction();
+                handleDeleteAction();
+            }
+            break;
+            
+        default:
+            break;
     }
 }
 
