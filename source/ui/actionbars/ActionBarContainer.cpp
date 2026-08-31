@@ -43,6 +43,7 @@ void ActionBarContainer::setActionBar(const QString& type, ActionBar* actionBar)
                 objectBar->setHasSelection(m_hasObjectSelection);
                 objectBar->setHasObjectInClipboard(m_hasObjectsInClipboard);
                 objectBar->setHasImageInClipboard(m_clipboardHasImage);
+                objectBar->setObjectToolActive(m_currentTool == ToolType::ObjectSelect);
             }
         }
     }
@@ -313,6 +314,12 @@ void ActionBarContainer::updatePagePanelEffectiveVisibility()
 void ActionBarContainer::onToolChanged(ToolType tool)
 {
     m_currentTool = tool;
+    
+    if (auto* objectBar = qobject_cast<ObjectSelectActionBar*>(
+            m_actionBars.value(QStringLiteral("objectSelect"), nullptr))) {
+        objectBar->setObjectToolActive(tool == ToolType::ObjectSelect);
+    }
+    
     updateVisibility();
 }
 
@@ -416,7 +423,14 @@ void ActionBarContainer::updateVisibility()
             break;
             
         case ToolType::Highlighter:
-            if (m_hasTextSelection) {
+            // Tapping a highlight selects its annotation without leaving the
+            // tool, so the object actions have to be reachable from here too.
+            // Tap-to-select clears any text selection, so in practice only one
+            // of these is ever live; the annotation wins if both are, which is
+            // the case during an Adjust session.
+            if (m_hasObjectSelection) {
+                typeToShow = "objectSelect";
+            } else if (m_hasTextSelection) {
                 typeToShow = "textSelection";
             }
             break;

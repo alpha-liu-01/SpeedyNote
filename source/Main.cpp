@@ -266,6 +266,7 @@ static void applyAndroidFonts(QApplication& app)
 #include "objects/LinkObjectTests.h"
 #include "objects/TextBoxObjectTests.h"
 #include "pdf/MuPdfExporterTests.h"
+#include "ui/actionbars/ActionBarContainerTests.h"
 #include "ui/ToolbarButtonTestWidget.h"
 #include "ocr/OcrRasterTests.h"
 #include "ocr/OcrGoldenTests.h"
@@ -622,6 +623,8 @@ static int runTests(const QString& testType)
         success = TextBoxObjectTests::runAllTests();
     } else if (testType == "pdfexporter") {
         success = MuPdfExporterTests::runAllTests();
+    } else if (testType == "actionbars") {
+        success = ActionBarContainerTests::runAllTests();
     } else if (testType == "ocr-raster") {
         success = OcrRasterTests::runAllTests();
     } else if (testType == "ocr-golden") {
@@ -961,6 +964,8 @@ int main(int argc, char* argv[])
             testToRun = "textboxobject";
         } else if (arg == "--test-pdfexporter") {
             testToRun = "pdfexporter";
+        } else if (arg == "--test-actionbars") {
+            testToRun = "actionbars";
         } else if (arg == "--test-ocr-raster") {
             testToRun = "ocr-raster";
         } else if (arg == "--test-ocr-golden") {

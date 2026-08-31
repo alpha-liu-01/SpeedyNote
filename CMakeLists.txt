@@ -332,7 +332,7 @@ elseif(APPLE)
     # =========================================================================
     message(STATUS "🍎 Configuring for macOS")
     
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version")
     
     # Homebrew paths
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
@@ -873,11 +873,11 @@ set(UI_SOURCES
     source/ui/subtoolbars/MarkerSubToolbar.cpp
     source/ui/subtoolbars/EraserSubToolbar.cpp
     source/ui/subtoolbars/HighlighterSubToolbar.cpp
-    source/ui/subtoolbars/ObjectSelectSubToolbar.cpp
     source/ui/subtoolbars/OcrSubToolbar.cpp
     # Panels
     source/ui/panels/InlineTextBoxEditor.cpp
     source/ui/panels/TextBoxFormatBar.cpp
+    source/ui/panels/LinkObjectBar.cpp
     # Action bars
     source/ui/actionbars/ActionBar.cpp
     source/ui/actionbars/ActionBarContainer.cpp

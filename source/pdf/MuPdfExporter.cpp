@@ -11,6 +11,7 @@
 #include "../core/Page.h"
 #include "../layers/VectorLayer.h"
 #include "../objects/ImageObject.h"
+#include "../objects/LinkObject.h"
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
@@ -1525,6 +1526,13 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
         fz_rect mediabox = fz_make_rect(0, 0, widthPt, heightPt);
         pdf_obj* pageObj = pdf_add_page(m_ctx, m_outputDoc, mediabox, 0, 
                                          resources, combinedContent);
+        
+        // Highlights are annotations rather than content, so they attach to the
+        // page dictionary instead of the stream built above.
+        if (pdf_obj* annots = buildHighlightAnnots(page, pageHeightSn)) {
+            pdf_dict_put(m_ctx, pageObj, PDF_NAME(Annots), annots);
+        }
+        
         pdf_insert_page(m_ctx, m_outputDoc, -1, pageObj);
     }
     fz_always(m_ctx) {
@@ -1875,6 +1883,15 @@ bool MuPdfExporter::renderBlankPage(int pageIndex)
             
             // Create page with resources and combined content
             pdf_obj* pageObj = pdf_add_page(m_ctx, m_outputDoc, mediabox, 0, resources, finalContent);
+            
+            // Highlights are annotations rather than content, so they attach to
+            // the page dictionary instead of the stream built above. The empty
+            // branch below needs no equivalent: hasImages is really
+            // !page->objects.empty(), so any highlight lands here.
+            if (pdf_obj* annots = buildHighlightAnnots(page, pageHeightSn)) {
+                pdf_dict_put(m_ctx, pageObj, PDF_NAME(Annots), annots);
+            }
+            
             pdf_insert_page(m_ctx, m_outputDoc, -1, pageObj);
         } else {
             // Simple path - completely empty page (no strokes, no objects, no background)
@@ -2580,6 +2597,295 @@ static bool addImageToPage(fz_context* ctx, pdf_document* outputDoc,
     }
     
     return true;
+}
+
+// ============================================================================
+// Highlight Annotations
+// ============================================================================
+
+QVector<QRectF> MuPdfExporter::highlightRectsToPdfSpace(const QVector<QRectF>& pageRects,
+                                                        qreal pageHeightSn)
+{
+    QVector<QRectF> out;
+    out.reserve(pageRects.size());
+    for (const QRectF& r : pageRects) {
+        // Same scale and flip as transformPoint(), applied to the corners: the
+        // page-space bottom edge is the PDF-space lower edge.
+        out.append(QRectF(r.left() * SN_TO_PDF_SCALE,
+                          (pageHeightSn - r.bottom()) * SN_TO_PDF_SCALE,
+                          r.width() * SN_TO_PDF_SCALE,
+                          r.height() * SN_TO_PDF_SCALE));
+    }
+    return out;
+}
+
+/**
+ * @brief A highlight's page-space rects, minus the degenerate ones.
+ *
+ * Filters on the same 0.1 threshold LinkObject::renderRegion() skips on, so
+ * the quads, the /Rect and the appearance stream all describe the same lines.
+ */
+static QVector<QRectF> usableHighlightRects(const LinkObject* link)
+{
+    const QVector<QRectF> pageRects = link->regionRectsInPageSpace();
+    QVector<QRectF> out;
+    out.reserve(pageRects.size());
+    for (const QRectF& r : pageRects) {
+        if (r.width() < 0.1 || r.height() < 0.1) continue;
+        out.append(r);
+    }
+    return out;
+}
+
+/**
+ * @brief Build the /AP normal appearance for a highlight annotation.
+ * @param snRects Page-space rects (96 DPI), already filtered
+ * @param pdfRects The same rects in PDF space, index for index
+ * @param bbox Annotation rectangle in PDF space; also the form's BBox
+ * @param style Highlight style (never None here)
+ * @param color Fill colour, drawn OPAQUE -- alpha lives on the annot's /CA
+ * @param pageHeightSn Page height in SpeedyNote units, for the dot transform
+ * @return Indirect Form XObject, or nullptr on failure
+ *
+ * Supplying our own appearance is the whole point of exporting highlights this
+ * way: no viewer would draw an Underline as a tenth-of-line-height bar, and
+ * none would draw a dotted underline at all. BBox equals /Rect and /Matrix is
+ * left at identity, so the stream draws in page user space and the geometry
+ * below is a direct transcription of LinkObject::renderRegion().
+ */
+static pdf_obj* buildHighlightAppearance(fz_context* ctx, pdf_document* outputDoc,
+                                         const QVector<QRectF>& snRects,
+                                         const QVector<QRectF>& pdfRects,
+                                         const QRectF& bbox,
+                                         HighlightRegion::Style style,
+                                         const QColor& color,
+                                         qreal pageHeightSn)
+{
+    pdf_obj* form = nullptr;
+    fz_buffer* content = nullptr;
+    
+    fz_try(ctx) {
+        content = fz_new_buffer(ctx, 256);
+        
+        char cmd[128];
+        snprintf(cmd, sizeof(cmd), "%.4f %.4f %.4f rg\n",
+                 color.redF(), color.greenF(), color.blueF());
+        fz_append_string(ctx, content, cmd);
+        
+        for (int i = 0; i < pdfRects.size(); ++i) {
+            const QRectF& pr = pdfRects[i];
+            
+            // Derived from the unzoomed page-space rect and scaled once, the
+            // way renderRegion() does it. Deriving it from the PDF-space rect
+            // instead would clear the 1.5 floor at a different text size.
+            const qreal tSn = HighlightRegion::underlineThickness(snRects[i]);
+            const qreal tPt = tSn * SN_TO_PDF_SCALE;
+            
+            switch (style) {
+                case HighlightRegion::Style::Cover:
+                    snprintf(cmd, sizeof(cmd), "%.4f %.4f %.4f %.4f re\n",
+                             pr.x(), pr.y(), pr.width(), pr.height());
+                    fz_append_string(ctx, content, cmd);
+                    break;
+                
+                case HighlightRegion::Style::Underline:
+                    // pr.y() is the lower edge in PDF space, so the bar sits
+                    // on the baseline without any further flipping.
+                    snprintf(cmd, sizeof(cmd), "%.4f %.4f %.4f %.4f re\n",
+                             pr.x(), pr.y(), pr.width(), tPt);
+                    fz_append_string(ctx, content, cmd);
+                    break;
+                
+                case HighlightRegion::Style::DottedUnderline: {
+                    // Placed in page space and transformed by the shared circle
+                    // helper, which keeps this identical to renderRegion().
+                    const QRectF& sr = snRects[i];
+                    const qreal step = tSn * HighlightRegion::DOT_SPACING_FACTOR;
+                    if (step <= 0.0) break;
+                    
+                    const qreal y = sr.bottom() - tSn * 0.5;
+                    const qreal firstX = sr.left() + tSn * 0.5;
+                    const qreal lastX = sr.right() - tSn * 0.5;
+                    if (lastX < firstX) break;
+                    
+                    for (qreal x = firstX; x <= lastX; x += step) {
+                        appendCircleToBuffer(ctx, content, QPointF(x, y),
+                                             tSn * 0.5, pageHeightSn);
+                    }
+                    break;
+                }
+                
+                case HighlightRegion::Style::None:
+                    break;
+            }
+        }
+        
+        // One fill for every subpath, matching appendPolygonToBuffer's rule.
+        fz_append_string(ctx, content, "f\n");
+        
+        form = pdf_new_dict(ctx, outputDoc, 4);
+        pdf_dict_put(ctx, form, PDF_NAME(Type), PDF_NAME(XObject));
+        pdf_dict_put(ctx, form, PDF_NAME(Subtype), PDF_NAME(Form));
+        pdf_dict_put_int(ctx, form, PDF_NAME(FormType), 1);
+        pdf_dict_put_rect(ctx, form, PDF_NAME(BBox),
+                          fz_make_rect(bbox.x(), bbox.y(),
+                                       bbox.x() + bbox.width(),
+                                       bbox.y() + bbox.height()));
+        
+        // Must be indirect before pdf_update_stream(), as in importPageAsXObject().
+        form = pdf_add_object(ctx, outputDoc, form);
+        pdf_update_stream(ctx, outputDoc, form, content, 0);
+    }
+    fz_always(ctx) {
+        if (content) fz_drop_buffer(ctx, content);
+    }
+    fz_catch(ctx) {
+        qWarning() << "[MuPdfExporter] Failed to build highlight appearance:"
+                   << fz_caught_message(ctx);
+        return nullptr;
+    }
+    
+    return form;
+}
+
+pdf_obj* MuPdfExporter::buildHighlightAnnots(const Page* page, qreal pageHeightSn)
+{
+    if (!page || !m_ctx || !m_outputDoc) {
+        return nullptr;
+    }
+    
+    std::vector<const LinkObject*> highlights;
+    for (const auto& obj : page->objects) {
+        const LinkObject* link = dynamic_cast<const LinkObject*>(obj.get());
+        if (!link || !link->visible) continue;
+        // An empty region is a standalone link icon, which has no geometry to
+        // export; None is the legacy select-only value and draws nothing.
+        if (link->region.isEmpty()) continue;
+        if (link->region.style == HighlightRegion::Style::None) continue;
+        if (!link->region.color.isValid()) continue;
+        highlights.push_back(link);
+    }
+    if (highlights.empty()) {
+        return nullptr;
+    }
+    
+    // Ordered the way the page paints them, so where two highlights overlap the
+    // later /Annots entry is the one the app draws on top.
+    std::sort(highlights.begin(), highlights.end(),
+              [](const LinkObject* a, const LinkObject* b) {
+                  if (a->layerAffinity != b->layerAffinity) {
+                      return a->layerAffinity < b->layerAffinity;
+                  }
+                  return a->zOrder < b->zOrder;
+              });
+    
+    pdf_obj* annots = nullptr;
+    
+    fz_try(m_ctx) {
+        annots = pdf_new_array(m_ctx, m_outputDoc, static_cast<int>(highlights.size()));
+        
+        for (const LinkObject* link : highlights) {
+            const QVector<QRectF> snRects = usableHighlightRects(link);
+            if (snRects.isEmpty()) continue;
+            
+            const QVector<QRectF> pdfRects = highlightRectsToPdfSpace(snRects, pageHeightSn);
+            
+            QRectF bbox;
+            for (const QRectF& r : pdfRects) {
+                bbox = bbox.isNull() ? r : bbox.united(r);
+            }
+            if (bbox.isNull()) continue;
+            
+            QColor color = link->region.color;
+            if (m_options.darkenStrokes) {
+                color = DarkModeUtils::darkenColorForExport(color);
+            }
+            
+            pdf_obj* annot = pdf_new_dict(m_ctx, m_outputDoc, 12);
+            pdf_dict_put(m_ctx, annot, PDF_NAME(Type), PDF_NAME(Annot));
+            
+            // Cover is a Highlight; both underline styles are Underline, which
+            // is the closest standard type -- PDF has no dotted variant, so
+            // DottedUnderline relies on the appearance stream below.
+            pdf_dict_put(m_ctx, annot, PDF_NAME(Subtype),
+                         link->region.style == HighlightRegion::Style::Cover
+                             ? PDF_NAME(Highlight)
+                             : PDF_NAME(Underline));
+            
+            pdf_dict_put_rect(m_ctx, annot, PDF_NAME(Rect),
+                              fz_make_rect(bbox.x(), bbox.y(),
+                                           bbox.x() + bbox.width(),
+                                           bbox.y() + bbox.height()));
+            
+            // Quads describe the text that is marked, so they are the full line
+            // rects for every style; only the appearance differs. Corner order
+            // is upper-left, upper-right, lower-left, lower-right, which is
+            // what producers and readers actually use.
+            pdf_obj* quads = pdf_new_array(m_ctx, m_outputDoc, pdfRects.size() * 8);
+            for (const QRectF& pr : pdfRects) {
+                const qreal x0 = pr.x();
+                const qreal x1 = pr.x() + pr.width();
+                const qreal yLower = pr.y();
+                const qreal yUpper = pr.y() + pr.height();
+                pdf_array_push_real(m_ctx, quads, x0); pdf_array_push_real(m_ctx, quads, yUpper);
+                pdf_array_push_real(m_ctx, quads, x1); pdf_array_push_real(m_ctx, quads, yUpper);
+                pdf_array_push_real(m_ctx, quads, x0); pdf_array_push_real(m_ctx, quads, yLower);
+                pdf_array_push_real(m_ctx, quads, x1); pdf_array_push_real(m_ctx, quads, yLower);
+            }
+            pdf_dict_put(m_ctx, annot, PDF_NAME(QuadPoints), quads);
+            
+            // Colour is stored opaque and the transparency goes on /CA, so it
+            // cannot be applied twice by also baking it into the appearance,
+            // and a reader can still adjust it.
+            pdf_obj* colorArray = pdf_new_array(m_ctx, m_outputDoc, 3);
+            pdf_array_push_real(m_ctx, colorArray, color.redF());
+            pdf_array_push_real(m_ctx, colorArray, color.greenF());
+            pdf_array_push_real(m_ctx, colorArray, color.blueF());
+            pdf_dict_put(m_ctx, annot, PDF_NAME(C), colorArray);
+            pdf_dict_put_real(m_ctx, annot, PDF_NAME(CA), color.alphaF());
+            
+            pdf_dict_put_int(m_ctx, annot, PDF_NAME(F), 4);  // Print
+            pdf_dict_put_text_string(m_ctx, annot, PDF_NAME(T), "SpeedyNote");
+            if (!link->id.isEmpty()) {
+                pdf_dict_put_text_string(m_ctx, annot, pdf_new_name(m_ctx, "NM"),
+                                         link->id.toUtf8().constData());
+            }
+            if (!link->description.isEmpty()) {
+                pdf_dict_put_text_string(m_ctx, annot, PDF_NAME(Contents),
+                                         link->description.toUtf8().constData());
+            }
+            
+            // Deliberately no /BM /Multiply: the app composites with plain
+            // source-over, and multiply would not match what the user saw.
+            pdf_obj* form = buildHighlightAppearance(m_ctx, m_outputDoc, snRects, pdfRects,
+                                                     bbox, link->region.style,
+                                                     color, pageHeightSn);
+            if (form) {
+                pdf_obj* ap = pdf_new_dict(m_ctx, m_outputDoc, 1);
+                pdf_dict_put(m_ctx, ap, PDF_NAME(N), form);
+                pdf_dict_put(m_ctx, annot, PDF_NAME(AP), ap);
+            }
+            
+            // Annotations are referenced indirectly; readers need that to treat
+            // them as editable objects rather than inert page furniture.
+            pdf_array_push(m_ctx, annots, pdf_add_object(m_ctx, m_outputDoc, annot));
+        }
+    }
+    fz_catch(m_ctx) {
+        qWarning() << "[MuPdfExporter] Failed to build highlight annotations:"
+                   << fz_caught_message(m_ctx);
+        return nullptr;
+    }
+    
+    if (pdf_array_len(m_ctx, annots) == 0) {
+        return nullptr;
+    }
+    
+    #ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[MuPdfExporter] Built" << pdf_array_len(m_ctx, annots)
+             << "highlight annotation(s)";
+    #endif
+    return annots;
 }
 
 QByteArray MuPdfExporter::compressImage(const QImage& image, bool hasAlpha,

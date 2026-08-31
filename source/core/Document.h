@@ -1929,6 +1929,9 @@ private:
     /// copied set (present in @p pageUuidMap) are repointed to the new page uuid;
     /// out-of-set or edgeless targets are made inert (slot emptied) while keeping
     /// the LinkObject itself. url/markdown/empty slots are untouched (Plan B-links).
+    /// A highlight region's sourceRange page uuid is remapped the same way, but
+    /// an unresolvable one is marked stale rather than dropped: the region rects
+    /// are the rendering truth and the highlight must keep displaying.
     void remapImportedLinkTargets(QJsonObject& pageJson,
                                   const QHash<QString, QString>& pageUuidMap) const;
     
@@ -2056,6 +2059,11 @@ private:
      * @brief Extract a single Page*'s LinkObjects into outline entries.
      *        Factored out of `enumerateLinkOutline`'s previous lambda so
      *        both the rebuild path and the refresh path can share it.
+     * @param requireContent Skip annotations with nothing worth opening: no
+     *        filled slot and no description the user actually wrote. The
+     *        scroll-bar markers use this so a highlight nobody has given
+     *        content to yet does not tick the bar. Auto-derived descriptions do
+     *        not count, which is why `descriptionUserEdited` exists.
      */
     static QVector<LinkOutlineEntry>
     extractLinkOutlineFromPage(const Page* page,
@@ -2063,7 +2071,8 @@ private:
                                 int tileX,
                                 int tileY,
                                 bool edgeless,
-                                bool requireMarkdown = true);
+                                bool requireMarkdown = true,
+                                bool requireContent = false);
 
     /**
      * @brief Read a tile's JSON on disk and extract just the LinkObject
@@ -2074,11 +2083,13 @@ private:
      * `m_tileIndex`).  Safe to call on const paths.
      */
     QVector<LinkOutlineEntry>
-    peekTileLinkOutlineFromDisk(TileCoord coord, bool requireMarkdown = true) const;
+    peekTileLinkOutlineFromDisk(TileCoord coord, bool requireMarkdown = true,
+                                bool requireContent = false) const;
 
     /// Paged-mode counterpart of `peekTileLinkOutlineFromDisk`.
     QVector<LinkOutlineEntry>
-    peekPageLinkOutlineFromDisk(int pageIndex, bool requireMarkdown = true) const;
+    peekPageLinkOutlineFromDisk(int pageIndex, bool requireMarkdown = true,
+                                bool requireContent = false) const;
 
     /**
      * @brief Shared JSON → outline-entry walker used by both peek helpers.
@@ -2093,7 +2104,8 @@ private:
                                        int  tileX,
                                        int  tileY,
                                        const QPointF& tileOrigin,
-                                       bool requireMarkdown = true);
+                                       bool requireMarkdown = true,
+                                       bool requireContent = false);
 
     /// Cache contents, keyed by container.  Empty vectors are allowed
     /// and mean "container exists but has no markdown-backed links."

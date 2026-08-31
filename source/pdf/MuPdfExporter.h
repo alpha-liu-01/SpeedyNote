@@ -174,6 +174,25 @@ public:
     static QByteArray compressImage(const QImage& image, bool hasAlpha, 
                                     const QSizeF& displaySizePt, int targetDpi);
 
+    /**
+     * @brief Convert highlight rects from page space to PDF user space.
+     * @param pageRects Rects in SpeedyNote page coordinates (96 DPI, Y down)
+     * @param pageHeightSn Page height in SpeedyNote units, for the Y-axis flip
+     * @return Rects in PDF points (72 DPI, Y up), one per input
+     *
+     * Each returned rect's x()/y() is the PDF-space LOWER-left corner with
+     * positive width/height, which is exactly the argument order of the `re`
+     * operator. Note this makes QRectF::bottom() the visual top; the y-up
+     * convention is deliberate, since everything downstream is PDF geometry.
+     *
+     * The mapping is 1:1 and drops nothing, so callers can walk the input and
+     * the output in lockstep. Degenerate rects are filtered by the caller.
+     *
+     * Public only so MuPdfExporterTests can reach it, like parsePageRange().
+     */
+    static QVector<QRectF> highlightRectsToPdfSpace(const QVector<QRectF>& pageRects,
+                                                    qreal pageHeightSn);
+
 signals:
     /**
      * @brief Emitted when export progress changes.
@@ -311,6 +330,30 @@ private:
     
     // Note: addImageToPage is implemented as a static helper function in MuPdfExporter.cpp
     // to avoid exposing MuPDF types (fz_buffer, pdf_obj) in the header.
+    
+    // ===== Highlight Annotations =====
+    
+    /**
+     * @brief Build the /Annots array for a page's highlight annotations.
+     * @param page The notebook page being exported
+     * @param pageHeightSn Page height in SpeedyNote units (96 DPI)
+     * @return The array, or nullptr when the page carries no highlight
+     *
+     * Highlights are LinkObjects with a non-empty HighlightRegion. They become
+     * real PDF markup annotations rather than content-stream paths, so a reader
+     * can list, select and delete them. The cost is that annotations paint
+     * after the content stream, so an exported highlight sits above ink it
+     * renders beneath in the app; at 50% alpha that tints rather than hides.
+     *
+     * The caller attaches the result to the page dictionary between
+     * pdf_add_page() and pdf_insert_page().
+     */
+    pdf_obj* buildHighlightAnnots(const Page* page, qreal pageHeightSn);
+    
+    // Note: buildHighlightAppearance() is a static helper in MuPdfExporter.cpp;
+    // it builds the /AP normal-appearance Form XObject, which is what makes the
+    // exported mark match LinkObject::renderRegion() instead of whatever the
+    // viewer would synthesize (no viewer draws a dotted underline).
     
     // ===== Metadata and Outline =====
     

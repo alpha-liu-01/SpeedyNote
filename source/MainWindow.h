@@ -392,9 +392,13 @@ private slots:
     void showPdfSourcesDialog(DocumentViewport* viewport);
     void updatePdfSourceUi(DocumentViewport* viewport);
     void showExportDialog();
-    void updateLinkSlotButtons(DocumentViewport* viewport);  // Phase D: Update subtoolbar slot buttons
     void applySubToolbarValuesToViewport(ToolType tool);  // Phase D: Apply subtoolbar presets to viewport (via signals)
     void applyAllSubToolbarValuesToViewport(DocumentViewport* viewport);  // Phase D: Apply ALL tool presets directly
+    /// Push the Highlighter's four global settings into a viewport. Called from
+    /// both the tab-switch path and connectViewportScrollSignals(), which run
+    /// from different signal handlers in no guaranteed order, so they have to
+    /// push the same way.
+    void applyHighlighterSettingsToViewport(DocumentViewport* viewport);
     
     // Phase doc-1: Document operations
     void saveDocument();          // doc-1.1: Save document to JSON file (Ctrl+S)
@@ -756,6 +760,9 @@ private:
     // Phase D: Auto-highlight sync connection (subtoolbar ↔ viewport)
     QMetaObject::Connection m_autoHighlightConn;
 
+    // Select-vs-highlight sync connection (viewport -> subtoolbar)
+    QMetaObject::Connection m_highlightOnReleaseConn;
+
     // Highlighter selection-source sync connection (viewport -> subtoolbar)
     QMetaObject::Connection m_highlighterModeConn;
 
@@ -804,6 +811,7 @@ private:
     QMetaObject::Connection m_markdownNoteOpenConn;   // Phase M.5: For requestOpenMarkdownNote
     QMetaObject::Connection m_userWarningConn;        // For viewport userWarning → QMessageBox
     QMetaObject::Connection m_linkObjectListConn;     // M.7.3: For linkObjectListMayHaveChanged
+    QMetaObject::Connection m_linkAppearanceConn;     // For linkObjectAppearanceChanged
     QMetaObject::Connection m_pdfSourcesConn;
     QMetaObject::Connection m_strokesChangedConn;      // OCR: For strokesChanged → debounce
     QMetaObject::Connection m_ocrConvertConn;          // For convertOcrTextRequested

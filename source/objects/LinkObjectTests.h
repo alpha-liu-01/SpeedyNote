@@ -13,6 +13,7 @@
 // - Slot management methods
 // - cloneWithBackLink() functionality
 // - Factory creates LinkObject from JSON
+// - HighlightRegion rebasing, badge rules, serialization and legacy loading
 // ============================================================================
 
 #include "LinkObject.h"
@@ -497,6 +498,263 @@ inline bool testFactoryCreation()
 }
 
 /**
+ * @brief Test the highlight region: rebasing, bounds, serialization, hit test.
+ */
+inline bool testHighlightRegion()
+{
+    qDebug() << "=== Test: HighlightRegion ===";
+    
+    bool success = true;
+    
+    const QVector<QRectF> pageRects = {
+        QRectF(100, 400, 200, 14),
+        QRectF(80,  420, 220, 14),
+        QRectF(80,  440, 150, 14)
+    };
+    
+    // ----- Rebasing: position/size become the bounding box -----
+    {
+        LinkObject link;
+        link.setRegionFromPageRects(pageRects);
+        
+        // Bounding box spans x 80..300, y 400..454.
+        if (link.position != QPointF(80, 400)) {
+            qDebug() << "FAIL: position should be the region bbox top-left, got"
+                     << link.position;
+            success = false;
+        }
+        if (link.size != QSizeF(220, 54)) {
+            qDebug() << "FAIL: size should be the region bbox size, got" << link.size;
+            success = false;
+        }
+        if (link.region.rects.size() != 3) {
+            qDebug() << "FAIL: expected 3 region rects, got" << link.region.rects.size();
+            success = false;
+        }
+        // Object-local: the first line sits 20pt right of and level with the origin.
+        if (link.region.rects[0] != QRectF(20, 0, 200, 14)) {
+            qDebug() << "FAIL: region rects are not object-local, got"
+                     << link.region.rects[0];
+            success = false;
+        }
+        if (link.regionRectsInPageSpace() != pageRects) {
+            qDebug() << "FAIL: regionRectsInPageSpace() did not round-trip";
+            success = false;
+        }
+        
+        // Moving the annotation is a single position change with no fixups.
+        link.moveBy(QPointF(15, -25));
+        const QVector<QRectF> moved = link.regionRectsInPageSpace();
+        if (moved[0] != pageRects[0].translated(QPointF(15, -25))) {
+            qDebug() << "FAIL: moving the object did not carry the region";
+            success = false;
+        }
+        
+        // Clearing restores icon-sized bounds.
+        link.setRegionFromPageRects({});
+        if (!link.region.isEmpty()
+            || link.size != QSizeF(LinkObject::ICON_SIZE, LinkObject::ICON_SIZE)) {
+            qDebug() << "FAIL: clearing the region did not restore icon bounds";
+            success = false;
+        }
+    }
+    
+    // ----- containsPoint(): region body plus the badge -----
+    {
+        LinkObject link;
+        link.setRegionFromPageRects(pageRects);
+        link.descriptionUserEdited = true;   // badge shown
+        
+        if (!link.containsPoint(QPointF(150, 405))) {
+            qDebug() << "FAIL: a point on the first highlighted line should hit";
+            success = false;
+        }
+        if (!link.containsPoint(QPointF(100, 445))) {
+            qDebug() << "FAIL: a point on the third highlighted line should hit";
+            success = false;
+        }
+        // Inside the bounding box but in the gap between lines 1 and 2.
+        if (link.containsPoint(QPointF(90, 416))) {
+            qDebug() << "FAIL: the gap between lines should not hit";
+            success = false;
+        }
+        // Right of the short third line, still inside the bounding box.
+        if (link.containsPoint(QPointF(280, 445))) {
+            qDebug() << "FAIL: bounding-box filler right of a short line should not hit";
+            success = false;
+        }
+        // The badge sits in the margin, outside boundingRect().
+        const QRectF badge = link.iconRect();
+        if (badge.topLeft()
+            != QPointF(80 - LinkObject::ICON_SIZE - LinkObject::ICON_GAP, 400)) {
+            qDebug() << "FAIL: badge is not in the left margin, got" << badge;
+            success = false;
+        }
+        if (!link.containsPoint(badge.center())) {
+            qDebug() << "FAIL: the badge should stay hit-testable";
+            success = false;
+        }
+        
+        // Hidden badge is not a hit target, but the mark still is.
+        link.descriptionUserEdited = false;
+        if (link.shouldShowIcon()) {
+            qDebug() << "FAIL: a highlight with nothing worth opening should hide its badge";
+            success = false;
+        }
+        if (link.containsPoint(badge.center())) {
+            qDebug() << "FAIL: a hidden badge should not be hit-testable";
+            success = false;
+        }
+        if (!link.containsPoint(QPointF(150, 405))) {
+            qDebug() << "FAIL: hiding the badge must not affect the mark";
+            success = false;
+        }
+    }
+    
+    // ----- Badge visibility rules -----
+    {
+        // Empty region: always shown, since the badge is the only handle.
+        LinkObject icon;
+        if (!icon.shouldShowIcon()) {
+            qDebug() << "FAIL: an empty-region annotation must always show its badge";
+            success = false;
+        }
+        icon.description = QStringLiteral("auto");
+        if (!icon.shouldShowIcon()) {
+            qDebug() << "FAIL: an empty-region annotation must always show its badge";
+            success = false;
+        }
+        if (icon.iconRect().topLeft() != icon.position) {
+            qDebug() << "FAIL: with no region, position is the badge anchor";
+            success = false;
+        }
+        
+        // Region present: a filled slot is enough on its own.
+        LinkObject highlight;
+        highlight.setRegionFromPageRects(pageRects);
+        if (highlight.shouldShowIcon()) {
+            qDebug() << "FAIL: a bare highlight should hide its badge";
+            success = false;
+        }
+        highlight.linkSlots[1].type = LinkSlot::Type::Url;
+        highlight.linkSlots[1].url = QStringLiteral("https://example.com");
+        if (!highlight.shouldShowIcon()) {
+            qDebug() << "FAIL: a filled slot should reveal the badge";
+            success = false;
+        }
+    }
+    
+    // ----- Serialization round-trip -----
+    {
+        LinkObject link;
+        link.setRegionFromPageRects(pageRects);
+        link.region.style = HighlightRegion::Style::DottedUnderline;
+        link.region.color = QColor(255, 255, 0, 128);
+        link.region.sourceRange.pageUuid = QStringLiteral("page-uuid-xyz");
+        link.region.sourceRange.source = HighlightRegion::Source::Ocr;
+        link.region.sourceRange.startBoxIndex = 2;
+        link.region.sourceRange.startCharIndex = 5;
+        link.region.sourceRange.endBoxIndex = 4;
+        link.region.sourceRange.endCharIndex = 11;
+        link.descriptionUserEdited = true;
+        
+        LinkObject restored;
+        restored.loadFromJson(link.toJson());
+        
+        if (restored.region.rects != link.region.rects) {
+            qDebug() << "FAIL: region rects not preserved";
+            success = false;
+        }
+        if (restored.region.style != HighlightRegion::Style::DottedUnderline) {
+            qDebug() << "FAIL: region style not preserved";
+            success = false;
+        }
+        if (restored.region.color != QColor(255, 255, 0, 128)) {
+            qDebug() << "FAIL: region color not preserved, got" << restored.region.color;
+            success = false;
+        }
+        if (!restored.descriptionUserEdited) {
+            qDebug() << "FAIL: descriptionUserEdited not preserved";
+            success = false;
+        }
+        const HighlightRegion::SourceRange& r = restored.region.sourceRange;
+        if (r.pageUuid != QStringLiteral("page-uuid-xyz")
+            || r.source != HighlightRegion::Source::Ocr
+            || r.startBoxIndex != 2 || r.startCharIndex != 5
+            || r.endBoxIndex != 4 || r.endCharIndex != 11
+            || r.stale) {
+            qDebug() << "FAIL: sourceRange not preserved";
+            success = false;
+        }
+        if (!r.isUsable()) {
+            qDebug() << "FAIL: a freshly restored range should be usable";
+            success = false;
+        }
+        
+        // A clone carries the region and the flag.
+        auto clone = link.cloneWithBackLink(QStringLiteral("src-page"));
+        if (clone->region.rects != link.region.rects
+            || !clone->descriptionUserEdited
+            || clone->size != link.size) {
+            qDebug() << "FAIL: clone did not carry the region";
+            success = false;
+        }
+    }
+    
+    // ----- Legacy JSON: no region key at all -----
+    {
+        LinkObject link;
+        link.setRegionFromPageRects(pageRects);
+        QJsonObject json = link.toJson();
+        json.remove(QStringLiteral("region"));
+        json.remove(QStringLiteral("descriptionUserEdited"));
+        // A pre-region document also carries icon-sized bounds.
+        json["width"] = LinkObject::ICON_SIZE;
+        json["height"] = LinkObject::ICON_SIZE;
+        
+        LinkObject restored;
+        restored.loadFromJson(json);
+        
+        if (!restored.region.isEmpty()) {
+            qDebug() << "FAIL: absent region key should load as an empty region";
+            success = false;
+        }
+        if (restored.descriptionUserEdited) {
+            qDebug() << "FAIL: absent flag should default to false";
+            success = false;
+        }
+        if (!restored.shouldShowIcon()) {
+            qDebug() << "FAIL: a legacy annotation must keep its icon";
+            success = false;
+        }
+        // Falls all the way back to the historical 24x24 icon hit test.
+        if (!restored.containsPoint(restored.position + QPointF(12, 12))
+            || restored.containsPoint(restored.position + QPointF(30, 12))) {
+            qDebug() << "FAIL: legacy hit testing is not the 24x24 icon rect";
+            success = false;
+        }
+    }
+    
+    // ----- An empty region serializes exactly as it did before regions -----
+    {
+        LinkObject icon;
+        icon.description = QStringLiteral("plain");
+        const QJsonObject json = icon.toJson();
+        if (json.contains(QStringLiteral("region"))
+            || json.contains(QStringLiteral("descriptionUserEdited"))) {
+            qDebug() << "FAIL: an empty region should not add keys to the JSON";
+            success = false;
+        }
+    }
+    
+    if (success) {
+        qDebug() << "PASS: HighlightRegion successful!";
+    }
+    
+    return success;
+}
+
+/**
  * @brief Test slot clear() method.
  */
 inline bool testSlotClear()
@@ -559,6 +817,9 @@ inline bool runAllTests()
     qDebug() << "";
     
     allPass &= testContainsPoint();
+    qDebug() << "";
+    
+    allPass &= testHighlightRegion();
     qDebug() << "";
     
     allPass &= testCloneWithBackLink();

@@ -8,10 +8,29 @@
 //
 // Current tests:
 // - parsePageRange() edge cases
+// - highlightRectsToPdfSpace() coordinate conversion
+// - highlight annotations survive a real export round-trip
 // ============================================================================
 
 #include "MuPdfExporter.h"
 #include <QDebug>
+
+#ifdef SPEEDYNOTE_MUPDF_EXPORT
+#include "../core/Document.h"
+#include "../core/Page.h"
+#include "../objects/LinkObject.h"
+
+#include <mupdf/fitz.h>
+#include <mupdf/pdf.h>
+
+#include <QDir>
+#include <QFile>
+#include <QRectF>
+#include <QVector>
+
+#include <cmath>
+#include <memory>
+#endif
 
 namespace MuPdfExporterTests {
 
@@ -299,6 +318,358 @@ inline bool testParsePageRange()
     return success;
 }
 
+#ifdef SPEEDYNOTE_MUPDF_EXPORT
+
+/**
+ * @brief Test highlightRectsToPdfSpace().
+ *
+ * Covers the 96-to-72 DPI scale, the Y-axis flip onto a bottom-left origin,
+ * and the 1:1 mapping callers rely on to walk input and output in lockstep.
+ */
+inline bool testHighlightRectsToPdfSpace()
+{
+    qDebug() << "=== Test: highlightRectsToPdfSpace() ===";
+    bool success = true;
+    
+    auto nearly = [](qreal a, qreal b) { return std::fabs(a - b) < 0.001; };
+    
+    // Test 1: a mid-page rect, scale and flip together
+    {
+        // Page-space (100, 200) 300x20 on a 1000-unit-tall page. Scale is 0.75,
+        // and the PDF-space lower edge comes from the page-space bottom (220).
+        const QVector<QRectF> in{QRectF(100, 200, 300, 20)};
+        const QVector<QRectF> out = MuPdfExporter::highlightRectsToPdfSpace(in, 1000.0);
+        
+        if (out.size() != 1) {
+            qDebug() << "FAIL: expected 1 rect, got" << out.size();
+            success = false;
+        } else if (!nearly(out[0].x(), 75.0) || !nearly(out[0].y(), 585.0) ||
+                   !nearly(out[0].width(), 225.0) || !nearly(out[0].height(), 15.0)) {
+            qDebug() << "FAIL: expected (75, 585) 225x15, got" << out[0];
+            success = false;
+        } else {
+            qDebug() << "  - Scale and Y flip: OK";
+        }
+    }
+    
+    // Test 2: a rect flush with the top of the page stays flush with the top
+    {
+        const QVector<QRectF> in{QRectF(0, 0, 96, 96)};
+        const QVector<QRectF> out = MuPdfExporter::highlightRectsToPdfSpace(in, 1000.0);
+        
+        const qreal expectedTop = 1000.0 * 0.75;  // page top in PDF space
+        if (out.size() != 1 || !nearly(out[0].y() + out[0].height(), expectedTop)) {
+            qDebug() << "FAIL: top-flush rect should reach the PDF page top"
+                     << expectedTop << ", got" << out;
+            success = false;
+        } else {
+            qDebug() << "  - Top-flush rect: OK";
+        }
+    }
+    
+    // Test 3: mapping is 1:1, degenerate rects included (callers filter)
+    {
+        const QVector<QRectF> in{QRectF(0, 0, 10, 10), QRectF(5, 5, 0, 0),
+                                 QRectF(20, 20, 10, 10)};
+        const QVector<QRectF> out = MuPdfExporter::highlightRectsToPdfSpace(in, 500.0);
+        
+        if (out.size() != in.size()) {
+            qDebug() << "FAIL: mapping should be 1:1, got" << out.size()
+                     << "for" << in.size() << "inputs";
+            success = false;
+        } else {
+            qDebug() << "  - 1:1 mapping: OK";
+        }
+    }
+    
+    // Test 4: empty input
+    {
+        if (!MuPdfExporter::highlightRectsToPdfSpace({}, 100.0).isEmpty()) {
+            qDebug() << "FAIL: empty input should give empty output";
+            success = false;
+        } else {
+            qDebug() << "  - Empty input: OK";
+        }
+    }
+    
+    if (success) {
+        qDebug() << "=== highlightRectsToPdfSpace(): ALL TESTS PASSED ===";
+    } else {
+        qDebug() << "=== highlightRectsToPdfSpace(): SOME TESTS FAILED ===";
+    }
+    
+    return success;
+}
+
+/**
+ * @brief Export a page of highlights and read the annotations back out.
+ *
+ * A hand-written annotation dictionary that is subtly malformed produces a
+ * file that still opens, so nothing short of reopening the output and walking
+ * /Annots will catch it.
+ */
+inline bool testHighlightAnnotationExport()
+{
+    qDebug() << "=== Test: highlight annotation export ===";
+    bool success = true;
+    
+    auto doc = Document::createNew(QStringLiteral("Highlight Export Test"));
+    Page* page = doc->page(0);
+    if (!page) {
+        qDebug() << "FAIL: new document has no page 0";
+        return false;
+    }
+    
+    // A Cover highlight spanning two lines, with a description that should
+    // travel as /Contents.
+    {
+        auto link = std::make_unique<LinkObject>();
+        link->setRegionFromPageRects({QRectF(100, 200, 300, 20),
+                                      QRectF(100, 224, 180, 20)});
+        link->region.style = HighlightRegion::Style::Cover;
+        link->region.color = QColor(255, 255, 0, HighlightRegion::DEFAULT_OPACITY);
+        link->description = QStringLiteral("marked passage");
+        page->addObject(std::move(link));
+    }
+    
+    // A dotted underline, which has no standard PDF type and so leans entirely
+    // on the appearance stream.
+    {
+        auto link = std::make_unique<LinkObject>();
+        link->setRegionFromPageRects({QRectF(100, 400, 250, 18)});
+        link->region.style = HighlightRegion::Style::DottedUnderline;
+        link->region.color = QColor(255, 0, 0, HighlightRegion::DEFAULT_OPACITY);
+        page->addObject(std::move(link));
+    }
+    
+    // Neither of these is a highlight, so neither may produce an annotation:
+    // a standalone link icon, and the legacy select-only style.
+    {
+        auto link = std::make_unique<LinkObject>();
+        link->position = QPointF(50, 50);
+        page->addObject(std::move(link));
+    }
+    {
+        auto link = std::make_unique<LinkObject>();
+        link->setRegionFromPageRects({QRectF(100, 600, 200, 20)});
+        link->region.style = HighlightRegion::Style::None;
+        link->region.color = QColor(0, 255, 0, HighlightRegion::DEFAULT_OPACITY);
+        page->addObject(std::move(link));
+    }
+    
+    const QString outPath =
+        QDir::temp().filePath(QStringLiteral("speedynote_highlight_export_test.pdf"));
+    QFile::remove(outPath);
+    
+    MuPdfExporter exporter;
+    exporter.setDocument(doc.get());
+    
+    PdfExportOptions options;
+    options.outputPath = outPath;
+    
+    const PdfExportResult result = exporter.exportPdf(options);
+    if (!result.success) {
+        qDebug() << "FAIL: export failed:" << result.errorMessage;
+        return false;
+    }
+    
+    // Reopen and inspect
+    fz_context* ctx = fz_new_context(nullptr, nullptr, FZ_STORE_DEFAULT);
+    if (!ctx) {
+        qDebug() << "FAIL: could not create a MuPDF context";
+        return false;
+    }
+    
+    pdf_document* pdf = nullptr;
+    pdf_page* pdfPage = nullptr;
+    
+    fz_try(ctx) {
+        fz_register_document_handlers(ctx);
+        pdf = pdf_open_document(ctx, outPath.toUtf8().constData());
+        pdfPage = pdf_load_page(ctx, pdf, 0);
+        
+        int count = 0;
+        int coverQuads = 0;
+        bool sawHighlight = false;
+        bool sawUnderline = false;
+        bool contentsMatched = false;
+        bool allHaveAppearance = true;
+        bool opacityMatched = true;
+        
+        for (pdf_annot* annot = pdf_first_annot(ctx, pdfPage); annot;
+             annot = pdf_next_annot(ctx, annot)) {
+            count++;
+            
+            const enum pdf_annot_type type = pdf_annot_type(ctx, annot);
+            if (type == PDF_ANNOT_HIGHLIGHT) {
+                sawHighlight = true;
+                coverQuads = pdf_annot_quad_point_count(ctx, annot);
+                const char* contents = pdf_annot_contents(ctx, annot);
+                contentsMatched = contents &&
+                                  QString::fromUtf8(contents) == QStringLiteral("marked passage");
+            } else if (type == PDF_ANNOT_UNDERLINE) {
+                sawUnderline = true;
+            }
+            
+            // 128/255 is what DEFAULT_OPACITY round-trips to on /CA.
+            if (std::fabs(pdf_annot_opacity(ctx, annot) - (128.0f / 255.0f)) > 0.01f) {
+                opacityMatched = false;
+            }
+            
+            if (!pdf_dict_get(ctx, pdf_annot_obj(ctx, annot), PDF_NAME(AP))) {
+                allHaveAppearance = false;
+            }
+        }
+        
+        if (count != 2) {
+            qDebug() << "FAIL: expected 2 annotations (empty region and None style"
+                     << "must be skipped), got" << count;
+            success = false;
+        } else {
+            qDebug() << "  - Only real highlights exported: OK";
+        }
+        
+        if (!sawHighlight || !sawUnderline) {
+            qDebug() << "FAIL: expected one Highlight and one Underline subtype;"
+                     << "highlight:" << sawHighlight << "underline:" << sawUnderline;
+            success = false;
+        } else {
+            qDebug() << "  - Cover maps to Highlight, dotted maps to Underline: OK";
+        }
+        
+        if (coverQuads != 2) {
+            qDebug() << "FAIL: two-line Cover should carry 2 quads, got" << coverQuads;
+            success = false;
+        } else {
+            qDebug() << "  - One quad per line: OK";
+        }
+        
+        if (!contentsMatched) {
+            qDebug() << "FAIL: description should travel as /Contents";
+            success = false;
+        } else {
+            qDebug() << "  - Description as /Contents: OK";
+        }
+        
+        if (!opacityMatched) {
+            qDebug() << "FAIL: /CA should carry the region alpha";
+            success = false;
+        } else {
+            qDebug() << "  - Alpha on /CA: OK";
+        }
+        
+        if (!allHaveAppearance) {
+            qDebug() << "FAIL: every highlight needs its own /AP, otherwise the"
+                     << "viewer draws its own idea of an underline";
+            success = false;
+        } else {
+            qDebug() << "  - Appearance stream present: OK";
+        }
+        
+        // Rasterize and look at the result. A structurally valid annotation can
+        // still draw nothing (a malformed appearance stream) or draw in the
+        // mirrored position (a flip error), and neither shows up above.
+        //
+        // fz_new_pixmap_from_page composites annotations, and the pixmap origin
+        // is the page top-left just like SpeedyNote's page space, so a
+        // page-space coordinate maps to a pixel by scale alone.
+        const float renderScale = 4.0f;
+        auto toPixel = [renderScale](qreal sn) {
+            return static_cast<int>(sn * 0.75 * renderScale);
+        };
+        
+        fz_pixmap* pix = fz_new_pixmap_from_page(
+            ctx, reinterpret_cast<fz_page*>(pdfPage),
+            fz_scale(renderScale, renderScale), fz_device_rgb(ctx), 0);
+        
+        auto isWhite = [&](int px, int py) {
+            if (px < 0 || py < 0 || px >= pix->w || py >= pix->h) return true;
+            const unsigned char* p =
+                pix->samples + static_cast<qsizetype>(py) * pix->stride
+                             + static_cast<qsizetype>(px) * pix->n;
+            return p[0] > 250 && p[1] > 250 && p[2] > 250;
+        };
+        auto isYellowish = [&](int px, int py) {
+            if (px < 0 || py < 0 || px >= pix->w || py >= pix->h) return false;
+            const unsigned char* p =
+                pix->samples + static_cast<qsizetype>(py) * pix->stride
+                             + static_cast<qsizetype>(px) * pix->n;
+            return p[0] > 200 && p[1] > 200 && p[2] < 200;
+        };
+        
+        fz_try(ctx) {
+            // Cover, both lines. Yellow at 50% over white is (255, 255, 127).
+            const bool line1 = isYellowish(toPixel(250), toPixel(210));
+            const bool line2 = isYellowish(toPixel(190), toPixel(234));
+            if (!line1 || !line2) {
+                qDebug() << "FAIL: Cover should paint both lines; line 1:" << line1
+                         << "line 2:" << line2;
+                success = false;
+            } else {
+                qDebug() << "  - Cover paints where the text is: OK";
+            }
+            
+            // Just above the mark. Catches a Y flip landing it elsewhere.
+            if (!isWhite(toPixel(250), toPixel(180))) {
+                qDebug() << "FAIL: page above the highlight should be untouched";
+                success = false;
+            } else {
+                qDebug() << "  - Nothing painted outside the region: OK";
+            }
+            
+            // DottedUnderline sits in the bottom tenth of its line rect
+            // (100, 400) 250x18, so the baseline band has dots and the middle
+            // of the line stays clear.
+            int dotPixels = 0;
+            for (qreal x = 100; x < 350; x += 0.5) {
+                if (!isWhite(toPixel(x), toPixel(417))) dotPixels++;
+            }
+            int midLinePixels = 0;
+            for (qreal x = 100; x < 350; x += 0.5) {
+                if (!isWhite(toPixel(x), toPixel(408))) midLinePixels++;
+            }
+            
+            if (dotPixels == 0) {
+                qDebug() << "FAIL: DottedUnderline drew nothing on its baseline";
+                success = false;
+            } else if (midLinePixels != 0) {
+                qDebug() << "FAIL: DottedUnderline should not cover the line,"
+                         << "but" << midLinePixels << "mid-line pixels are painted";
+                success = false;
+            } else {
+                qDebug() << "  - Dotted underline on the baseline only: OK";
+            }
+        }
+        fz_always(ctx) {
+            fz_drop_pixmap(ctx, pix);
+        }
+        fz_catch(ctx) {
+            fz_rethrow(ctx);
+        }
+    }
+    fz_always(ctx) {
+        if (pdfPage) fz_drop_page(ctx, reinterpret_cast<fz_page*>(pdfPage));
+        if (pdf) pdf_drop_document(ctx, pdf);
+        fz_drop_context(ctx);
+    }
+    fz_catch(ctx) {
+        qDebug() << "FAIL: could not reopen the exported PDF:" << fz_caught_message(ctx);
+        success = false;
+    }
+    
+    QFile::remove(outPath);
+    
+    if (success) {
+        qDebug() << "=== highlight annotation export: ALL TESTS PASSED ===";
+    } else {
+        qDebug() << "=== highlight annotation export: SOME TESTS FAILED ===";
+    }
+    
+    return success;
+}
+
+#endif // SPEEDYNOTE_MUPDF_EXPORT
+
 /**
  * @brief Run all MuPdfExporter tests.
  * @return true if all tests pass, false otherwise.
@@ -313,6 +684,10 @@ inline bool runAllTests()
     bool allPassed = true;
     
     allPassed &= testParsePageRange();
+    #ifdef SPEEDYNOTE_MUPDF_EXPORT
+    allPassed &= testHighlightRectsToPdfSpace();
+    allPassed &= testHighlightAnnotationExport();
+    #endif
     
     qDebug() << "";
     if (allPassed) {

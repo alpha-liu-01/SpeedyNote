@@ -23,6 +23,7 @@ const QString HighlighterSubToolbar::SETTINGS_GROUP_HIGHLIGHTER = "highlighter";
 const QString HighlighterSubToolbar::KEY_COLOR_PREFIX = "color";
 const QString HighlighterSubToolbar::KEY_SELECTED_COLOR = "selectedColor";
 const QString HighlighterSubToolbar::KEY_AUTO_HIGHLIGHT = "autoHighlight";
+const QString HighlighterSubToolbar::KEY_HIGHLIGHT_ON_RELEASE = "highlightOnRelease";
 const QString HighlighterSubToolbar::KEY_SELECTION_SOURCE = "selectionSource";
 
 HighlighterSubToolbar::HighlighterSubToolbar(QWidget* parent)
@@ -43,10 +44,23 @@ void HighlighterSubToolbar::createWidgets()
         addWidget(m_colorButtons[i]);
     }
     
-    // Add separator before the auto-highlight dropdown
+    // Add separator before the highlight controls
     addSeparator();
 
-    // Auto-highlight style dropdown (None / Cover / Underline / Dotted underline)
+    // Select-vs-highlight toggle. This used to be HighlightStyle::None hiding
+    // inside the style dropdown, which made a whole tool mode look like one
+    // more appearance option.
+    m_highlightModeToggle = new ModeToggleButton(this);
+    m_highlightModeToggle->setModeIconNames("highlight_none", "marker");
+    m_highlightModeToggle->setDarkMode(isDarkMode());
+    m_highlightModeToggle->setModeToolTips(
+        tr("Select text only (click to highlight on release)"),
+        tr("Highlight on release (click to select text only)")
+    );
+    addWidget(m_highlightModeToggle);
+
+    // Auto-highlight style dropdown (Cover / Underline / Dotted underline).
+    // No "None" entry: that is the toggle above.
     m_autoHighlightButton = new QToolButton(this);
     m_autoHighlightButton->setPopupMode(QToolButton::InstantPopup);
     m_autoHighlightButton->setToolTip(tr("Auto-highlight style"));
@@ -54,11 +68,11 @@ void HighlighterSubToolbar::createWidgets()
     m_autoHighlightButton->setIconSize(QSize(20, 20));
 
     m_autoHighlightMenu = new QMenu(m_autoHighlightButton);
-    m_styleActions[static_cast<int>(HighlightStyle::None)]            = m_autoHighlightMenu->addAction(tr("None"));
     m_styleActions[static_cast<int>(HighlightStyle::Cover)]           = m_autoHighlightMenu->addAction(tr("Cover text"));
     m_styleActions[static_cast<int>(HighlightStyle::Underline)]       = m_autoHighlightMenu->addAction(tr("Underline"));
     m_styleActions[static_cast<int>(HighlightStyle::DottedUnderline)] = m_autoHighlightMenu->addAction(tr("Dotted underline"));
     for (int i = 0; i < kNumStyles; ++i) {
+        if (!m_styleActions[i]) continue;  // None has no entry
         m_styleActions[i]->setData(i);
         m_styleActions[i]->setCheckable(true);
     }
@@ -93,6 +107,10 @@ void HighlighterSubToolbar::setupConnections()
         });
     }
     
+    // Highlight-on-release toggle connection
+    connect(m_highlightModeToggle, &ModeToggleButton::modeChanged,
+            this, &HighlighterSubToolbar::onHighlightOnReleaseToggled);
+
     // Auto-highlight style dropdown connection
     connect(m_autoHighlightMenu, &QMenu::triggered,
             this, &HighlighterSubToolbar::onAutoHighlightStyleTriggered);
@@ -122,10 +140,25 @@ void HighlighterSubToolbar::loadFromSettings()
     m_selectedColorIndex = settings.value(KEY_SELECTED_COLOR, 0).toInt();
 
     // Load auto-highlight style. Stored as int in [0..kNumStyles-1]. Backward-compat:
-    // an older `bool true` value is read via toInt() as 1 => Cover, `false` => None.
-    const int styleInt = qBound(0, settings.value(KEY_AUTO_HIGHLIGHT, 0).toInt(),
+    // an older `bool true` value is read via toInt() as 1 => Cover, `false` => 0.
+    const int styleInt = qBound(0, settings.value(KEY_AUTO_HIGHLIGHT,
+                                                  static_cast<int>(HighlightStyle::Cover)).toInt(),
                                 kNumStyles - 1);
     m_autoHighlightStyle = static_cast<HighlightStyle>(styleInt);
+
+    // Load highlight-on-release, migrating the old style-0-means-select-only
+    // encoding on first run. A style of 0 no longer has a meaning of its own,
+    // so it is promoted to Cover and its intent moves to the toggle. Fresh
+    // installs land on true: a Highlighter that highlights nothing when you
+    // drag over text is exactly the confusion this toggle exists to remove.
+    if (settings.contains(KEY_HIGHLIGHT_ON_RELEASE)) {
+        m_highlightOnRelease = settings.value(KEY_HIGHLIGHT_ON_RELEASE, true).toBool();
+    } else {
+        m_highlightOnRelease = (m_autoHighlightStyle != HighlightStyle::None);
+    }
+    if (m_autoHighlightStyle == HighlightStyle::None) {
+        m_autoHighlightStyle = HighlightStyle::Cover;
+    }
 
     // Load selection source (PDF vs OCR)
     int srcInt = qBound(0, settings.value(KEY_SELECTION_SOURCE, 0).toInt(), 1);
@@ -136,6 +169,11 @@ void HighlighterSubToolbar::loadFromSettings()
     // Apply settings
     selectColorPreset(m_selectedColorIndex);
     updateAutoHighlightButtonIcon();
+    if (m_highlightModeToggle) {
+        m_highlightModeToggle->blockSignals(true);
+        m_highlightModeToggle->setCurrentMode(m_highlightOnRelease ? 1 : 0);
+        m_highlightModeToggle->blockSignals(false);
+    }
     if (m_selectionSourceToggle) {
         m_selectionSourceToggle->blockSignals(true);
         m_selectionSourceToggle->setCurrentMode(static_cast<int>(m_selectionSource));
@@ -166,6 +204,14 @@ void HighlighterSubToolbar::saveAutoHighlightToSettings()
     QSettings settings;
     settings.beginGroup(SETTINGS_GROUP_HIGHLIGHTER);
     settings.setValue(KEY_AUTO_HIGHLIGHT, static_cast<int>(m_autoHighlightStyle));
+    settings.endGroup();
+}
+
+void HighlighterSubToolbar::saveHighlightOnReleaseToSettings()
+{
+    QSettings settings;
+    settings.beginGroup(SETTINGS_GROUP_HIGHLIGHTER);
+    settings.setValue(KEY_HIGHLIGHT_ON_RELEASE, m_highlightOnRelease);
     settings.endGroup();
 }
 
@@ -233,9 +279,9 @@ void HighlighterSubToolbar::restoreTabState(int tabIndex)
     // Restore selection
     selectColorPreset(state.selectedColorIndex);
     
-    // NOTE: Auto-highlight style is NOT restored here.
-    // DocumentViewport is the source of truth for auto-highlight style (per-viewport).
-    // The dropdown is synced from viewport via setAutoHighlightStyle() in MainWindow.
+    // NOTE: Auto-highlight style, highlight-on-release and selection source are
+    // NOT per-tab. They are global tool settings backed by QSettings, like the
+    // highlighter colour, and MainWindow pushes them into each viewport.
 }
 
 void HighlighterSubToolbar::saveTabState(int tabIndex)
@@ -250,9 +296,8 @@ void HighlighterSubToolbar::saveTabState(int tabIndex)
     // Save selection
     state.selectedColorIndex = m_selectedColorIndex;
     
-    // NOTE: Auto-highlight state is NOT saved here.
-    // DocumentViewport stores auto-highlight state per-viewport (per-tab).
-    // We don't duplicate that state in the subtoolbar.
+    // NOTE: Auto-highlight state is NOT saved here - it is global, not per-tab,
+    // and lives in QSettings.
     state.initialized = true;
 }
 
@@ -312,6 +357,11 @@ void HighlighterSubToolbar::onAutoHighlightStyleTriggered(QAction* action)
     if (!action) return;
     const int v = qBound(0, action->data().toInt(), kNumStyles - 1);
     const HighlightStyle s = static_cast<HighlightStyle>(v);
+
+    // Asking for a style is asking to highlight. Without this the dropdown is a
+    // dead control whenever the toggle happens to be off.
+    setHighlightOnReleaseFromShortcut(true);
+
     if (s == m_autoHighlightStyle) {
         // Already active; just re-sync the check state in case it drifted.
         updateAutoHighlightButtonIcon();
@@ -323,13 +373,50 @@ void HighlighterSubToolbar::onAutoHighlightStyleTriggered(QAction* action)
     emit autoHighlightStyleChanged(s);
 }
 
+void HighlighterSubToolbar::onHighlightOnReleaseToggled(int mode)
+{
+    const bool enabled = (mode == 1);
+    if (enabled == m_highlightOnRelease) {
+        return;
+    }
+    m_highlightOnRelease = enabled;
+    saveHighlightOnReleaseToSettings();
+    emit highlightOnReleaseChanged(enabled);
+}
+
+void HighlighterSubToolbar::setHighlightOnRelease(bool enabled)
+{
+    if (m_highlightOnRelease == enabled) return;
+
+    // UI-only update, no signal: this is the sync-from-viewport direction, so
+    // emitting back would create a feedback loop.
+    m_highlightOnRelease = enabled;
+    if (m_highlightModeToggle) {
+        m_highlightModeToggle->blockSignals(true);
+        m_highlightModeToggle->setCurrentMode(enabled ? 1 : 0);
+        m_highlightModeToggle->blockSignals(false);
+    }
+}
+
+void HighlighterSubToolbar::setHighlightOnReleaseFromShortcut(bool enabled)
+{
+    if (m_highlightOnRelease == enabled) return;
+    if (m_highlightModeToggle) {
+        // Drive the widget so the change goes through onHighlightOnReleaseToggled
+        // and picks up persistence plus the one signal emission.
+        m_highlightModeToggle->setCurrentMode(enabled ? 1 : 0);
+    } else {
+        onHighlightOnReleaseToggled(enabled ? 1 : 0);
+    }
+}
+
 // Resource base name of the icon for each HighlightStyle, indexed by enum value.
 // Kept at file scope so it's shared by both the cheap per-click refresh and the
 // one-shot restyling helper.
 namespace {
 constexpr const char* kHighlightStyleIconBases[] = {
     "highlight_none",       // HighlightStyle::None
-    "marker",               // HighlightStyle::Cover (reuses existing marker icon)
+    "preset",               // HighlightStyle::Cover (reuses existing paint bucket icon)
     "highlight_underline",  // HighlightStyle::Underline
     "highlight_dotted",     // HighlightStyle::DottedUnderline
 };
@@ -357,6 +444,7 @@ void HighlighterSubToolbar::updateAutoHighlightButtonIcon()
     m_autoHighlightButton->setIcon(loadHighlightIcon(activeIdx, isDarkMode()));
 
     for (int i = 0; i < kNumStyles; ++i) {
+        // The None slot is null: it has no menu entry any more.
         if (m_styleActions[i])
             m_styleActions[i]->setChecked(i == activeIdx);
     }
@@ -368,7 +456,8 @@ void HighlighterSubToolbar::applyAutoHighlightStyling()
 
     const bool dark = isDarkMode();
 
-    // Menu-item icons (matches ObjectSelectSubToolbar's dropdown UX).
+    // Menu-item icons (matches LinkObjectBar's dropdown UX). The None slot is
+    // null: it has no menu entry any more.
     for (int i = 0; i < kNumStyles; ++i) {
         if (m_styleActions[i])
             m_styleActions[i]->setIcon(loadHighlightIcon(i, dark));
@@ -438,11 +527,14 @@ void HighlighterSubToolbar::selectAutoHighlightStyleFromShortcut(HighlightStyle 
     const int idx = static_cast<int>(style);
     if (idx < 0 || idx >= kNumStyles) return;
     QAction* action = m_styleActions[idx];
+    // HighlightStyle::None has no action: "select text only" is the
+    // highlight-on-release toggle, which callers reach directly.
     if (!action) return;
 
     // Drive the same QAction trigger path the dropdown menu uses so the
     // onAutoHighlightStyleTriggered() slot handles state update, settings
-    // persistence, icon/check refresh, and the single signal emission.
+    // persistence, icon/check refresh, turning the toggle on, and the single
+    // signal emission.
     action->trigger();
 }
 
@@ -504,6 +596,9 @@ void HighlighterSubToolbar::setDarkMode(bool darkMode)
     applyAutoHighlightStyling();
     updateAutoHighlightButtonIcon();
 
+    if (m_highlightModeToggle) {
+        m_highlightModeToggle->setDarkMode(darkMode);
+    }
     if (m_selectionSourceToggle) {
         m_selectionSourceToggle->setDarkMode(darkMode);
     }

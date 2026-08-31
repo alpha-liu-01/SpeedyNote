@@ -17,14 +17,17 @@ class QAction;
  * Layout:
  * - 3 color preset buttons (SHARED with Marker)
  * - Separator
- * - Auto-highlight style dropdown (None / Cover / Underline / Dotted underline)
+ * - Highlight-on-release toggle (select text only vs highlight)
+ * - Auto-highlight style dropdown (Cover / Underline / Dotted underline)
  * - Separator
  * - Selection source toggle (PDF text vs OCR text)
  *
  * Key features:
  * - Colors are SHARED with MarkerSubToolbar via same QSettings keys
- * - Auto-highlight dropdown selects the style of stroke generated on release
- *   (HighlightStyle::None disables auto-highlighting entirely)
+ * - The toggle decides whether a released selection becomes a highlight at all;
+ *   the dropdown decides what a highlight looks like. Those used to be one
+ *   control, with HighlightStyle::None standing in for "select text only" -
+ *   a mode disguised as a style.
  * - No thickness controls (highlighter has fixed thickness)
  *
  * Features:
@@ -47,12 +50,16 @@ public:
     enum class SelectionSource { Pdf = 0, Ocr = 1 };
 
     /**
-     * @brief Style of auto-generated highlight stroke.
+     * @brief Style of the highlight a released selection becomes.
      *
      * Mirrors DocumentViewport::HighlightStyle (same ordering so a
      * `static_cast` is safe when marshalling across the two APIs).
-     * Persisted as an int under the existing "autoHighlight" QSettings key
-     * (backward-compat: old bool `true` => Cover, `false` => None).
+     * Persisted as an int under the existing "autoHighlight" QSettings key.
+     *
+     * `None` is retained so all three mirrors keep their 0..3 ordering and so
+     * HighlightRegion::Style::None stays a readable persisted value, but it is
+     * no longer reachable from the UI: "select text only" is the
+     * highlightOnRelease toggle, not a style.
      */
     enum class HighlightStyle {
         None = 0,
@@ -105,6 +112,30 @@ public:
     HighlightStyle currentAutoHighlightStyle() const { return m_autoHighlightStyle; }
 
     /**
+     * @brief Set the highlight-on-release toggle from outside.
+     *
+     * Updates the UI without emitting highlightOnReleaseChanged, matching
+     * setAutoHighlightStyle().
+     */
+    void setHighlightOnRelease(bool enabled);
+
+    /**
+     * @brief Whether a released selection becomes a highlight.
+     *
+     * False is "select text only": the selection is finalized and left up for
+     * copying, and no annotation is created.
+     */
+    bool highlightOnRelease() const { return m_highlightOnRelease; }
+
+    /**
+     * @brief Shortcut-driven toggle of highlight-on-release.
+     *
+     * Drives the underlying ModeToggleButton so the change travels through the
+     * normal onHighlightOnReleaseToggled() path (persistence plus one signal).
+     */
+    void setHighlightOnReleaseFromShortcut(bool enabled);
+
+    /**
      * @brief Set the selection-source toggle state from outside.
      * @param src The new selection source (PDF or OCR).
      *
@@ -124,7 +155,9 @@ public:
      * Reuses the existing menu-click path (QAction::trigger() on the matching
      * dropdown action) so settings persistence, check-state, icon refresh,
      * and the single `autoHighlightStyleChanged` emission all happen through
-     * one code path. No-op when @p style already matches the current style.
+     * one code path. Also turns highlight-on-release on, since asking for a
+     * style is asking to highlight. No-op when @p style already matches the
+     * current style and the toggle is already on.
      */
     void selectAutoHighlightStyleFromShortcut(HighlightStyle style);
 
@@ -166,9 +199,15 @@ signals:
     
     /**
      * @brief Emitted when the auto-highlight style changes via the dropdown.
-     * @param style The new style (HighlightStyle::None disables auto-highlight).
+     * @param style The new style.
      */
     void autoHighlightStyleChanged(HighlightStyle style);
+
+    /**
+     * @brief Emitted when the select-vs-highlight toggle changes.
+     * @param enabled True to turn a released selection into a highlight.
+     */
+    void highlightOnReleaseChanged(bool enabled);
 
     /**
      * @brief Emitted when the selection source (PDF vs OCR) changes via the toggle.
@@ -180,6 +219,7 @@ private slots:
     void onColorPresetClicked(int index);
     void onColorEditRequested(int index);
     void onAutoHighlightStyleTriggered(QAction* action);
+    void onHighlightOnReleaseToggled(int mode);
     void onSelectionSourceToggled(int mode);
 
 private:
@@ -188,6 +228,7 @@ private:
     void loadFromSettings();
     void saveColorsToSettings();
     void saveAutoHighlightToSettings();
+    void saveHighlightOnReleaseToSettings();
     void saveSelectionSourceToSettings();
     /// Write ONLY the selected-color index key under the highlighter group.
     /// Used by the click handler so spam-clicks don't trigger
@@ -208,19 +249,24 @@ private:
 
     // Widgets
     ColorPresetButton* m_colorButtons[3] = {nullptr, nullptr, nullptr};
+    ModeToggleButton*  m_highlightModeToggle = nullptr;
     QToolButton*       m_autoHighlightButton = nullptr;
     QMenu*             m_autoHighlightMenu   = nullptr;
+    /// Indexed by HighlightStyle. The None slot stays null: it has no menu
+    /// entry, but keeping the slot means every other index is its enum value.
     QAction*           m_styleActions[kNumStyles] = {};
     ModeToggleButton*  m_selectionSourceToggle = nullptr;
 
     // Current state
     int m_selectedColorIndex = 0;  // Default: first color
-    HighlightStyle m_autoHighlightStyle = HighlightStyle::None;
+    HighlightStyle m_autoHighlightStyle = HighlightStyle::Cover;
+    bool m_highlightOnRelease = true;
     SelectionSource m_selectionSource = SelectionSource::Pdf;
     
     // Per-tab state storage
-    // NOTE: autoHighlightStyle is NOT stored here - DocumentViewport is the source of truth.
-    // The subtoolbar syncs its dropdown state from the viewport via setAutoHighlightStyle().
+    // NOTE: autoHighlightStyle, highlightOnRelease and selectionSource are NOT
+    // stored here - they are global tool settings in QSettings, and MainWindow
+    // pushes them into every viewport.
     struct TabState {
         QColor colors[3];
         int selectedColorIndex;
@@ -243,6 +289,7 @@ private:
     static const QString KEY_COLOR_PREFIX;
     static const QString KEY_SELECTED_COLOR;
     static const QString KEY_AUTO_HIGHLIGHT;
+    static const QString KEY_HIGHLIGHT_ON_RELEASE;
     static const QString KEY_SELECTION_SOURCE;
 };
 

@@ -2241,6 +2241,36 @@ void Document::remapImportedLinkTargets(QJsonObject& pageJson,
 
         if (slotsChanged) {
             obj["slots"] = slotArr;
+        }
+
+        // A highlight's source range points at the page it lives on, which is
+        // by definition in the copy set, so it normally maps cleanly. The rects
+        // are the rendering truth and must survive regardless: an unresolvable
+        // range is marked stale (Adjust falls back to drag-redefine) rather
+        // than dropping the highlight.
+        bool regionChanged = false;
+        if (obj.contains(QStringLiteral("region"))) {
+            QJsonObject region = obj.value("region").toObject();
+            if (region.contains(QStringLiteral("sourceRange"))) {
+                QJsonObject range = region.value("sourceRange").toObject();
+                const QString targetUuid = range.value("pageUuid").toString();
+
+                if (!targetUuid.isEmpty()) {
+                    auto it = pageUuidMap.find(targetUuid);
+                    if (it != pageUuidMap.end()) {
+                        range["pageUuid"] = it.value();
+                    } else {
+                        range.remove(QStringLiteral("pageUuid"));
+                        range["stale"] = true;
+                    }
+                    region["sourceRange"] = range;
+                    obj["region"] = region;
+                    regionChanged = true;
+                }
+            }
+        }
+
+        if (slotsChanged || regionChanged) {
             objects[i] = obj;
             objectsChanged = true;
         }
@@ -4066,7 +4096,8 @@ Document::extractLinkOutlineFromPage(const Page* page,
                                       int tileX,
                                       int tileY,
                                       bool edgeless,
-                                      bool requireMarkdown)
+                                      bool requireMarkdown,
+                                      bool requireContent)
 {
     QVector<LinkOutlineEntry> out;
     if (!page) return out;
@@ -4089,6 +4120,12 @@ Document::extractLinkOutlineFromPage(const Page* page,
             entry.markdownSlots.push_back({ i, s.markdownNoteId });
         }
         if (requireMarkdown && entry.markdownSlots.isEmpty()) continue;
+        // A highlight auto-describes itself from the selected text, so only a
+        // description the user actually wrote counts as content.
+        if (requireContent && link->filledSlotCount() == 0
+            && !link->descriptionUserEdited) {
+            continue;
+        }
 
         entry.linkObjectId = link->id;
         entry.description  = link->description;
@@ -4111,7 +4148,8 @@ Document::extractLinkOutlineFromJsonObjects(const QJsonArray& objects,
                                              int  tileX,
                                              int  tileY,
                                              const QPointF& tileOrigin,
-                                             bool requireMarkdown)
+                                             bool requireMarkdown,
+                                             bool requireContent)
 {
     QVector<LinkOutlineEntry> out;
     const QColor kDefaultIcon(100, 100, 100, 180);
@@ -4126,14 +4164,23 @@ Document::extractLinkOutlineFromJsonObjects(const QJsonArray& objects,
         const QJsonArray slotArray = o["slots"].toArray();
         const int slotMax = qMin(static_cast<int>(slotArray.size()),
                                   LinkObject::SLOT_COUNT);
+        int filledSlots = 0;
         for (int i = 0; i < slotMax; ++i) {
             const QJsonObject s = slotArray[i].toObject();
-            if (s["type"].toString() != QLatin1String("markdown")) continue;
+            const QString slotType = s["type"].toString();
+            if (slotType != QLatin1String("empty")) ++filledSlots;
+            if (slotType != QLatin1String("markdown")) continue;
             const QString noteId = s["noteId"].toString();
             if (noteId.isEmpty()) continue;
             entry.markdownSlots.push_back({ i, noteId });
         }
         if (requireMarkdown && entry.markdownSlots.isEmpty()) continue;
+        // Mirrors the live-object predicate above: an auto-derived description
+        // is not content, so the flag rather than non-emptiness is the trigger.
+        if (requireContent && filledSlots == 0
+            && !o["descriptionUserEdited"].toBool()) {
+            continue;
+        }
 
         entry.linkObjectId = o["id"].toString();
         entry.description  = o["description"].toString();
@@ -4162,7 +4209,8 @@ Document::extractLinkOutlineFromJsonObjects(const QJsonArray& objects,
 // -------- Disk peek: tile JSON → outline entries ---------------------------
 
 QVector<LinkOutlineEntry>
-Document::peekTileLinkOutlineFromDisk(TileCoord coord, bool requireMarkdown) const
+Document::peekTileLinkOutlineFromDisk(TileCoord coord, bool requireMarkdown,
+                                      bool requireContent) const
 {
     if (m_bundlePath.isEmpty()) return {};
 
@@ -4180,13 +4228,15 @@ Document::peekTileLinkOutlineFromDisk(TileCoord coord, bool requireMarkdown) con
                               coord.second * static_cast<qreal>(EDGELESS_TILE_SIZE));
     return extractLinkOutlineFromJsonObjects(
         jd.object()["objects"].toArray(),
-        /*pageIndex=*/ -1, coord.first, coord.second, tileOrigin, requireMarkdown);
+        /*pageIndex=*/ -1, coord.first, coord.second, tileOrigin, requireMarkdown,
+        requireContent);
 }
 
 // -------- Disk peek: page JSON → outline entries ---------------------------
 
 QVector<LinkOutlineEntry>
-Document::peekPageLinkOutlineFromDisk(int pageIndex, bool requireMarkdown) const
+Document::peekPageLinkOutlineFromDisk(int pageIndex, bool requireMarkdown,
+                                      bool requireContent) const
 {
     if (m_bundlePath.isEmpty()) return {};
     if (pageIndex < 0 || pageIndex >= m_pageOrder.size()) return {};
@@ -4202,7 +4252,8 @@ Document::peekPageLinkOutlineFromDisk(int pageIndex, bool requireMarkdown) const
 
     return extractLinkOutlineFromJsonObjects(
         jd.object()["objects"].toArray(),
-        pageIndex, /*tileX=*/0, /*tileY=*/0, /*tileOrigin=*/QPointF(), requireMarkdown);
+        pageIndex, /*tileX=*/0, /*tileY=*/0, /*tileOrigin=*/QPointF(), requireMarkdown,
+        requireContent);
 }
 
 // -------- Cache maintenance -------------------------------------------------
@@ -4283,22 +4334,24 @@ void Document::refreshLinkOutlineFor(int pageIndex) const
         return;
     }
 
-    // Re-extract from the most authoritative source once, then filter per cache
-    // via requireMarkdown.
+    // Re-extract from the most authoritative source once, then filter per cache.
     const QString uuid = m_pageOrder[pageIndex];
     auto it = m_loadedPages.find(uuid);
     const bool loaded = (it != m_loadedPages.end() && it->second);
 
-    auto compute = [&](bool requireMarkdown) -> QVector<LinkOutlineEntry> {
+    auto compute = [&](bool requireMarkdown, bool requireContent) -> QVector<LinkOutlineEntry> {
         if (loaded) {
             return extractLinkOutlineFromPage(
-                it->second.get(), pageIndex, 0, 0, false, requireMarkdown);
+                it->second.get(), pageIndex, 0, 0, false, requireMarkdown,
+                requireContent);
         }
-        return peekPageLinkOutlineFromDisk(pageIndex, requireMarkdown);
+        return peekPageLinkOutlineFromDisk(pageIndex, requireMarkdown, requireContent);
     };
 
-    if (m_linkOutlineCacheReady) m_pageOutline[pageIndex] = compute(/*requireMarkdown=*/true);
-    if (m_markerCacheReady)      m_pageMarkers[pageIndex] = compute(/*requireMarkdown=*/false);
+    if (m_linkOutlineCacheReady)
+        m_pageOutline[pageIndex] = compute(/*requireMarkdown=*/true, /*requireContent=*/false);
+    if (m_markerCacheReady)
+        m_pageMarkers[pageIndex] = compute(/*requireMarkdown=*/false, /*requireContent=*/true);
 }
 
 void Document::dropLinkOutlineFor(TileCoord coord) const
@@ -4353,9 +4406,11 @@ void Document::buildMarkerCache() const
             QVector<LinkOutlineEntry> entries;
             if (it != m_loadedPages.end() && it->second) {
                 entries = extractLinkOutlineFromPage(
-                    it->second.get(), i, 0, 0, false, /*requireMarkdown=*/false);
+                    it->second.get(), i, 0, 0, false, /*requireMarkdown=*/false,
+                    /*requireContent=*/true);
             } else {
-                entries = peekPageLinkOutlineFromDisk(i, /*requireMarkdown=*/false);
+                entries = peekPageLinkOutlineFromDisk(i, /*requireMarkdown=*/false,
+                                                      /*requireContent=*/true);
             }
             m_pageMarkers[i] = std::move(entries);
         }
@@ -4385,7 +4440,8 @@ QVector<Document::PageLinkMarker> Document::pageLinkMarkers() const
         auto lit = m_loadedPages.find(uuid);
         if (lit != m_loadedPages.end() && lit->second) {
             live = extractLinkOutlineFromPage(lit->second.get(), i, 0, 0,
-                                              /*edgeless=*/false, /*requireMarkdown=*/false);
+                                              /*edgeless=*/false, /*requireMarkdown=*/false,
+                                              /*requireContent=*/true);
             entries = &live;
         } else {
             auto cit = m_pageMarkers.find(i);

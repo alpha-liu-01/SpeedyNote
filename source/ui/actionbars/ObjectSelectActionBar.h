@@ -26,7 +26,9 @@ class ActionBarButton;
  * - [Paste]    - Visible when clipboard has object
  * - [Cancel]   - Clears clipboard and dismisses action bar (Esc)
  * 
- * This action bar appears whenever the current tool is ObjectSelect.
+ * This action bar appears whenever the current tool is ObjectSelect, and also
+ * under the Highlighter once an annotation is selected by tapping its
+ * highlight. See @ref setObjectToolActive for what differs between the two.
  */
 class ObjectSelectActionBar : public ActionBar {
     Q_OBJECT
@@ -65,6 +67,18 @@ public:
      * When true, shows full action bar.
      */
     void setHasSelection(bool hasSelection);
+    
+    /**
+     * @brief Set whether ObjectSelect is the active tool.
+     * @param active False when another tool is hosting this bar.
+     *
+     * Only the Add/Select toggle is genuinely ObjectSelect's own: it switches
+     * that tool's sub-mode, and no other tool reads it, so offering it
+     * elsewhere would arm a mode whose effect is invisible until the user
+     * switches back. Every other button acts on the selection or the
+     * clipboard and behaves identically under either tool.
+     */
+    void setObjectToolActive(bool active);
     
     /**
      * @brief Update image-specific state for the aspect ratio lock button.
@@ -180,6 +194,7 @@ private:
     bool m_hasObjectInClipboard = false;
     bool m_hasImageInClipboard = false;
     bool m_hasSelection = false;
+    bool m_objectToolActive = true;
     bool m_isImageSelected = false;
     bool m_isOcrTextSelected = false;
     DocumentViewport::ObjectActionMode m_actionMode =

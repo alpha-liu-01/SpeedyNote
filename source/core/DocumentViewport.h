@@ -29,6 +29,7 @@ enum class TouchGestureMode {
 #include "Page.h"
 #include "ToolType.h"
 #include "ViewportPerfMonitor.h"
+#include "../objects/HighlightRegion.h"
 #include "../objects/TextBoxObject.h"
 #include "../strokes/VectorStroke.h"
 #include "../pdf/PdfProvider.h"
@@ -40,6 +41,7 @@ enum class TouchGestureMode {
 class QContextMenuEvent;
 class ImageObject;
 class InlineTextBoxEditor;
+class LinkObjectBar;
 class OcrTextObject;
 class TextBoxFormatBar;
 
@@ -74,6 +76,7 @@ struct UndoAction {
         ObjectAffinityChange,
         ObjectResize,
         ObjectTextEdit,
+        ObjectRegionChange,     ///< A LinkObject's highlight region was re-ranged by Adjust
         OcrLockChange,
         OcrConvertToTextBox,    ///< One OCR block replaced by an editable text box
 
@@ -180,6 +183,17 @@ struct UndoAction {
     bool objectHasTextBoxState = false;
     TextBoxState objectOldTextBoxState;
     TextBoxState objectNewTextBoxState;
+
+    /// ObjectRegionChange: the annotation's highlight geometry before/after an
+    /// Adjust session. position/size are carried in objectOld/NewPosition and
+    /// objectOld/NewSize, since re-ranging moves the region's bounding box.
+    HighlightRegion objectOldRegion;
+    HighlightRegion objectNewRegion;
+    /// Also carried because recolouring the mark re-derives the badge tint from
+    /// it, so the two have to travel together. Equal on both sides for an
+    /// Adjust session, which only moves geometry.
+    QColor objectOldIconColor;
+    QColor objectNewIconColor;
 
     // OcrLockChange fields
     QVector<QString> ocrLockObjectIds;
@@ -664,12 +678,10 @@ public:
     };
 
     /**
-     * @brief Set the auto-highlight style.
-     * @param style New style; HighlightStyle::None disables auto-highlight.
+     * @brief Set the style a committed highlight is given.
      *
-     * When set to anything other than None, releasing the pointer after a
-     * text selection automatically creates highlight strokes of the chosen
-     * style. Called from HighlighterSubToolbar.
+     * What a highlight looks like, not whether one is made: that is
+     * setHighlightOnRelease(). Called from HighlighterSubToolbar.
      */
     void setAutoHighlightStyle(HighlightStyle style);
 
@@ -677,6 +689,22 @@ public:
      * @brief Get the current auto-highlight style.
      */
     HighlightStyle autoHighlightStyle() const { return m_autoHighlightStyle; }
+
+    /**
+     * @brief Whether releasing a text selection turns it into a highlight.
+     *
+     * False is "select text only": the selection is finalized and left up so
+     * it can be copied, and no annotation is created. This used to be
+     * HighlightStyle::None, a tool mode disguised as an appearance option.
+     */
+    bool highlightOnRelease() const { return m_highlightOnRelease; }
+
+    /**
+     * @brief Set whether a released selection becomes a highlight.
+     *
+     * Emits highlightOnReleaseChanged() only if the value actually changed.
+     */
+    void setHighlightOnRelease(bool enabled);
 
     // ===== Highlighter Selection Source (PDF vs OCR) =====
 
@@ -798,6 +826,26 @@ public:
     void pushObjectTextEditUndo(
         TextBoxObject* obj, const TextBoxState& oldState,
         const TextBoxState& newState, int pageIndex,
+        Document::TileCoord oldTile = {0, 0},
+        Document::TileCoord newTile = {0, 0});
+
+    /**
+     * @brief Record one Adjust session's net change to an annotation's region.
+     *
+     * The new state is read off @p obj, so call this after the last gesture has
+     * been written in. Position and size travel with the region because
+     * re-ranging moves the region's bounding box, which *is* the object's
+     * position (see the stage 2 note in HIGHLIGHT_ANNOTATION_QA.md).
+     *
+     * @p oldIconColor travels for the same reason: recolouring a mark re-derives
+     * the badge tint, so undoing one without the other leaves a green highlight
+     * wearing a yellow badge. Pass the object's current tint when only geometry
+     * changed.
+     */
+    void pushObjectRegionChangeUndo(
+        LinkObject* obj, const HighlightRegion& oldRegion,
+        const QPointF& oldPosition, const QSizeF& oldSize,
+        const QColor& oldIconColor, int pageIndex,
         Document::TileCoord oldTile = {0, 0},
         Document::TileCoord newTile = {0, 0});
 
@@ -1129,8 +1177,70 @@ public:
     bool hasActiveInlineTextEdit() const;
     bool inlineTextEditorHasFocus() const;
     bool textBoxFormatBarHasFocus() const;
+    bool linkObjectBarHasFocus() const;
     void commitInlineTextEdit();
     void cancelInlineTextEdit();
+
+    // ===== Highlight Adjust mode (stage 3) =====
+
+    /// True while a highlight's text range is being re-ranged.
+    bool isAdjustingHighlight() const { return m_adjustSession.active; }
+
+    /**
+     * @brief Enter Adjust on the selected annotation.
+     *
+     * Adjust belongs to the Highlighter because it is a text-range operation
+     * needing the character caches, so invoking it from ObjectSelect switches
+     * the active tool. The object selection deliberately survives that switch.
+     *
+     * @return false when there is no single selected annotation with a region.
+     */
+    bool beginHighlightAdjust();
+
+    /// Exit Adjust, keeping the new range as one undo entry.
+    void commitHighlightAdjust();
+
+    /// Exit Adjust, restoring the range the session started with.
+    void cancelHighlightAdjust();
+
+    /**
+     * @brief Re-read the selected LinkObject's state into the floating bar.
+     *
+     * For callers that mutate a LinkObject from outside the viewport (the
+     * markdown notes sidebar clearing a slot, for instance).
+     */
+    void refreshLinkObjectBar();
+
+    /**
+     * @brief Apply a new icon color to the selected LinkObject.
+     *
+     * For standalone link icons only. When the annotation carries a highlight
+     * the badge tint is derived from the mark's colour instead, so it is set
+     * through setSelectedLinkRegionColor().
+     */
+    void setSelectedLinkColor(const QColor& color);
+
+    /**
+     * @brief Recolour the selected annotation's highlight.
+     * @param color Opaque as picked; stored at HighlightRegion::DEFAULT_OPACITY.
+     *
+     * Also re-derives the badge tint, so a green mark stops wearing the badge
+     * of the yellow it used to be. Undoable through ObjectRegionChange with the
+     * geometry unchanged, unless an Adjust session is live on this object, in
+     * which case it folds into that session's single entry.
+     */
+    void setSelectedLinkRegionColor(const QColor& color);
+
+    /**
+     * @brief Restyle the selected annotation's highlight.
+     * @param style A HighlightRegion::Style value as an int.
+     */
+    void setSelectedLinkRegionStyle(int style);
+
+    /**
+     * @brief Apply a new description to the selected LinkObject.
+     */
+    void setSelectedLinkDescription(const QString& description);
     
     /**
      * @brief Check if a lasso selection exists.
@@ -1485,7 +1595,7 @@ public:
      * @brief Clear the content of a LinkObject slot.
      * @param slotIndex The slot index (0-2) to clear.
      * 
-     * Phase D: Called from ObjectSelectSubToolbar after long-press delete
+     * Phase D: Called from LinkObjectBar after long-press delete
      * confirmation. Clears the slot content (Position/URL/Markdown) without
      * deleting the entire LinkObject.
      */
@@ -1600,6 +1710,64 @@ public:
     static bool textBoxStatesEqual(const TextBoxState& lhs,
                                    const TextBoxState& rhs);
 
+    /**
+     * @brief One Adjust session: re-ranging a highlight's covered text.
+     *
+     * Coalesces undo the same way InlineTextEditSession does. Every gesture
+     * commits into the object on release so the mark tracks the finger, but no
+     * undo entry is pushed until the session ends; iterative fiddling, which is
+     * how people actually adjust a highlight, therefore costs one entry rather
+     * than one per tweak.
+     */
+    struct AdjustSession {
+        QString objectId;
+        int pageIndex = -1;
+        Document::TileCoord tileCoord = {0, 0};
+        /// Geometry as it was on entry, for the single undo entry and for Esc.
+        HighlightRegion startRegion;
+        QPointF startPosition;
+        QSizeF startSize;
+        /// Badge tint on entry. A recolour made mid-session folds into the
+        /// session's one entry rather than pushing its own, so Esc has to be
+        /// able to put the derived tint back too.
+        QColor startIconColor;
+        bool active = false;
+        /**
+         * @brief Whether a live text range was recovered on entry.
+         *
+         * False leaves only drag-redefine available: there is no known anchor
+         * for tap-moves-the-near-edge to hold on to.
+         */
+        bool endpointsResolved = false;
+
+        void clear() {
+            objectId.clear();
+            pageIndex = -1;
+            tileCoord = {0, 0};
+            startRegion = HighlightRegion();
+            startPosition = QPointF();
+            startSize = QSizeF();
+            startIconColor = QColor();
+            active = false;
+            endpointsResolved = false;
+        }
+    };
+
+    /// Resolve the session's target, or nullptr if it went away.
+    LinkObject* resolveAdjustTarget() const;
+
+    /**
+     * @brief End the session without committing or reverting.
+     *
+     * For when the target or the document is going away: an undo entry would be
+     * stray noise ahead of the delete, and reverting would fight the delete's
+     * own snapshot of what was on screen.
+     */
+    void discardHighlightAdjust();
+
+    /// Viewport pixels of travel before an Adjust gesture counts as a drag.
+    static constexpr qreal ADJUST_TAP_SLOP = 6.0;
+
     enum class TextBoxFormatChange {
         FontSize,
         FontFamily,
@@ -1650,6 +1818,35 @@ public:
      */
     bool pointerOverTextOverlay(const QPointF& viewportPos) const;
     void updateTextBoxFormatBarGeometry();
+
+    /**
+     * @brief Position a floating control bar next to an anchor rect.
+     * @param bar The bar to move (a child widget of this viewport).
+     * @param anchorRect The anchor, in viewport coordinates.
+     *
+     * Tries above, below, right and left in that order, takes the first
+     * placement that fits, and otherwise picks the least-overflowing candidate
+     * and clamps it inside the viewport. Shared by the text box format bar and
+     * the LinkObject bar.
+     */
+    void placeFloatingBar(QWidget* bar, const QRectF& anchorRect);
+
+    LinkObject* selectedLinkForBar() const;
+    void ensureLinkObjectBar();
+    void syncLinkObjectBar();
+    void updateLinkObjectBarGeometry();
+    void closeLinkObjectBarPopups(bool acceptPreview);
+
+    /// The selected annotation when it carries an editable highlight.
+    LinkObject* selectedHighlightForAppearance() const;
+
+    /// Shared tail of a region recolour or restyle: re-derive the badge tint,
+    /// refresh the caches, and record one undo entry unless an Adjust session
+    /// is live to absorb it.
+    void finishRegionAppearanceChange(LinkObject* link,
+                                      const HighlightRegion& oldRegion,
+                                      const QColor& oldIconColor);
+
     void beginTextBoxFormatInteraction();
     void applyTextBoxFormatPreview(TextBoxFormatChange change,
                                    const QVariant& value);
@@ -1671,14 +1868,29 @@ public:
                                     const QRectF& anchorViewportRect);
 
     /**
-     * @brief Create a LinkObject for a text highlight.
-     * @param pageIndex Index of the page containing the highlight.
-     * 
-     * Phase C.3.2: Creates a LinkObject positioned at the start of the
-     * first highlight rect, with description set to the selected text
-     * and icon color matching the highlighter color.
+     * @brief Create the annotation that owns a text highlight.
+     * @param pageIndex   Index of the page the selection came from.
+     * @param regionRects Per-line rects, in page coordinates for paged mode or
+     *                    document coordinates for edgeless mode.
+     * @return The created annotation, or nullptr on failure.
+     *
+     * The annotation's `position`/`size` become the region's bounding box, so
+     * Document::maxObjectExtent() covers a highlight that spans several
+     * edgeless tiles, and the icon becomes a badge beside the mark. The
+     * description is auto-derived from the selected text and therefore leaves
+     * `descriptionUserEdited` false.
      */
-    void createLinkObjectForHighlight(int pageIndex);
+    LinkObject* createLinkObjectForHighlight(int pageIndex,
+                                             const QVector<QRectF>& regionRects);
+
+    /**
+     * @brief Build the source range describing the current text selection.
+     *
+     * Stored alongside the region rects as the *edit* affordance for Adjust
+     * mode. The rects remain the rendering truth, so this range is allowed to
+     * be absent or stale.
+     */
+    HighlightRegion::SourceRange buildHighlightSourceRange(int pageIndex) const;
     
     /**
      * @brief Get the list of pages currently visible in the viewport.
@@ -2180,7 +2392,28 @@ signals:
      * - Tiles are loaded/evicted in edgeless mode
      */
     void linkObjectListMayHaveChanged();
-    
+
+    /**
+     * @brief Emitted when the slot contents of the selected LinkObject change.
+     *
+     * Narrower than linkObjectListMayHaveChanged(): the set of LinkObjects is
+     * unchanged, only the 3 slots of one object. Drives the LinkObject bar's
+     * slot buttons.
+     */
+    void linkSlotsChanged();
+
+    /**
+     * @brief Emitted when one LinkObject's description or icon color changes.
+     *
+     * Narrower still: nothing about the set of LinkObjects or their slots has
+     * changed, only how this one presents itself. Lets the notes sidebar patch
+     * the single row in place instead of rebuilding the tree, which would
+     * collapse expanded subtrees and drop focus.
+     */
+    void linkObjectAppearanceChanged(const QString& linkObjectId,
+                                     const QString& description,
+                                     const QColor& color);
+
     /**
      * @brief Emitted when the current tool changes.
      * @param tool New tool type.
@@ -2321,6 +2554,14 @@ signals:
      * @param style New auto-highlight style.
      */
     void autoHighlightStyleChanged(HighlightStyle style);
+
+    /**
+     * @brief Emitted when the select-vs-highlight mode changes.
+     *
+     * Routed by MainWindow to the Highlighter subtoolbar so the toggle reflects
+     * the active viewport, the same way the style dropdown does.
+     */
+    void highlightOnReleaseChanged(bool enabled);
 
     /**
      * @brief Emitted when the highlighter selection source (PDF vs OCR) changes.
@@ -2706,7 +2947,8 @@ private:
 
     // Highlighter tool settings
     QColor m_highlighterColor = QColor(255, 255, 0, 128);  ///< Yellow, 50% alpha
-    HighlightStyle m_autoHighlightStyle = HighlightStyle::None;  ///< Style of auto-created highlight strokes (None disables auto-highlight)
+    HighlightStyle m_autoHighlightStyle = HighlightStyle::Cover;  ///< What a committed highlight looks like
+    bool m_highlightOnRelease = true;  ///< Whether a released selection becomes a highlight at all
     HighlighterMode m_highlighterMode = HighlighterMode::Pdf;  ///< PDF vs OCR text selection source
     
     // ===== PDF Search Highlighting =====
@@ -2771,6 +3013,18 @@ private:
     QRectF m_objectGeometryFeedbackAnchor;
     InlineTextBoxEditor* m_inlineTextBoxEditor = nullptr;
     InlineTextEditSession m_inlineEditSession;
+    AdjustSession m_adjustSession;
+    /**
+     * @brief Suppresses setCurrentTool()'s leave-ObjectSelect deselect.
+     *
+     * Entering Adjust from ObjectSelect switches to the Highlighter, and that
+     * switch would otherwise clear the very selection the session targets.
+     */
+    bool m_enteringAdjustMode = false;
+    /// Press point of the in-progress Adjust gesture, for tap-vs-drag.
+    QPointF m_adjustGestureStart;
+    /// True until the Adjust gesture moves far enough to count as a drag.
+    bool m_adjustGestureIsTap = false;
     bool m_revertingInlineText = false;
     /// Set on a right-press that landed on the box being edited, so the
     /// context menu that follows opens the editor's menu instead of the
@@ -2783,6 +3037,9 @@ private:
     QString m_contextMenuObjectId;
     TextBoxFormatBar* m_textBoxFormatBar = nullptr;
     TextBoxFormatTransaction m_textBoxFormatTransaction;
+    /// Floating controls for the selected LinkObject (color, description, 3
+    /// slots). Created lazily, one per viewport, and anchored to the object.
+    LinkObjectBar* m_linkObjectBar = nullptr;
     
     /**
      * @brief Whether we're currently dragging selected objects.
@@ -3920,53 +4177,98 @@ private:
     void renderSearchMatchesOverlayEdgeless(QPainter& painter);
     
     /**
-     * @brief Create a marker-style stroke for a highlight rectangle.
+     * @brief Commit the current text selection as a highlight annotation.
      *
-     * For HighlightStyle::Cover, produces a horizontal stroke through the
-     * center of the rectangle with thickness equal to the rectangle height
-     * (original cover-the-text behavior). For HighlightStyle::Underline,
-     * produces a thin horizontal stroke along the bottom of the rectangle.
+     * A highlight is no longer ink. The selection's per-line rects are
+     * converted into the owning container's coordinate space and handed to
+     * createLinkObjectForHighlight(), which stores them as the annotation's
+     * HighlightRegion. Because the mark and its slots are one record, the
+     * whole commit is a single ObjectInsert undo entry, and neither half can be
+     * removed without the other.
      *
-     * HighlightStyle::DottedUnderline is handled separately by
-     * createDottedUnderlineStrokes() since it produces multiple strokes.
+     * Clears the text selection either way.
      *
-     * @param rect  Rectangle in page coordinates (96 DPI).
-     * @param color Highlight color (typically m_highlighterColor).
-     * @param style Either Cover or Underline. (DottedUnderline is routed
-     *              through createDottedUnderlineStrokes() instead.)
-     * @return VectorStroke configured as a horizontal marker.
+     * @return The created annotation, or nullptr when nothing was committed
+     *         (no valid selection, style None, or edgeless PDF selection).
      */
-    VectorStroke createHighlightStroke(const QRectF& rect,
-                                       const QColor& color,
-                                       HighlightStyle style) const;
+    LinkObject* commitHighlightAnnotation();
+
+    // ===== Stage 3: Adjust mode geometry helpers =====
 
     /**
-     * @brief Create the sequence of dot strokes that make up a dotted underline.
+     * @brief Current selection's rects in the space an annotation stores.
      *
-     * Dots are evenly spaced along the bottom edge of @p rect. Dot thickness
-     * scales with @p rect height (~10%), and center-to-center spacing is
-     * 3x the thickness. Each dot is an ordinary single-point `VectorStroke`,
-     * which keeps the renderer, serializer, and exporter unchanged.
-     *
-     * @param rect  Rectangle in page coordinates (96 DPI).
-     * @param color Highlight color.
-     * @return Vector of dot strokes (possibly empty if rect is too narrow).
+     * Page coordinates when paged, document coordinates when edgeless. PDF text
+     * rects arrive at 72 DPI and are scaled; OCR rects already match their
+     * container. Degenerate rects are dropped.
      */
-    QVector<VectorStroke> createDottedUnderlineStrokes(const QRectF& rect,
-                                                       const QColor& color) const;
-    
+    QVector<QRectF> selectionRectsInContainerSpace() const;
+
     /**
-     * @brief Create highlight strokes from current text selection (Phase B.3).
-     * 
-     * Converts each rectangle in m_textSelection.highlightRects to a VectorStroke
-     * and adds it to the current layer on the selection's page.
-     * Each stroke gets its own undo action (can be undone individually).
-     * Clears the text selection after creating strokes.
-     * 
-     * @return List of created stroke IDs.
+     * @brief Locate the container an annotation lives in.
+     * @param pageIndex Receives the notebook page index (0 in edgeless).
+     * @param containerOrigin Receives the tile origin in edgeless, null when
+     *        paged. Region rects are container-local, so this bridges them to
+     *        the document-space OCR cache.
+     * @param tileCoordOut Receives the owning tile coordinate (edgeless).
+     * @return false when the object is not in any loaded container.
      */
-    QVector<QString> createHighlightStrokes();
-    
+    bool resolveRegionContainer(LinkObject* link, int* pageIndex,
+                                QPointF* containerOrigin,
+                                Document::TileCoord* tileCoordOut = nullptr);
+
+    /**
+     * @brief Rebuild the text range a highlight currently covers.
+     *
+     * Probes the region's own rects through the character caches instead of
+     * trusting region.sourceRange, whose box indices address a lazily rebuilt
+     * cache: in edgeless the OCR cache is re-sorted across whichever tiles are
+     * loaded, so a stored index can mean a different block than it did at
+     * commit time. The stored range is only a fallback for when the geometry
+     * cannot be resolved at all.
+     *
+     * Fills only the indices; the caller populates text and rects by assigning
+     * to m_textSelection and calling updateSelectedTextAndRects().
+     *
+     * @return false when neither the geometry nor the stored range resolves,
+     *         in which case Adjust degrades to drag-redefine only.
+     */
+    bool deriveRegionEndpoints(LinkObject* link, TextSelection& out);
+
+    /**
+     * @brief Expand one selection endpoint outward to its word boundary.
+     * @param toStart true to move the index to the start of its word.
+     *
+     * Keeps a coarse stylus feeling precise. CJK glyphs are left alone because
+     * they are not space-separated, so snapping outward would swallow the
+     * sentence.
+     */
+    void snapEndpointToWord(TextSelection::Source source, int boxIndex,
+                            int& charIndex, bool toStart) const;
+
+    /**
+     * @brief Write the current text selection into the annotation's region.
+     *
+     * Called on every Adjust gesture release. Pushes no undo: the session owns
+     * that, so iterative fiddling stays a single entry.
+     * @return false when the selection produced no usable rects.
+     */
+    bool applyAdjustedRangeToRegion();
+
+    /**
+     * @brief Resolve one Adjust gesture into a new range and write it in.
+     *
+     * A tap moves the endpoint nearer the tap and anchors the far one; a drag
+     * redefines the range outright. Both snap to word boundaries.
+     */
+    void finishAdjustGesture(const QPointF& viewportPos);
+
+    /// Which endpoint an Adjust tap should move, in reading order.
+    bool tapIsNearerToSelectionStart(const CharacterPosition& tapPos) const;
+
+    /// Expand both selection endpoints outward to their word boundaries.
+    void snapSelectionToWords();
+
     /**
      * @brief Update cursor based on Highlighter tool availability.
      * Sets IBeamCursor on PDF pages, ForbiddenCursor on non-PDF pages,

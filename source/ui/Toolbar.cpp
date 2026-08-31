@@ -6,7 +6,6 @@
 #include "subtoolbars/MarkerSubToolbar.h"
 #include "subtoolbars/EraserSubToolbar.h"
 #include "subtoolbars/HighlighterSubToolbar.h"
-#include "subtoolbars/ObjectSelectSubToolbar.h"
 #include "subtoolbars/OcrSubToolbar.h"
 
 #include <QHBoxLayout>
@@ -92,20 +91,20 @@ void Toolbar::setupUi()
     mainLayout->addWidget(m_lassoButton);
 
     // --- Object tools (one internal ObjectSelect tool, three insert modes) ---
-    m_objectSelectSubToolbar = new ObjectSelectSubToolbar();
-
+    // The Link tool's controls live in a floating, viewport-owned LinkObjectBar
+    // anchored to the selected LinkObject, so this is a plain toggle like the
+    // other two insert modes.
     m_objectImageButton = new ToolButton(this);
     m_objectImageButton->setThemedIcon("objectinsert");
     m_objectImageButton->setToolTip(tr("Image Object Tool (I)"));
     m_toolGroup->addButton(m_objectImageButton);
     mainLayout->addWidget(m_objectImageButton);
 
-    m_objectLinkExpandable = new ExpandableToolButton(this);
-    m_objectLinkExpandable->setThemedIcon("linkicon");
-    m_objectLinkExpandable->toolButton()->setToolTip(tr("Link Object Tool (Ctrl+.)"));
-    m_objectLinkExpandable->setContentWidget(m_objectSelectSubToolbar);
-    m_toolGroup->addButton(m_objectLinkExpandable->toolButton());
-    mainLayout->addWidget(m_objectLinkExpandable);
+    m_objectLinkButton = new ToolButton(this);
+    m_objectLinkButton->setThemedIcon("linkicon");
+    m_objectLinkButton->setToolTip(tr("Link Object Tool (Ctrl+.)"));
+    m_toolGroup->addButton(m_objectLinkButton);
+    mainLayout->addWidget(m_objectLinkButton);
 
     m_objectTextButton = new ToolButton(this);
     m_objectTextButton->setThemedIcon("auto");
@@ -125,7 +124,7 @@ void Toolbar::setupUi()
     m_page1Widgets = {
         m_penExpandable, m_markerExpandable, m_eraserExpandable,
         m_straightLineButton, m_lassoButton, m_objectImageButton,
-        m_objectLinkExpandable, m_objectTextButton, m_textExpandable
+        m_objectLinkButton, m_objectTextButton, m_textExpandable
     };
 
     // --- OCR (not in tool group, hover-to-expand) ---
@@ -188,14 +187,6 @@ void Toolbar::setupUi()
 
     applyPageVisibility();
 
-    // Wire contentSizeChanged from ObjectSelectSubToolbar to re-layout
-    connect(m_objectSelectSubToolbar, &ObjectSelectSubToolbar::contentSizeChanged, this, [this]() {
-        m_objectLinkExpandable->updateGeometry();
-        layout()->invalidate();
-        layout()->activate();
-        updatePagination();
-    });
-
     installSwipeFilter(this);
 }
 
@@ -230,7 +221,7 @@ void Toolbar::connectSignals()
         emit objectInsertModeSelected(DocumentViewport::ObjectInsertMode::Image);
         emit toolSelected(ToolType::ObjectSelect);
     });
-    connect(m_objectLinkExpandable->toolButton(), &QPushButton::clicked, this, [this]() {
+    connect(m_objectLinkButton, &QPushButton::clicked, this, [this]() {
         setObjectInsertMode(DocumentViewport::ObjectInsertMode::Link);
         expandToolButton(ToolType::ObjectSelect);
         emit objectInsertModeSelected(DocumentViewport::ObjectInsertMode::Link);
@@ -265,7 +256,7 @@ void Toolbar::connectSignals()
 
 void Toolbar::expandToolButton(ToolType tool)
 {
-    if (m_currentTool == tool && tool != ToolType::ObjectSelect)
+    if (m_currentTool == tool)
         return;
 
     // Sync shared state when switching between Marker/Highlighter
@@ -277,10 +268,6 @@ void Toolbar::expandToolButton(ToolType tool)
         case ToolType::Marker:    newSub = m_markerSubToolbar; break;
         case ToolType::Eraser:    newSub = m_eraserSubToolbar; break;
         case ToolType::Highlighter: newSub = m_highlighterSubToolbar; break;
-        case ToolType::ObjectSelect:
-            if (m_objectInsertMode == DocumentViewport::ObjectInsertMode::Link)
-                newSub = m_objectSelectSubToolbar;
-            break;
         default: break;
     }
 
@@ -308,7 +295,6 @@ void Toolbar::collapseAllToolButtons()
     m_penExpandable->setExpanded(false);
     m_markerExpandable->setExpanded(false);
     m_eraserExpandable->setExpanded(false);
-    m_objectLinkExpandable->setExpanded(false);
     m_textExpandable->setExpanded(false);
 }
 
@@ -332,10 +318,6 @@ ExpandableToolButton* Toolbar::expandableForTool(ToolType tool) const
         case ToolType::Pen:          return m_penExpandable;
         case ToolType::Marker:       return m_markerExpandable;
         case ToolType::Eraser:       return m_eraserExpandable;
-        case ToolType::ObjectSelect:
-            return m_objectInsertMode == DocumentViewport::ObjectInsertMode::Link
-                ? m_objectLinkExpandable
-                : nullptr;
         case ToolType::Highlighter:  return m_textExpandable;
         default: return nullptr;
     }
@@ -354,8 +336,8 @@ void Toolbar::setCurrentTool(ToolType tool)
             selected = m_objectImageButton;
             break;
         case DocumentViewport::ObjectInsertMode::Link:
-            m_objectLinkExpandable->toolButton()->setChecked(true);
-            selected = m_objectLinkExpandable;
+            m_objectLinkButton->setChecked(true);
+            selected = m_objectLinkButton;
             break;
         case DocumentViewport::ObjectInsertMode::Text:
             m_objectTextButton->setChecked(true);
@@ -396,8 +378,8 @@ void Toolbar::setObjectInsertMode(DocumentViewport::ObjectInsertMode mode)
         selected = m_objectImageButton;
         break;
     case DocumentViewport::ObjectInsertMode::Link:
-        m_objectLinkExpandable->toolButton()->setChecked(true);
-        selected = m_objectLinkExpandable;
+        m_objectLinkButton->setChecked(true);
+        selected = m_objectLinkButton;
         break;
     case DocumentViewport::ObjectInsertMode::Text:
         m_objectTextButton->setChecked(true);
@@ -409,8 +391,6 @@ void Toolbar::setObjectInsertMode(DocumentViewport::ObjectInsertMode mode)
     revealWidget(selected);
 
     collapseAllToolButtons();
-    if (mode == DocumentViewport::ObjectInsertMode::Link)
-        m_objectLinkExpandable->setExpanded(true);
 
     updateGeometry();
     updatePagination();
@@ -439,7 +419,6 @@ void Toolbar::updateTheme(bool darkMode)
     m_penExpandable->setDarkMode(darkMode);
     m_markerExpandable->setDarkMode(darkMode);
     m_eraserExpandable->setDarkMode(darkMode);
-    m_objectLinkExpandable->setDarkMode(darkMode);
     m_textExpandable->setDarkMode(darkMode);
     m_ocrExpandable->setDarkMode(darkMode);
 
@@ -448,13 +427,13 @@ void Toolbar::updateTheme(bool darkMode)
     m_markerSubToolbar->setDarkMode(darkMode);
     m_eraserSubToolbar->setDarkMode(darkMode);
     m_highlighterSubToolbar->setDarkMode(darkMode);
-    m_objectSelectSubToolbar->setDarkMode(darkMode);
     m_ocrSubToolbar->setDarkMode(darkMode);
 
     // Update plain buttons
     m_straightLineButton->setDarkMode(darkMode);
     m_lassoButton->setDarkMode(darkMode);
     m_objectImageButton->setDarkMode(darkMode);
+    m_objectLinkButton->setDarkMode(darkMode);
     m_objectTextButton->setDarkMode(darkMode);
     m_panButton->setDarkMode(darkMode);
     m_undoButton->setDarkMode(darkMode);
