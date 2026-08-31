@@ -3,7 +3,8 @@
 // ============================================================================
 // PdfSearchBar - Search bar widget for PDF text search
 // ============================================================================
-// Displays at the bottom of the viewport for searching PDF text.
+// Floats as a compact card in the top-right corner of the viewport, the way
+// editors place Find. MainWindow positions it; see updatePdfSearchBarPosition.
 // Features: case-sensitive toggle, whole-word toggle, next/prev navigation.
 // ============================================================================
 
@@ -17,16 +18,30 @@
 /**
  * @brief Search bar widget for PDF text search.
  * 
- * Layout: [X] Find: [input____] [Status] [▼Next] [▲Prev] [⚙Options]
+ * Layout: [X] [input____] [Status] [▼] [▲] [⚙]
  * 
- * The search bar is shown at the bottom of the viewport when Ctrl+F is pressed
- * on a PDF document. It emits signals when the user requests next/previous
- * match navigation.
+ * The search bar is shown in the viewport's top-right corner when Ctrl+F is
+ * pressed on a PDF document. It emits signals when the user requests
+ * next/previous match navigation.
  */
 class PdfSearchBar : public QWidget {
     Q_OBJECT
     
 public:
+    /**
+     * @brief Width the bar asks for when the viewport has room for it.
+     *
+     * Fixed rather than derived from the layout so the input does not jump
+     * narrower the moment the match counter appears beside it.
+     */
+    static constexpr int PREFERRED_WIDTH = 340;
+
+    /**
+     * @brief Space held for the match counter, occupied whether or not a count
+     *        is currently showing.
+     */
+    static constexpr int STATUS_WIDTH = 76;
+
     explicit PdfSearchBar(QWidget *parent = nullptr);
     ~PdfSearchBar() override;
     
@@ -109,6 +124,8 @@ private slots:
 private:
     void setupUi();
     void updateIcons();
+    /// Repaint the floating-card background and border for the current theme.
+    void applyCardStyle();
     bool isDarkMode() const;
     
     // UI components

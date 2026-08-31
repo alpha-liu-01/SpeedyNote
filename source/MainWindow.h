@@ -813,6 +813,7 @@ private:
     QMetaObject::Connection m_linkObjectListConn;     // M.7.3: For linkObjectListMayHaveChanged
     QMetaObject::Connection m_linkAppearanceConn;     // For linkObjectAppearanceChanged
     QMetaObject::Connection m_pdfSourcesConn;
+    QMetaObject::Connection m_pdfBannerReserveConn;  // Banner height → search bar Y
     QMetaObject::Connection m_strokesChangedConn;      // OCR: For strokesChanged → debounce
     QMetaObject::Connection m_ocrConvertConn;          // For convertOcrTextRequested
     QMetaObject::Connection m_textBoxLayoutConn;       // Text-box commit → search invalidation

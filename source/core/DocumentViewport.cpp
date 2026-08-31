@@ -525,6 +525,7 @@ void DocumentViewport::showPdfSourceWarning(int sourceCount, int affectedPages,
         connect(m_missingPdfBanner, &MissingPdfBanner::dismissed,
                 this, [this]() {
             m_dismissedPdfWarningSignature = m_pdfWarningSignature;
+            emit topBannerReserveChanged();
         });
     }
     
@@ -536,7 +537,9 @@ void DocumentViewport::showPdfSourceWarning(int sourceCount, int affectedPages,
     
     if (m_dismissedPdfWarningSignature != warningSignature) {
         // Also cancels an in-flight hide animation if health changed again.
+        const bool wasShowing = m_missingPdfBanner->isVisible();
         m_missingPdfBanner->showAnimated();
+        if (!wasShowing) emit topBannerReserveChanged();
     }
 }
 
@@ -546,7 +549,24 @@ void DocumentViewport::hidePdfSourceWarning()
     m_dismissedPdfWarningSignature.clear();
     if (m_missingPdfBanner && m_missingPdfBanner->isVisible()) {
         m_missingPdfBanner->hideAnimated();
+        emit topBannerReserveChanged();
     }
+}
+
+int DocumentViewport::topBannerReserve() const
+{
+    if (!m_missingPdfBanner || !m_missingPdfBanner->isVisible()) {
+        return 0;
+    }
+    // The banner stays visible for the length of its slide-out, so a dismissed
+    // or superseded warning still reports isVisible(). Treating those as gone
+    // lets a top-anchored overlay settle in one move instead of chasing the
+    // animation in either direction.
+    if (m_pdfWarningSignature.isEmpty() ||
+        m_dismissedPdfWarningSignature == m_pdfWarningSignature) {
+        return 0;
+    }
+    return m_missingPdfBanner->height();
 }
 
 // ===== Theme / Dark Mode =====

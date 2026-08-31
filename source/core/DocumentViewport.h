@@ -452,6 +452,15 @@ public:
      * @brief Hide the missing PDF banner.
      */
     void hidePdfSourceWarning();
+
+    /**
+     * @brief Height of the strip the missing-PDF banner occupies at the top of
+     *        the viewport, or 0 when it is not showing.
+     *
+     * Lets overlays anchored to the top of the viewport (the search bar) keep
+     * clear of the banner so its buttons stay reachable.
+     */
+    int topBannerReserve() const;
     
     // ===== Theme / Dark Mode =====
     
@@ -2751,6 +2760,12 @@ signals:
     void strokesChanged();
 
     void requestPdfSources();
+
+    /**
+     * @brief The missing-PDF banner appeared or went away, so topBannerReserve()
+     *        has changed and top-anchored overlays need repositioning.
+     */
+    void topBannerReserveChanged();
 
     /**
      * @brief A recognized OCR block was double-clicked to be made editable.

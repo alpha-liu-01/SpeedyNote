@@ -320,6 +320,20 @@ MainWindow::MainWindow(QWidget *parent)
     m_splitViewManager = new SplitViewManager(this);
     connect(m_splitViewManager, &SplitViewManager::jumpToPageRequested,
             this, &MainWindow::showJumpToPageDialog);
+    // The manager has already made the originating pane active, so this lands on
+    // the document whose scroll handle the button was sitting next to.
+    connect(m_splitViewManager, &SplitViewManager::searchRequested,
+            this, &MainWindow::showPdfSearchBar);
+    // The search bar anchors to the active pane's top-right corner, so anything
+    // that moves that corner has to move the bar with it.
+    connect(m_splitViewManager, &SplitViewManager::activePaneChanged,
+            this, [this](SplitViewManager::Pane) { updatePdfSearchBarPosition(); });
+    connect(m_splitViewManager, &SplitViewManager::splitStateChanged,
+            this, [this](bool) { updatePdfSearchBarPosition(); });
+    if (QSplitter* splitter = m_splitViewManager->viewportSplitter()) {
+        connect(splitter, &QSplitter::splitterMoved,
+                this, [this](int, int) { updatePdfSearchBarPosition(); });
+    }
 
     // Phase 3.1.1: Initialize DocumentManager
     m_documentManager = new DocumentManager(this);
@@ -2497,6 +2511,10 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_pdfSourcesConn);
         m_pdfSourcesConn = {};
     }
+    if (m_pdfBannerReserveConn) {
+        disconnect(m_pdfBannerReserveConn);
+        m_pdfBannerReserveConn = {};
+    }
     // OCR: Disconnect strokesChanged connection
     if (m_strokesChangedConn) {
         disconnect(m_strokesChangedConn);
@@ -3038,6 +3056,8 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
             this, [this, viewport]() {
         showPdfSourcesDialog(viewport);
     });
+    m_pdfBannerReserveConn = connect(viewport, &DocumentViewport::topBannerReserveChanged,
+            this, &MainWindow::updatePdfSearchBarPosition);
     updatePdfSourceUi(viewport);
 }
 
@@ -6157,23 +6177,43 @@ void MainWindow::updatePdfSearchBarPosition()
     if (!m_pdfSearchBar || !m_canvasContainer) {
         return;
     }
-    
-    // Position at the bottom of the canvas container
-    QRect viewportRect = m_canvasContainer->rect();
-    
-    // Calculate search bar geometry: full width, at bottom
-    int barHeight = m_pdfSearchBar->height();
-    int y = viewportRect.height() - barHeight;
-    
-    m_pdfSearchBar->setGeometry(0, y, viewportRect.width(), barHeight);
-    
+
+    // Floating card in the top-right corner, the way editors place Find. The
+    // bottom edge is avoided because on tablets it is where the on-screen
+    // keyboard comes up.
+    const int margin = 8;
+
+    // The corner that matters is the active pane's, not the window's: search
+    // acts on the active viewport, and when split those two corners differ. The
+    // bar is a child of the canvas container, so the pane rect comes back in
+    // that container's coordinates.
+    QRect paneRect = m_canvasContainer->rect();
+    if (m_splitViewManager) {
+        QWidget* pane = m_splitViewManager->activePaneContainer();
+        if (pane && pane->isVisible() && m_canvasContainer->isAncestorOf(pane)) {
+            paneRect = QRect(pane->mapTo(m_canvasContainer, QPoint(0, 0)),
+                             pane->size());
+        }
+    }
+
+    const int width = qMin(PdfSearchBar::PREFERRED_WIDTH,
+                           qMax(0, paneRect.width() - margin * 2));
+
+    // A top-docked cross-axis scroll bar and the missing-PDF banner both claim
+    // the pane's top strip, and they overlap each other, so clearing the taller
+    // of the two clears both. Without this the banner's Dismiss button ends up
+    // buried.
+    const int scrollBarReserve = m_splitViewManager
+        ? m_splitViewManager->viewportTopReserve() : 0;
+    DocumentViewport* vp = currentViewport();
+    const int bannerReserve = vp ? vp->topBannerReserve() : 0;
+
+    m_pdfSearchBar->setGeometry(paneRect.right() + 1 - width - margin,
+                                paneRect.top() + qMax(scrollBarReserve, bannerReserve) + margin,
+                                width, m_pdfSearchBar->height());
+
     // Ensure it's raised above viewport content
     m_pdfSearchBar->raise();
-
-    // SB4: keep a bottom-docked cross-axis scroll bar clear of the search bar.
-    if (m_splitViewManager && m_pdfSearchBar->isVisible()) {
-        m_splitViewManager->setViewportBottomInset(barHeight);
-    }
 }
 
 void MainWindow::showPdfSearchBar()
@@ -6196,11 +6236,6 @@ void MainWindow::showPdfSearchBar()
     
     // Sync dark mode
     m_pdfSearchBar->setDarkMode(isDarkMode());
-
-    // SB4: reserve bottom space so a bottom-docked cross-axis bar clears it.
-    if (m_splitViewManager) {
-        m_splitViewManager->setViewportBottomInset(m_pdfSearchBar->height());
-    }
 }
 
 void MainWindow::hidePdfSearchBar()
@@ -6232,12 +6267,6 @@ void MainWindow::hidePdfSearchBar()
     
     m_pdfSearchBar->hide();
     m_pdfSearchBar->clearStatus();
-
-    // SB4: release the reserved bottom space so a bottom-docked cross-axis bar
-    // drops back to the edge.
-    if (m_splitViewManager) {
-        m_splitViewManager->setViewportBottomInset(0);
-    }
     
     // Clear search highlights from viewport
     if (DocumentViewport *vp = currentViewport()) {
@@ -6283,6 +6312,8 @@ void MainWindow::setScrollBarHorizontalOnBottom(bool onBottom)
     if (!m_splitViewManager) return;
     m_splitViewManager->setScrollBarHorizontalEdge(onBottom ? ViewportScrollBar::DockEdge::Bottom
                                                             : ViewportScrollBar::DockEdge::Top);
+    // The top strip the search bar has to clear grows or vanishes with the edge.
+    updatePdfSearchBarPosition();
 }
 
 bool MainWindow::scrollBarsPinned() const
