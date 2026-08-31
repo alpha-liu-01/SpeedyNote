@@ -447,6 +447,205 @@ public:
     }
 
     /**
+     * @brief Test that the empty space around pages acts as the Pan tool.
+     */
+    static bool testOffPagePanFromEmptySpace() {
+        printf("  testOffPagePanFromEmptySpace... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        const bool savedSetting = DocumentViewport::panOutsidePagesEnabled();
+        DocumentViewport::setPanOutsidePagesEnabled(true);
+
+        auto doc = Document::createNew("Off-page pan");
+        for (int i = 0; i < 4; ++i) {
+            doc->addPage();
+        }
+
+        DocumentViewport viewport;
+        viewport.resize(1200, 800);
+        // beginPanGesture() refuses to run on a hidden widget, so the pan path
+        // only exists once the viewport has been (offscreen-) shown.
+        viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+        viewport.show();
+        QApplication::processEvents();
+        viewport.setDocument(doc.get());
+        viewport.setZoomLevel(1.0);
+        viewport.setPanOffset(QPointF(0, 0));
+
+        auto makeEvent = [&](PointerEvent::Type type, QPointF pos) {
+            PointerEvent pe;
+            pe.type = type;
+            pe.source = PointerEvent::Stylus;
+            pe.viewportPos = pos;
+            pe.button = Qt::LeftButton;
+            pe.pressure = 1.0;
+            pe.pageHit = viewport.viewportToPage(pos);
+            return pe;
+        };
+
+        const QRectF page0 = viewport.pageRect(0);
+        // Zoom is 1.0, so a document-space offset is also a viewport-pixel one:
+        // 60 units left of the page clears the tolerance band, 2 does not.
+        const QPointF farOffPage = viewport.documentToViewport(
+            QPointF(page0.left() - 60.0, page0.center().y()));
+        const QPointF nearMiss = viewport.documentToViewport(
+            QPointF(page0.left() - 2.0, page0.center().y()));
+        const QPointF onPage = viewport.documentToViewport(page0.center());
+
+        // ----- A press in the empty space pans instead of drawing -----
+        viewport.setCurrentTool(ToolType::Pen);
+        viewport.setPanOffset(QPointF(0, 0));
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Press, farOffPage));
+        if (!viewport.m_offPagePanArmed)
+            return fail("off-page press did not arm the pan");
+        if (viewport.m_isDrawing)
+            return fail("off-page press started a stroke");
+        if (viewport.m_offPagePanDragging)
+            return fail("pan started before the pointer left the tap slop");
+
+        viewport.handlePointerEvent(
+            makeEvent(PointerEvent::Move, farOffPage + QPointF(0, -150)));
+        if (!viewport.m_offPagePanDragging)
+            return fail("moving past the slop did not start the pan");
+        viewport.handlePointerEvent(
+            makeEvent(PointerEvent::Release, farOffPage + QPointF(0, -150)));
+        if (viewport.m_offPagePanArmed || viewport.m_offPagePanDragging)
+            return fail("release left off-page pan state behind");
+        if (viewport.panOffset().y() < 100.0)
+            return fail("off-page drag did not scroll the viewport");
+
+        // ----- The setting gates the whole feature -----
+        DocumentViewport::setPanOutsidePagesEnabled(false);
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Press, farOffPage));
+        const bool armedWhileDisabled = viewport.m_offPagePanArmed;
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Release, farOffPage));
+        DocumentViewport::setPanOutsidePagesEnabled(true);
+        if (armedWhileDisabled)
+            return fail("disabled setting still armed an off-page pan");
+
+        // ----- A near-miss at the page edge still belongs to the tool -----
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Press, nearMiss));
+        const bool armedOnNearMiss = viewport.m_offPagePanArmed;
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Release, nearMiss));
+        if (armedOnNearMiss)
+            return fail("a near-miss at the page edge should reach the tool");
+
+        // ----- The edgeless canvas has no space outside a page -----
+        auto edgelessDoc =
+            Document::createNew("Off-page pan edgeless", Document::Mode::Edgeless);
+        DocumentViewport edgelessViewport;
+        edgelessViewport.resize(1200, 800);
+        edgelessViewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+        edgelessViewport.show();
+        QApplication::processEvents();
+        edgelessViewport.setDocument(edgelessDoc.get());
+        PointerEvent edgelessPress;
+        edgelessPress.type = PointerEvent::Press;
+        edgelessPress.source = PointerEvent::Stylus;
+        edgelessPress.button = Qt::LeftButton;
+        edgelessPress.viewportPos = QPointF(-400.0, 120.0);
+        edgelessPress.pageHit =
+            edgelessViewport.viewportToPage(edgelessPress.viewportPos);
+        if (edgelessViewport.shouldArmOffPagePan(edgelessPress))
+            return fail("edgeless canvas should never arm an off-page pan");
+        edgelessViewport.hide();
+        edgelessViewport.setDocument(nullptr);
+
+        // ----- An in-progress lasso keeps going outside the page -----
+        viewport.setCurrentTool(ToolType::Lasso);
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Press, onPage));
+        if (!viewport.m_isDrawingLasso)
+            return fail("lasso press on a page did not start a path");
+        const int lassoPointsOnPage = viewport.m_lassoPath.size();
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Move, farOffPage));
+        if (viewport.m_offPagePanArmed)
+            return fail("an in-progress lasso was hijacked by the off-page pan");
+        if (viewport.m_lassoPath.size() <= lassoPointsOnPage)
+            return fail("lasso path did not continue outside the page");
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Release, farOffPage));
+
+        // ----- A hardware eraser off-page pans and erases nothing -----
+        viewport.setCurrentTool(ToolType::Pen);
+        Page* firstPage = doc->page(0);
+        if (!firstPage || !firstPage->activeLayer())
+            return fail("first page has no active layer");
+        VectorStroke stroke;
+        stroke.color = Qt::black;
+        stroke.baseThickness = 4.0;
+        for (int i = 0; i <= 10; ++i) {
+            StrokePoint pt;
+            pt.pos = QPointF(60.0 + i * 20.0, 120.0);
+            pt.pressure = 1.0;
+            stroke.points.append(pt);
+        }
+        stroke.updateBoundingBox();
+        firstPage->activeLayer()->addStroke(stroke);
+        const int strokesBefore = firstPage->activeLayer()->strokes().size();
+
+        viewport.setPanOffset(QPointF(0, 0));
+        PointerEvent eraserPress = makeEvent(PointerEvent::Press, farOffPage);
+        eraserPress.isEraser = true;
+        viewport.handlePointerEvent(eraserPress);
+        if (!viewport.m_offPagePanArmed)
+            return fail("hardware eraser press off-page did not arm the pan");
+        PointerEvent eraserMove =
+            makeEvent(PointerEvent::Move, farOffPage + QPointF(0, -130));
+        eraserMove.isEraser = true;
+        viewport.handlePointerEvent(eraserMove);
+        PointerEvent eraserRelease =
+            makeEvent(PointerEvent::Release, farOffPage + QPointF(0, -130));
+        eraserRelease.isEraser = true;
+        viewport.handlePointerEvent(eraserRelease);
+        if (viewport.m_isDrawingEraserLasso)
+            return fail("hardware eraser off-page started an eraser lasso");
+        if (firstPage->activeLayer()->strokes().size() != strokesBefore)
+            return fail("hardware eraser off-page deleted strokes while panning");
+        if (viewport.panOffset().y() < 80.0)
+            return fail("eraser branch swallowed the off-page pan move");
+
+        // ----- A tap in the empty space still drops the selection -----
+        auto image = std::make_unique<ImageObject>();
+        image->position = QPointF(50.0, 50.0);
+        image->size = QSizeF(120.0, 90.0);
+        ImageObject* imageRaw = image.get();
+        firstPage->addObject(std::move(image));
+
+        viewport.setCurrentTool(ToolType::ObjectSelect);
+        viewport.selectObject(imageRaw, false);
+        if (viewport.m_selectedObjects.isEmpty())
+            return fail("object was not selected for the tap test");
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Press, farOffPage));
+        if (!viewport.m_offPagePanArmed)
+            return fail("off-page press under ObjectSelect did not arm the pan");
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Release, farOffPage));
+        if (!viewport.m_selectedObjects.isEmpty())
+            return fail("off-page tap did not clear the object selection");
+
+        // ----- Handles that hang off the page still belong to the tool -----
+        viewport.selectObject(imageRaw, false);
+        const QRectF bounds = viewport.objectBoundsInViewport(imageRaw);
+        if (bounds.isEmpty())
+            return fail("selected object had no viewport bounds");
+        if (viewport.objectHandleAtPoint(bounds.topLeft())
+                == DocumentViewport::HandleHit::None)
+            return fail("object corner was not recognised as a resize handle");
+        if (!viewport.toolClaimsOffPagePress(
+                makeEvent(PointerEvent::Press, bounds.topLeft())))
+            return fail("resize handle press was not claimed by the tool");
+
+        viewport.deselectAllObjects();
+        viewport.hide();
+        viewport.setDocument(nullptr);
+        DocumentViewport::setPanOutsidePagesEnabled(savedSetting);
+
+        printf("PASSED\n");
+        return true;
+    }
+
+    /**
      * @brief Test left/current and right/alternate ObjectSelect mode resolution.
      */
     static bool testObjectAlternateMouseMode() {
@@ -4350,6 +4549,7 @@ public:
         runTest(testScrollFractions, "testScrollFractions");
         runTest(testPdfCache, "testPdfCache");
         runTest(testPointerEvents, "testPointerEvents");
+        runTest(testOffPagePanFromEmptySpace, "testOffPagePanFromEmptySpace");
         runTest(testObjectAlternateMouseMode, "testObjectAlternateMouseMode");
         runTest(testObjectGestureCancellation, "testObjectGestureCancellation");
         runTest(testObjectPageContainment, "testObjectPageContainment");

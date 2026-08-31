@@ -378,6 +378,12 @@ void ControlPanelDialog::applyChanges()
     settings.setValue("tools/wheelScrollSpeed", wheelSpeed);
     DocumentViewport::setWheelScrollSpeed(wheelSpeed);
 
+    if (panOutsidePagesCheck) {
+        bool panOutsidePages = panOutsidePagesCheck->isChecked();
+        settings.setValue("tools/panOutsidePages", panOutsidePages);
+        DocumentViewport::setPanOutsidePagesEnabled(panOutsidePages);
+    }
+
     if (ocrCjkGridModeCheck)
         settings.setValue("ocrCjkGridMode", ocrCjkGridModeCheck->isChecked());
 
@@ -1122,6 +1128,23 @@ void ControlPanelDialog::createToolsTab()
     panHint->setWordWrap(true);
     panHint->setStyleSheet("color: gray; font-size: 11px;");
     panLayout->addRow(panHint);
+
+    panOutsidePagesCheck = new QCheckBox(
+        tr("Pan the view by dragging the empty space around pages"), panGroup);
+    panOutsidePagesCheck->setChecked(
+        settings.value("tools/panOutsidePages", true).toBool());
+    panLayout->addRow(panOutsidePagesCheck);
+
+    QLabel *offPagePanHint = new QLabel(
+        tr("Lets you move the view with a stylus alone, without holding a key or "
+           "switching to the hand tool. Drawing tools are unaffected because they "
+           "only work on the pages themselves. A tap in the empty space still "
+           "clears the current selection, and a drag that starts on a page always "
+           "continues as drawing. Does not apply to the edgeless canvas."),
+        panGroup);
+    offPagePanHint->setWordWrap(true);
+    offPagePanHint->setStyleSheet("color: gray; font-size: 11px;");
+    panLayout->addRow(offPagePanHint);
 
     layout->addWidget(panGroup);
 

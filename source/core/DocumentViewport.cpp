@@ -860,6 +860,13 @@ void DocumentViewport::setCurrentTool(ToolType tool)
         }
     }
     
+    // An off-page pan belongs to no tool in particular, so it has to end
+    // whichever tool the user switches away from. The hover cursor is reset
+    // too, since updateHighlighterCursor() below replaces it with the new
+    // tool's and the next hover has to be free to claim it back.
+    cancelOffPagePan();
+    m_offPageHoverCursor = false;
+    
     // Phase A: Clear text selection when switching away from Highlighter
     if (previousTool == ToolType::Highlighter && tool != ToolType::Highlighter) {
         bool hadTextSelection = m_textSelection.isValid();
@@ -3608,8 +3615,25 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
             dirtyRegion += QRegion(newRectF.toAlignedRect(), QRegion::Ellipse);
             update(dirtyRegion);
         }
+        
+        // Advertise the empty space around the pages as a pan target. This
+        // takes precedence over the tool cursors while hovering there, and the
+        // tool cursor is restored on the way back onto a page.
+        const bool offPageHover =
+            s_panOutsidePagesEnabled && m_document && !m_document->isEdgeless()
+            && !m_isPanToolDragging
+            && isPointOutsideAllPages(m_lastPointerPos);
+        if (offPageHover != m_offPageHoverCursor) {
+            m_offPageHoverCursor = offPageHover;
+            if (offPageHover) {
+                setCursor(Qt::OpenHandCursor);
+            } else {
+                updateHighlighterCursor();
+            }
+        }
+        
         // Phase D.1: Update cursor for PDF link hover in Highlighter tool
-        else if (m_currentTool == ToolType::Highlighter) {
+        if (!offPageHover && m_currentTool == ToolType::Highlighter) {
             updateLinkCursor(m_lastPointerPos);
         }
     }
@@ -4026,6 +4050,11 @@ void DocumentViewport::focusOutEvent(QFocusEvent* event)
         }
     }
 
+    // The gesture above is gone, but the drag flags that fed it are not: left
+    // set, they swallow the next press as a continuation of a dead drag.
+    cancelOffPagePan();
+    m_isPanToolDragging = false;
+
     if (hasActiveObjectPointerGesture()) {
         cancelObjectPointerGesture();
     }
@@ -4053,6 +4082,10 @@ void DocumentViewport::hideEvent(QHideEvent* event)
         m_gesture.reset();
         m_gestureTimeoutTimer->stop();
     }
+    
+    m_offPagePanArmed = false;
+    m_offPagePanDragging = false;
+    m_isPanToolDragging = false;
     
     // Also reset touch handler state including inertia
     // This prevents inertia callbacks from accessing invalid widget state
@@ -5666,6 +5699,18 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
         }
     }
     
+    // Empty space around the pages acts as the Pan tool, so a stylus user can
+    // move the view without reaching for the keyboard or a touchscreen. Only
+    // armed here: the gesture becomes a pan on the first move past the slop, so
+    // a tap costs no viewport grab and still reaches handleOffPagePanTap().
+    if (shouldArmOffPagePan(pe)) {
+        m_offPagePanArmed = true;
+        m_offPagePanDragging = false;
+        m_offPagePanStart = pe.viewportPos;
+        m_offPagePanModifiers = pe.modifiers;
+        return;
+    }
+    
     // Handle tool-specific actions
     // Hardware eraser (stylus eraser end) always erases, regardless of selected tool
     bool isErasing = m_hardwareEraserActive || m_currentTool == ToolType::Eraser;
@@ -5741,6 +5786,26 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
     
     // Update last pointer position for cursor tracking
     m_lastPointerPos = pe.viewportPos;
+    
+    // Off-page pan runs ahead of every tool branch, the eraser included: a
+    // hardware eraser press sets m_hardwareEraserActive before dispatch, so
+    // checking this later would pan and erase at the same time.
+    if (m_offPagePanArmed) {
+        if (!m_offPagePanDragging) {
+            if (QLineF(m_offPagePanStart, pe.viewportPos).length()
+                <= OFF_PAGE_PAN_TAP_SLOP_PX) {
+                return;  // Still within the tap slop - decide on release
+            }
+            // Seed the gesture from the press position so the movement that
+            // crossed the slop is not swallowed.
+            PointerEvent seed = pe;
+            seed.viewportPos = m_offPagePanStart;
+            handlePointerPress_Pan(seed);
+            m_offPagePanDragging = true;
+        }
+        handlePointerMove_Pan(pe);
+        return;
+    }
     
     // CRITICAL: Some tablet drivers don't report eraser on Press but DO report it on Move.
     // If ANY event in the stroke has isEraser, treat the whole stroke as eraser.
@@ -5878,6 +5943,27 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
 void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
 {
     if (!m_document) return;
+    
+    // Off-page pan: either finish the pan, or treat a press that never moved as
+    // the tap that used to clear the selection.
+    if (m_offPagePanArmed) {
+        if (m_offPagePanDragging) {
+            handlePointerRelease_Pan(pe);
+        } else {
+            handleOffPagePanTap();
+        }
+        
+        m_offPagePanArmed = false;
+        m_offPagePanDragging = false;
+        m_pointerActive = false;
+        m_activeSource = PointerEvent::Unknown;
+        m_activeDrawingPage = -1;
+        m_hardwareEraserActive = false;
+        
+        updateHighlighterCursor();
+        update();
+        return;
+    }
     
     // Eraser lasso: finalize and delete strokes inside the region
     if (m_isDrawingEraserLasso) {
@@ -14872,10 +14958,142 @@ void DocumentViewport::handlePointerRelease_Pan(const PointerEvent& pe)
     Q_UNUSED(pe);
     endPanGesture();
     m_isPanToolDragging = false;
-    setCursor(Qt::OpenHandCursor);
+    // Not hard-coded to the open hand: an off-page pan runs under whatever tool
+    // the user actually selected, and its cursor has to come back afterwards.
+    updateHighlighterCursor();
     
     m_pointerActive = false;
     m_activeSource = PointerEvent::Unknown;
+}
+
+// =============================================================================
+// Off-Page Pan
+// =============================================================================
+
+bool DocumentViewport::isPointOutsideAllPages(const QPointF& viewportPos) const
+{
+    if (!m_document || m_document->isEdgeless() || m_document->pageCount() == 0) {
+        return false;
+    }
+
+    const QPointF docPt = viewportToDocument(viewportPos);
+    const int nearest = nearestPageToPoint(docPt);
+    if (nearest < 0) {
+        return false;
+    }
+
+    // The tolerance is a viewport distance, so it has to be unzoomed before it
+    // can grow a document-space rect.
+    const qreal margin = OFF_PAGE_EDGE_TOLERANCE_PX / qMax(m_zoomLevel, 0.01);
+    const QRectF tolerant =
+        pageRect(nearest).adjusted(-margin, -margin, margin, margin);
+    return !tolerant.contains(docPt);
+}
+
+bool DocumentViewport::toolClaimsOffPagePress(const PointerEvent& pe) const
+{
+    switch (m_currentTool) {
+        case ToolType::Lasso:
+            // The selection box can be dragged past a page edge, and its
+            // handles are drawn outside the box either way.
+            return m_lassoSelection.isValid()
+                && hitTestSelectionHandles(pe.viewportPos) != HandleHit::None;
+
+        case ToolType::ObjectSelect:
+            // The rotate handle sits above the object's top edge, so it is
+            // off-page by construction for an object at the top of a page.
+            if (m_selectedObjects.size() == 1
+                && objectHandleAtPoint(pe.viewportPos) != HandleHit::None) {
+                return true;
+            }
+            // Positions are clamped to the page, but rotation can push the
+            // visual bounds past the edge.
+            return objectAtPoint(viewportToDocument(pe.viewportPos)) != nullptr;
+
+        case ToolType::Highlighter:
+            return objectAtPoint(viewportToDocument(pe.viewportPos)) != nullptr;
+
+        default:
+            return false;
+    }
+}
+
+bool DocumentViewport::shouldArmOffPagePan(const PointerEvent& pe) const
+{
+    if (!s_panOutsidePagesEnabled) return false;
+    if (!m_document || m_document->isEdgeless()) return false;
+
+    // Touch already pans with two fingers, and the right button carries the
+    // context menu for ObjectSelect.
+    if (pe.source == PointerEvent::Touch) return false;
+    if (pe.button == Qt::RightButton || pe.button == Qt::MiddleButton) return false;
+
+    if (pe.pageHit.valid()) return false;
+
+    // A press should never arrive mid-gesture, but if one does the gesture in
+    // flight owns it.
+    if (m_isDrawing || m_isDrawingLasso || m_isDrawingEraserLasso
+        || m_isDrawingStraightLine || m_isTransformingSelection
+        || m_isCreatingTextBox || m_isDraggingObjects || m_isResizingObject) {
+        return false;
+    }
+
+    if (!isPointOutsideAllPages(pe.viewportPos)) return false;
+
+    return !toolClaimsOffPagePress(pe);
+}
+
+void DocumentViewport::cancelOffPagePan()
+{
+    if (!m_offPagePanArmed) {
+        return;
+    }
+    
+    if (m_offPagePanDragging) {
+        endPanGesture();
+        m_isPanToolDragging = false;
+    }
+    m_offPagePanArmed = false;
+    m_offPagePanDragging = false;
+    m_pointerActive = false;
+    m_activeSource = PointerEvent::Unknown;
+    updateHighlighterCursor();
+}
+
+void DocumentViewport::handleOffPagePanTap()
+{
+    const bool shiftHeld = (m_offPagePanModifiers & Qt::ShiftModifier);
+
+    switch (m_currentTool) {
+        case ToolType::Lasso:
+            if (m_lassoSelection.isValid()) {
+                if (m_lassoSelection.hasTransform()) {
+                    applySelectionTransform();  // Also clears the selection
+                } else {
+                    clearLassoSelection();
+                }
+            }
+            break;
+
+        case ToolType::ObjectSelect:
+            if (!shiftHeld && !m_selectedObjects.isEmpty()) {
+                deselectAllObjects();
+            }
+            break;
+
+        case ToolType::Highlighter: {
+            const bool hadTextSelection = m_textSelection.isValid();
+            m_textSelection.clear();
+            if (hadTextSelection) emit textSelectionChanged(false);
+            if (!m_selectedObjects.isEmpty()) {
+                deselectAllObjects();
+            }
+            break;
+        }
+
+        default:
+            break;
+    }
 }
 
 // =============================================================================

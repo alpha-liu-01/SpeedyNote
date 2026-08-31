@@ -487,6 +487,18 @@ public:
     static void setWheelScrollSpeed(qreal speed) { s_wheelScrollSpeed = qBound(5.0, speed, 200.0); }
     static qreal wheelScrollSpeed() { return s_wheelScrollSpeed; }
 
+    // ===== Off-Page Pan =====
+
+    /**
+     * @brief Enable/disable panning by dragging the empty space around pages.
+     *
+     * Global preference (no per-document override), so it lives as a static and
+     * takes effect in every tab and split pane at once. Paged documents only:
+     * an edgeless canvas has no space that is outside a page.
+     */
+    static void setPanOutsidePagesEnabled(bool enabled) { s_panOutsidePagesEnabled = enabled; }
+    static bool panOutsidePagesEnabled() { return s_panOutsidePagesEnabled; }
+
     // ===== View State Getters =====
     
     /**
@@ -2822,6 +2834,23 @@ private:
     // ===== Pan Tool State =====
     bool m_isPanToolDragging = false;
     QPointF m_panToolLastPos;
+
+    // ===== Off-Page Pan State =====
+    // A press that lands in the empty space around the pages pans instead of
+    // reaching the current tool. The gesture is only armed on press: it becomes
+    // a real pan once the pointer moves past the slop, and a release before that
+    // is treated as a tap so the old "click empty space to deselect" survives.
+    bool m_offPagePanArmed = false;     ///< Press landed off-page; still undecided
+    bool m_offPagePanDragging = false;  ///< Slop exceeded, pan gesture running
+    QPointF m_offPagePanStart;          ///< Viewport position of the arming press
+    Qt::KeyboardModifiers m_offPagePanModifiers = Qt::NoModifier;  ///< Modifiers at press time
+    bool m_offPageHoverCursor = false;  ///< Open-hand hover cursor is currently shown
+
+    /// Presses within this many viewport pixels of a page still reach the tool,
+    /// so a near-miss at the page edge does not yank the view.
+    static constexpr qreal OFF_PAGE_EDGE_TOLERANCE_PX = 6.0;
+    /// Movement below this many viewport pixels makes the release a tap.
+    static constexpr qreal OFF_PAGE_PAN_TAP_SLOP_PX = 4.0;
     
     // ===== Middle Mouse Pan (independent of tool system) =====
     bool m_isMiddleMousePanning = false;
@@ -2857,6 +2886,9 @@ private:
 
     // ----- Mouse Wheel Scroll Speed -----
     static inline qreal s_wheelScrollSpeed = 40.0;  ///< Document units per wheel click
+
+    // ----- Off-Page Pan -----
+    static inline bool s_panOutsidePagesEnabled = true;  ///< Empty space around pages acts as the Pan tool
     
     // ----- Tool Defaults -----
     // These are initial values; MainWindow will set them from user preferences.
@@ -4200,6 +4232,46 @@ private:
     void handlePointerPress_Pan(const PointerEvent& pe);
     void handlePointerMove_Pan(const PointerEvent& pe);
     void handlePointerRelease_Pan(const PointerEvent& pe);
+
+    // ----- Off-Page Pan -----
+
+    /**
+     * @brief True if this press should arm an off-page pan instead of the tool.
+     *
+     * Paged documents only, non-touch sources, left/stylus tip only, and only
+     * when the press misses every page by more than OFF_PAGE_EDGE_TOLERANCE_PX
+     * and the current tool has nothing to grab there.
+     */
+    bool shouldArmOffPagePan(const PointerEvent& pe) const;
+
+    /**
+     * @brief True if the current tool owns this off-page press.
+     *
+     * Some interactive geometry legitimately sits outside pageRect(): lasso
+     * transform handles, object resize/rotate handles, and rotated objects.
+     */
+    bool toolClaimsOffPagePress(const PointerEvent& pe) const;
+
+    /**
+     * @brief True if the point is outside every page plus the edge tolerance.
+     */
+    bool isPointOutsideAllPages(const QPointF& viewportPos) const;
+
+    /**
+     * @brief Apply the deselect an off-page press would have caused.
+     *
+     * Runs when an armed off-page pan is released without moving, keeping the
+     * "tap the empty space to drop the selection" gesture the tools relied on.
+     */
+    void handleOffPagePanTap();
+
+    /**
+     * @brief Abandon an armed or running off-page pan without acting on it.
+     *
+     * For the paths that can steal the release: tool switch, focus loss and the
+     * viewport being hidden.
+     */
+    void cancelOffPagePan();
     
     /**
      * @brief Load text boxes from PDF for the specified page.
