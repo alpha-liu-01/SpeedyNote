@@ -187,6 +187,13 @@ private:
 
     static constexpr int PADDING_LEFT = 6;
     static constexpr int PADDING_RIGHT = 6;
+
+    /// Size of a round button chip. Mirrors SubToolbarToggle::BUTTON_SIZE and
+    /// LinkSlotButton::BUTTON_SIZE, which are private to widgets the style
+    /// dropdown is not derived from, so the value is repeated here to keep the
+    /// plain QToolButton the same shape as its neighbours.
+    static constexpr int CHIP_SIZE = 24;
+    static constexpr int CHIP_ICON_SIZE = 16;
 };
 
 #endif // LINKOBJECTBAR_H

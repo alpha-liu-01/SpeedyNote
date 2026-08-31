@@ -133,9 +133,10 @@ void ObjectSelectActionBar::setupButtons()
 
 void ObjectSelectActionBar::updateButtonStates()
 {
-    // Add/Select is the persistent entry point for ObjectSelect, including idle state.
+    // Add/Select is the persistent entry point for ObjectSelect, including idle
+    // state, but means nothing under a tool that never reads the mode.
     if (m_actionModeButton) {
-        m_actionModeButton->setVisible(true);
+        m_actionModeButton->setVisible(m_objectToolActive);
     }
 
     // Aspect lock: visible only when a single ImageObject is selected
@@ -234,6 +235,14 @@ void ObjectSelectActionBar::setHasSelection(bool hasSelection)
 {
     if (m_hasSelection != hasSelection) {
         m_hasSelection = hasSelection;
+        updateButtonStates();
+    }
+}
+
+void ObjectSelectActionBar::setObjectToolActive(bool active)
+{
+    if (m_objectToolActive != active) {
+        m_objectToolActive = active;
         updateButtonStates();
     }
 }

@@ -14117,7 +14117,12 @@ void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
         InsertedObject* under = objectAtPoint(viewportToDocument(pe.viewportPos));
         if (auto* annotation = dynamic_cast<LinkObject*>(under)) {
             if (!annotation->region.isEmpty()) {
+                // Announce the drop: a select-only drag leaves a valid
+                // selection behind, and without this the action bar container
+                // would keep believing it is still there.
+                const bool hadTextSelection = m_textSelection.isValid();
                 m_textSelection.clear();
+                if (hadTextSelection) emit textSelectionChanged(false);
                 selectObject(annotation, false);
                 m_pointerActive = false;
                 updateHighlighterCursor();

@@ -416,7 +416,7 @@ void HighlighterSubToolbar::setHighlightOnReleaseFromShortcut(bool enabled)
 namespace {
 constexpr const char* kHighlightStyleIconBases[] = {
     "highlight_none",       // HighlightStyle::None
-    "marker",               // HighlightStyle::Cover (reuses existing marker icon)
+    "preset",               // HighlightStyle::Cover (reuses existing paint bucket icon)
     "highlight_underline",  // HighlightStyle::Underline
     "highlight_dotted",     // HighlightStyle::DottedUnderline
 };

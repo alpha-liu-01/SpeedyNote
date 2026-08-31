@@ -43,7 +43,7 @@ constexpr HighlightRegion::Style kRegionStyles[] = {
 // Same icons the Highlighter subtoolbar's style dropdown uses, so a mark's
 // style reads identically wherever it is shown.
 constexpr const char* kRegionStyleIconBases[] = {
-    "marker",
+    "preset",
     "highlight_underline",
     "highlight_dotted",
 };
@@ -75,6 +75,9 @@ LinkObjectBar::LinkObjectBar(QWidget* parent)
     : QWidget(parent)
 {
     setObjectName(QStringLiteral("linkObjectBar"));
+    // Without this a plain QWidget ignores the panel background and border that
+    // setDarkMode() installs, leaving the bar transparent over the canvas.
+    setAttribute(Qt::WA_StyledBackground, true);
     setFixedHeight(36);
 
     m_layout = new QHBoxLayout(this);
@@ -132,8 +135,10 @@ void LinkObjectBar::createWidgets()
     m_regionStyleButton->setObjectName(QStringLiteral("linkRegionStyle"));
     m_regionStyleButton->setPopupMode(QToolButton::InstantPopup);
     m_regionStyleButton->setToolTip(tr("Highlight style"));
-    m_regionStyleButton->setFixedSize(28, 28);
-    m_regionStyleButton->setIconSize(QSize(20, 20));
+    // Sized to match the toggles and slot buttons beside it, which are all
+    // 24px round chips carrying a 16px icon.
+    m_regionStyleButton->setFixedSize(CHIP_SIZE, CHIP_SIZE);
+    m_regionStyleButton->setIconSize(QSize(CHIP_ICON_SIZE, CHIP_ICON_SIZE));
 
     m_regionStyleMenu = new QMenu(m_regionStyleButton);
     m_regionStyleActions[0] = m_regionStyleMenu->addAction(tr("Cover text"));
@@ -515,13 +520,18 @@ void LinkObjectBar::applyRegionStyleStyling()
 
     // setStyleSheet() forces a full unpolish/polish, so this only runs on a
     // theme change, never on a per-click style change.
-    const QString btnBg  = dark ? QStringLiteral("#303030") : QStringLiteral("#f7f7f7");
-    const QString btnHov = dark ? QStringLiteral("#4a4a4a") : QStringLiteral("#e0e0e0");
+    //
+    // Black on dark / white on light is the chip colour SubToolbarToggle and
+    // LinkSlotButton paint themselves, rather than the panel colour: filling
+    // with the panel colour would leave the button with no visible affordance
+    // while every neighbour reads as a distinct chip.
+    const QString btnBg  = dark ? QStringLiteral("#000000") : QStringLiteral("#ffffff");
+    const QString btnHov = dark ? QStringLiteral("#2a2a2a") : QStringLiteral("#ececec");
     m_regionStyleButton->setStyleSheet(QStringLiteral(
-        "QToolButton { background: %1; border: none; border-radius: 4px; }"
+        "QToolButton { background: %1; border: none; border-radius: %3px; }"
         "QToolButton:hover { background: %2; }"
         "QToolButton::menu-indicator { image: none; }"
-    ).arg(btnBg, btnHov));
+    ).arg(btnBg, btnHov, QString::number(CHIP_SIZE / 2)));
 
     if (m_regionStyleMenu) {
         const QString menuBg      = dark ? QStringLiteral("#1a1a1a") : QStringLiteral("#ffffff");
