@@ -883,7 +883,6 @@ set(UI_SOURCES
     source/ui/actionbars/ActionBarContainer.cpp
     source/ui/actionbars/LassoActionBar.cpp
     source/ui/actionbars/ObjectSelectActionBar.cpp
-    source/ui/actionbars/TextSelectionActionBar.cpp
     source/ui/actionbars/PagePanelActionBar.cpp
     # Banners
     source/ui/banners/MissingPdfBanner.cpp

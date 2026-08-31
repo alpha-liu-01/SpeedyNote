@@ -152,10 +152,16 @@ void ObjectSelectActionBar::updateButtonStates()
         m_ocrConvertButton->setVisible(m_hasSelection && m_isOcrTextSelected);
     }
     
-    // Copy, Delete, and layer ordering buttons: visible only when selection exists
+    // Copy covers a text selection too, so it is the one button that can be the
+    // whole bar: under the Highlighter with text selected and nothing else, every
+    // rule below leaves only this one standing.
     if (m_copyButton) {
-        m_copyButton->setVisible(m_hasSelection);
+        m_copyButton->setVisible(m_hasSelection || m_hasTextSelection);
+        m_copyButton->setToolTip(copySubjectIsText() ? tr("Copy Text (Ctrl+C)")
+                                                    : tr("Copy (Ctrl+C)"));
     }
+
+    // Delete and layer ordering buttons: visible only when selection exists
     if (m_deleteButton) {
         m_deleteButton->setVisible(m_hasSelection);
     }
@@ -175,15 +181,20 @@ void ObjectSelectActionBar::updateButtonStates()
         m_decreaseAffinityButton->setVisible(m_hasSelection);
     }
     
-    // Paste button: visible for either the internal object clipboard or a system image.
+    // Paste and Cancel are object-clipboard actions, and pasting an object is
+    // not something another tool's user is asking for -- pasteForObjectSelect()
+    // would insert one and leave them in the Highlighter. Same reasoning as the
+    // Add/Select toggle above.
     if (m_pasteButton) {
-        m_pasteButton->setVisible(m_hasObjectInClipboard || m_hasImageInClipboard);
+        m_pasteButton->setVisible(m_objectToolActive
+                                  && (m_hasObjectInClipboard || m_hasImageInClipboard));
     }
     
     // Cancel button: visible when clipboard has content and no selection (paste-only mode)
     // This allows dismissing the action bar without keyboard
     if (m_cancelButton) {
-        m_cancelButton->setVisible(m_hasObjectInClipboard && !m_hasSelection);
+        m_cancelButton->setVisible(m_objectToolActive && m_hasObjectInClipboard
+                                   && !m_hasSelection);
     }
     
     // Trigger re-layout to adjust height
@@ -247,12 +258,36 @@ void ObjectSelectActionBar::setObjectToolActive(bool active)
     }
 }
 
+void ObjectSelectActionBar::setHasTextSelection(bool hasTextSelection)
+{
+    if (m_hasTextSelection != hasTextSelection) {
+        m_hasTextSelection = hasTextSelection;
+        updateButtonStates();
+    }
+}
+
+bool ObjectSelectActionBar::copySubjectIsText() const
+{
+    // An annotation's copyable content is its text, and a bare text selection
+    // obviously is. Everything else copies the objects themselves.
+    return m_isLinkSelected || (!m_hasSelection && m_hasTextSelection);
+}
+
 void ObjectSelectActionBar::updateImageSelection(bool isImage, bool aspectLocked)
 {
     m_isImageSelected = isImage;
     if (m_aspectLockButton) {
         m_aspectLockButton->setChecked(aspectLocked);
     }
+    updateButtonStates();
+}
+
+void ObjectSelectActionBar::updateLinkSelection(bool isLink)
+{
+    if (m_isLinkSelected == isLink)
+        return;
+
+    m_isLinkSelected = isLink;
     updateButtonStates();
 }
 

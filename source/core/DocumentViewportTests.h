@@ -27,6 +27,7 @@
 #include <QAbstractItemView>
 #include <QApplication>
 #include <QBuffer>
+#include <QClipboard>
 #include <QColorDialog>
 #include <QContextMenuEvent>
 #include <QMenu>
@@ -4216,6 +4217,90 @@ public:
         return true;
     }
 
+    /**
+     * @brief Copy and Delete on an annotation, through the shared policy.
+     *
+     * The action bar buttons, Ctrl+C / Delete, and the context menu all call
+     * handleCopyAction() / handleDeleteAction(), so these two functions are the
+     * only place the behaviour is defined. What matters is that a selected
+     * annotation copies its text rather than the object, in either tool, and
+     * that a text selection still copies its text when nothing is selected.
+     */
+    static bool testAnnotationCopyDelete() {
+        printf("  testAnnotationCopyDelete... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        QClipboard* clipboard = QGuiApplication::clipboard();
+        if (!clipboard)
+            return fail("no clipboard available");
+
+        auto doc = Document::createNew("Annotation copy");
+        DocumentViewport viewport;
+        viewport.resize(900, 700);
+        viewport.setDocument(doc.get());
+
+        Page* page = doc->page(0);
+        if (!page)
+            return fail("missing copy test page");
+
+        auto markPtr = std::make_unique<LinkObject>();
+        markPtr->setRegionFromPageRects({QRectF(60.0, 80.0, 180.0, 14.0)});
+        markPtr->region.style = HighlightRegion::Style::Cover;
+        markPtr->description = QStringLiteral("the annotated sentence");
+        LinkObject* mark = markPtr.get();
+        page->addObject(std::move(markPtr));
+
+        const QString objectsBefore =
+            QStringLiteral("sentinel that object copy would not overwrite");
+
+        for (ToolType tool : {ToolType::ObjectSelect, ToolType::Highlighter}) {
+            viewport.setCurrentTool(tool);
+            viewport.clearObjectSelection();
+            viewport.selectObject(mark, false);
+
+            clipboard->setText(objectsBefore);
+            viewport.handleCopyAction();
+            if (clipboard->text() != mark->description)
+                return fail("copying an annotation did not yield its text");
+        }
+
+        // A bare text selection is the other half of the merged Copy button.
+        viewport.setCurrentTool(ToolType::Highlighter);
+        viewport.clearObjectSelection();
+        viewport.m_textSelection.clear();
+        viewport.m_textSelection.source =
+            DocumentViewport::TextSelection::Source::Ocr;
+        viewport.m_textSelection.pageIndex = 0;
+        viewport.m_textSelection.startBoxIndex = 0;
+        viewport.m_textSelection.startCharIndex = 0;
+        viewport.m_textSelection.endBoxIndex = 0;
+        viewport.m_textSelection.endCharIndex = 11;
+        viewport.m_textSelection.selectedText = QStringLiteral("loose words");
+        viewport.m_textSelection.highlightRects = {QRectF(60.0, 300.0, 100.0, 14.0)};
+        clipboard->setText(objectsBefore);
+        viewport.handleCopyAction();
+        if (clipboard->text() != QStringLiteral("loose words"))
+            return fail("a bare text selection did not copy its text");
+
+        // Delete used to be a no-op under the Highlighter, which left the only
+        // route to removing a tapped annotation in the other tool.
+        viewport.clearObjectSelection();
+        viewport.selectObject(mark, false);
+        const int objectsBeforeDelete = static_cast<int>(page->objects.size());
+        viewport.handleDeleteAction();
+        if (static_cast<int>(page->objects.size()) != objectsBeforeDelete - 1)
+            return fail("Delete under the Highlighter left the annotation");
+        if (page->objectById(mark->id))
+            return fail("the deleted annotation is still reachable");
+
+        printf("PASSED\n");
+        return true;
+    }
+
     static bool testOcrTextBoxConversion() {
         printf("  testOcrTextBoxConversion... ");
 
@@ -4576,6 +4661,8 @@ public:
                 "testHighlightAppearanceEdit");
         runTest(testPositionLinkPairing,
                 "testPositionLinkPairing");
+        runTest(testAnnotationCopyDelete,
+                "testAnnotationCopyDelete");
         runTest(testOcrTextBoxConversion,
                 "testOcrTextBoxConversion");
         

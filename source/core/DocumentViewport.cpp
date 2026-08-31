@@ -13566,13 +13566,23 @@ void DocumentViewport::handleCopyAction()
             break;
             
         case ToolType::ObjectSelect:
-            if (hasSelectedObjects()) {
+            // An annotation's copyable content is its text, not the object. The
+            // object itself carries link slots that mean nothing at a second
+            // location, which is why it has no object-copy path at all.
+            if (selectedLinkForBar()) {
+                copyAnnotationText();
+            } else if (hasSelectedObjects()) {
                 copySelectedObjects();
             }
             break;
             
         case ToolType::Highlighter:
-            if (m_textSelection.isValid()) {
+            // Tap-to-select clears the text selection, so these two are
+            // normally exclusive; the annotation wins if an Adjust session has
+            // both live at once.
+            if (selectedLinkForBar()) {
+                copyAnnotationText();
+            } else if (m_textSelection.isValid()) {
                 copySelectedTextToClipboard();
             }
             break;
@@ -13628,8 +13638,13 @@ void DocumentViewport::handleDeleteAction()
             break;
             
         case ToolType::Highlighter:
-            // For highlighter, Escape cancels selection, Delete doesn't do anything special
-            // (we can't delete PDF text)
+            // An annotation selected by tapping its highlight is deletable here,
+            // the same as it would be under ObjectSelect. With no annotation
+            // selected there is nothing to delete: PDF text is not ours to
+            // remove, and Escape is what drops a text selection.
+            if (hasSelectedObjects()) {
+                deleteSelectedObjects();
+            }
             break;
             
         default:
@@ -13954,9 +13969,14 @@ void DocumentViewport::recolorLassoSelection(const QColor& newColor)
     }
 }
 
-void DocumentViewport::copyTextSelection()
+void DocumentViewport::copyAnnotationText()
 {
-    copySelectedTextToClipboard();
+    LinkObject* link = selectedLinkForBar();
+    if (!link || link->description.isEmpty()) {
+        // An icon-only annotation with no note typed has nothing to copy.
+        return;
+    }
+    QGuiApplication::clipboard()->setText(link->description);
 }
 
 void DocumentViewport::clearLassoSelection()

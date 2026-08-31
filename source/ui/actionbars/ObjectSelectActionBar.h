@@ -13,8 +13,9 @@ class ActionBarButton;
  * delete, and layer ordering operations while ObjectSelect is active.
  * 
  * Layout (when selection exists):
- * - [Copy]     - Visible when selection exists
- * - [Paste]    - Visible when clipboard has object
+ * - [Copy]     - Visible for any selection or a text selection; copies the
+ *                annotation's text, the selected text, or the objects
+ * - [Paste]    - Visible when clipboard has object, ObjectSelect only
  * - [Delete]   - Visible when selection exists
  * - ───────    - Separator (visible when selection exists)
  * - [Forward]  - Z-order up by 1 (Ctrl+]) - visible when selection exists
@@ -26,9 +27,11 @@ class ActionBarButton;
  * - [Paste]    - Visible when clipboard has object
  * - [Cancel]   - Clears clipboard and dismisses action bar (Esc)
  * 
- * This action bar appears whenever the current tool is ObjectSelect, and also
- * under the Highlighter once an annotation is selected by tapping its
- * highlight. See @ref setObjectToolActive for what differs between the two.
+ * This action bar appears whenever the current tool is ObjectSelect, and under
+ * the Highlighter once either an annotation or some text is selected. It
+ * absorbed the one-button TextSelectionActionBar, which the text-selection case
+ * reproduces exactly: every other button's rule leaves it hidden there.
+ * See @ref setObjectToolActive for what else differs between the two tools.
  */
 class ObjectSelectActionBar : public ActionBar {
     Q_OBJECT
@@ -79,6 +82,15 @@ public:
      * clipboard and behaves identically under either tool.
      */
     void setObjectToolActive(bool active);
+
+    /**
+     * @brief Set whether PDF text is currently selected.
+     * @param hasTextSelection True if the viewport holds a valid text selection.
+     *
+     * Copy is the only button that can be useful with no object selected, so
+     * this is what lets the bar stand in for the old TextSelectionActionBar.
+     */
+    void setHasTextSelection(bool hasTextSelection);
     
     /**
      * @brief Update image-specific state for the aspect ratio lock button.
@@ -93,6 +105,16 @@ public:
      * @param isLocked Current ocrLocked state of the object.
      */
     void updateOcrLockSelection(bool isOcrText, bool isLocked);
+
+    /**
+     * @brief Note whether the selection is a single LinkObject.
+     * @param isLink True if exactly one annotation / link object is selected.
+     *
+     * Only words Copy's tooltip. What Copy actually does is decided in
+     * @ref DocumentViewport::handleCopyAction, so the bar does not need to
+     * agree about it.
+     */
+    void updateLinkSelection(bool isLink);
 
 signals:
     void actionModeChanged(DocumentViewport::ObjectActionMode mode);
@@ -194,11 +216,16 @@ private:
     bool m_hasObjectInClipboard = false;
     bool m_hasImageInClipboard = false;
     bool m_hasSelection = false;
+    bool m_hasTextSelection = false;
     bool m_objectToolActive = true;
     bool m_isImageSelected = false;
     bool m_isOcrTextSelected = false;
+    bool m_isLinkSelected = false;
     DocumentViewport::ObjectActionMode m_actionMode =
         DocumentViewport::ObjectActionMode::Select;
+
+    /// Whether Copy would put text rather than objects on the clipboard.
+    bool copySubjectIsText() const;
 };
 
 #endif // OBJECTSELECTACTIONBAR_H

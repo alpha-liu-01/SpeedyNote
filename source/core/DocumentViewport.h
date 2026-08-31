@@ -1338,8 +1338,12 @@ public:
      * 
      * Behavior depends on current tool:
      * - Lasso: Copy selected strokes
-     * - ObjectSelect: Copy selected objects
-     * - Highlighter: Copy selected text to system clipboard
+     * - ObjectSelect: Copy the selected annotation's text, else the objects
+     * - Highlighter: Copy the selected annotation's text, else the text selection
+     *
+     * This is the single home for what Copy means, shared by the keyboard
+     * shortcut, the action bar button, and the object context menu, so the
+     * three can never disagree about it.
      */
     void handleCopyAction();
     
@@ -1365,7 +1369,10 @@ public:
      * Deletes current selection based on tool:
      * - Lasso: Delete selected strokes
      * - ObjectSelect: Delete selected objects
-     * - Highlighter: Clear text selection
+     * - Highlighter: Delete the selected annotation, if any
+     *
+     * Dropping a text selection is Escape's job, not Delete's -- see
+     * @ref handleEscapeKey.
      */
     void handleDeleteAction();
     
@@ -1998,6 +2005,16 @@ public:
     void placeFloatingBar(QWidget* bar, const QRectF& anchorRect);
 
     LinkObject* selectedLinkForBar() const;
+
+    /// Put the selected annotation's text on the system clipboard.
+    ///
+    /// An annotation's text is its @ref LinkObject::description -- seeded from
+    /// the selection when the highlight was committed, edited by the user
+    /// afterwards, and already what PDF export writes as the annotation's
+    /// /Contents. Re-deriving it from the region would give a second, quietly
+    /// different answer.
+    void copyAnnotationText();
+
     void ensureLinkObjectBar();
     void syncLinkObjectBar();
     void updateLinkObjectBarGeometry();
@@ -2502,11 +2519,6 @@ public slots:
      */
     void recolorLassoSelection(const QColor& newColor);
     
-    /**
-     * @brief Copy selected PDF text to system clipboard.
-     * Action Bar: Called by TextSelectionActionBar::copyRequested.
-     */
-    void copyTextSelection();
     
 signals:
     // ===== View State Signals =====
@@ -2672,7 +2684,8 @@ signals:
      * @brief Emitted when PDF text selection state changes.
      * @param hasSelection True if text is selected.
      * 
-     * Action Bar: Used to show/hide TextSelectionActionBar.
+     * Action Bar: brings up ObjectSelectActionBar with Copy as its only
+     * applicable button.
      */
     void textSelectionChanged(bool hasSelection);
     

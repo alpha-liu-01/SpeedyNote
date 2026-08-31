@@ -4,19 +4,18 @@
 // ActionBarContainerTests - Unit tests for ActionBarContainer visibility
 // ============================================================================
 // The container's job is a routing decision: given the current tool and the
-// selection flags, which action bar should be on screen. That matrix grew a
-// priority rule when the Highlighter gained tap-to-select (an annotation
-// selected there shows the object bar, not the text bar), which is exactly the
-// kind of state combination that is tedious to reach by hand.
+// selection flags, which action bar should be on screen. Every tool with a bar
+// now routes to just one of them, so what the tests guard is which buttons that
+// one bar offers - state combinations that are tedious to reach by hand.
 //
 // Current tests:
 // - which bar each (tool, selection) combination routes to
 // - the Add/Select toggle is ObjectSelect-only
+// - a bare text selection leaves Copy as the only button
 // ============================================================================
 
 #include "ActionBarContainer.h"
 #include "ObjectSelectActionBar.h"
-#include "TextSelectionActionBar.h"
 
 #include <QDebug>
 #include <QLayout>
@@ -36,16 +35,21 @@ struct Fixture {
     QWidget host;
     ActionBarContainer* container = nullptr;
     ObjectSelectActionBar* objectBar = nullptr;
-    TextSelectionActionBar* textBar = nullptr;
 
     Fixture()
     {
         container = new ActionBarContainer(&host);
         container->setAnimationEnabled(false);
         objectBar = new ObjectSelectActionBar();
-        textBar = new TextSelectionActionBar();
         container->setActionBar(QStringLiteral("objectSelect"), objectBar);
-        container->setActionBar(QStringLiteral("textSelection"), textBar);
+    }
+
+    /// A button on the object bar by its position in setupButtons() order.
+    QWidget* objectBarButton(int index) const
+    {
+        QLayoutItem* item = objectBar->layout() ? objectBar->layout()->itemAt(index)
+                                                : nullptr;
+        return item ? item->widget() : nullptr;
     }
 };
 
@@ -87,8 +91,8 @@ inline bool testVisibilityRouting()
               f.objectBar);
     }
 
-    // The Highlighter is the interesting one: it hosts either bar depending on
-    // what is selected, and nothing when nothing is.
+    // The Highlighter is the interesting one: the bar appears for either kind of
+    // selection, and for nothing when nothing is selected.
     {
         Fixture f;
         f.container->onToolChanged(ToolType::Highlighter);
@@ -96,7 +100,7 @@ inline bool testVisibilityRouting()
 
         f.container->onTextSelectionChanged(true);
         check("Highlighter with text selected", f.container->currentActionBar(),
-              f.textBar);
+              f.objectBar);
 
         // Tap-to-select: the annotation becomes the subject, and the text
         // selection it replaced is dropped.
@@ -105,17 +109,17 @@ inline bool testVisibilityRouting()
         check("Highlighter with an annotation selected",
               f.container->currentActionBar(), f.objectBar);
 
-        // Both live at once happens during an Adjust session, where the
-        // annotation still wins.
+        // Deselecting the annotation while text is still selected keeps the bar,
+        // now in its text-selection shape.
         f.container->onTextSelectionChanged(true);
-        check("Highlighter adjusting (both selections live)",
-              f.container->currentActionBar(), f.objectBar);
-
-        // Starting a fresh drag deselects the annotation and hands the text
-        // bar back.
         f.container->onObjectSelectionChanged(false);
         check("Highlighter after the annotation is deselected",
-              f.container->currentActionBar(), f.textBar);
+              f.container->currentActionBar(), f.objectBar);
+
+        // Dropping both is what actually hides it.
+        f.container->onTextSelectionChanged(false);
+        check("Highlighter with nothing selected again",
+              f.container->currentActionBar(), nullptr);
     }
 
     // Leaving the Highlighter with an annotation still selected hides the bar,
@@ -150,9 +154,7 @@ inline bool testActionModeToggleScope()
     Fixture f;
 
     // setupButtons() adds the mode toggle first, so it heads the layout.
-    QLayoutItem* first = f.objectBar->layout() ? f.objectBar->layout()->itemAt(0)
-                                               : nullptr;
-    QWidget* modeButton = first ? first->widget() : nullptr;
+    QWidget* modeButton = f.objectBarButton(0);
     if (!modeButton) {
         qDebug() << "FAIL: could not reach the Add/Select toggle";
         return false;
@@ -186,6 +188,66 @@ inline bool testActionModeToggleScope()
     return success;
 }
 
+/**
+ * @brief With only text selected, the object bar reduces to a Copy button.
+ *
+ * This is what replaced the one-button TextSelectionActionBar, so the check is
+ * that Copy survives with no object selected and that Paste - an object action
+ * that would drop an object and leave the user in the Highlighter - does not.
+ */
+inline bool testTextSelectionShape()
+{
+    qDebug() << "=== Test: object bar shape for a bare text selection ===";
+    bool success = true;
+
+    Fixture f;
+
+    // setupButtons() order: mode, aspect lock, OCR lock, OCR convert, Copy, Paste.
+    QWidget* copyButton = f.objectBarButton(4);
+    QWidget* pasteButton = f.objectBarButton(5);
+    if (!copyButton || !pasteButton) {
+        qDebug() << "FAIL: could not reach the Copy / Paste buttons";
+        return false;
+    }
+
+    f.container->onToolChanged(ToolType::Highlighter);
+    f.container->onObjectClipboardChanged(true);
+    f.container->onTextSelectionChanged(true);
+
+    if (copyButton->isHidden()) {
+        qDebug() << "FAIL: Copy hidden with text selected";
+        success = false;
+    } else {
+        qDebug() << "  - Copy visible for a text selection: OK";
+    }
+    if (!pasteButton->isHidden()) {
+        qDebug() << "FAIL: Paste shown under the Highlighter";
+        success = false;
+    } else {
+        qDebug() << "  - Paste hidden under the Highlighter: OK";
+    }
+
+    // Under ObjectSelect the clipboard makes Paste available again.
+    f.container->onToolChanged(ToolType::ObjectSelect);
+    if (pasteButton->isHidden()) {
+        qDebug() << "FAIL: Paste not restored under ObjectSelect";
+        success = false;
+    } else {
+        qDebug() << "  - Paste restored under ObjectSelect: OK";
+    }
+
+    // Copy needs a selection of some kind; ObjectSelect idle has neither.
+    f.container->onTextSelectionChanged(false);
+    if (!copyButton->isHidden()) {
+        qDebug() << "FAIL: Copy shown with nothing selected";
+        success = false;
+    } else {
+        qDebug() << "  - Copy hidden with nothing selected: OK";
+    }
+
+    return success;
+}
+
 inline bool runAllTests()
 {
     qDebug() << "";
@@ -204,6 +266,7 @@ inline bool runAllTests()
 
     run(testVisibilityRouting());
     run(testActionModeToggleScope());
+    run(testTextSelectionShape());
 
     qDebug() << "=== Results:" << passed << "passed," << failed << "failed ===";
     return failed == 0;
