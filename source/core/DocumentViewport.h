@@ -237,6 +237,7 @@ class QDropEvent;
 class TouchGestureHandler;
 class MissingPdfBanner;
 class LinkObject;
+struct LinkSlot;
 
 /**
  * @brief Layout mode for page arrangement.
@@ -903,6 +904,20 @@ public:
      * documentModified() / linkObjectListMayHaveChanged().
      */
     void markLinkContainerDirtyAndRefreshOutline(LinkObject* link);
+
+    /**
+     * @brief The same dirty-mark and outline refresh, for a known container.
+     *
+     * The overload above locates the container with findPageContainingObject(),
+     * which in paged mode answers "the current page" without checking. Position
+     * link pairing writes to an object on whichever page the link was started
+     * from, so it has to name the container or it would mark the wrong page
+     * dirty and lose the edit.
+     *
+     * @param pageIndex Notebook page index; ignored in edgeless mode.
+     * @param tileCoord Owning tile; ignored in paged mode.
+     */
+    void markLinkContainerDirty(int pageIndex, Document::TileCoord tileCoord);
 
     /**
      * @brief Get the maximum valid affinity value.
@@ -1591,6 +1606,43 @@ public:
      */
     void addLinkToSlot(int slotIndex);
     
+    // ===== Position link pairing =====
+
+    /// True while a position link is half-made, waiting for its other end.
+    bool isPairingPositionLink() const { return m_positionPairing.active; }
+
+    /**
+     * @brief Arm a position link on the selected annotation's empty slot.
+     *
+     * Deliberately not a canvas mode: between arming and finishing, every
+     * gesture is ordinary navigation and selection. That is what makes the
+     * two-step pairing usable where a "tap the destination" mode is not, since
+     * the bar carrying the only cancel affordance scrolls away with its object.
+     */
+    void beginPositionLinkPairing(LinkObject* origin, int slotIndex);
+
+    /// Drop a half-made link. Nothing is written, so nothing is lost.
+    void cancelPositionLinkPairing();
+
+    /**
+     * @brief Finish the armed link, spending a slot at each end.
+     *
+     * Both slots become Position links pointing at each other, so either end
+     * navigates to the other. Rejects linking an object to itself.
+     */
+    void completePositionLinkPairing(LinkObject* target, int targetSlotIndex);
+
+    /**
+     * @brief The armed origin's description, for menu labels.
+     *
+     * Captured when arming so building the menu never has to reload the
+     * origin's page, which is normally evicted by the time the user gets here.
+     */
+    QString pairingOriginDescription() const { return m_positionPairing.originDescription; }
+
+    /// Whether @p link is the armed origin, and if so which slot is armed.
+    bool isPairingOrigin(const LinkObject* link, int* slotIndex = nullptr) const;
+
     /**
      * @brief Clear the content of a LinkObject slot.
      * @param slotIndex The slot index (0-2) to clear.
@@ -1752,6 +1804,99 @@ public:
             endpointsResolved = false;
         }
     };
+
+    /**
+     * @brief One half-made position link, waiting for its other end.
+     *
+     * In-memory only and never serialized: a link that was never finished is
+     * not a fact about the document. Per-viewport, like AdjustSession, so the
+     * gesture belongs to the view the user started it in.
+     */
+    struct PositionLinkPairing {
+        QString originObjectId;
+        int originSlotIndex = -1;
+        /// Container captured while the origin was still loaded. Finding the
+        /// other end means navigating away, which normally evicts that page, so
+        /// the id alone would not be enough to resolve the origin again.
+        bool originIsEdgeless = false;
+        QString originPageUuid;
+        Document::TileCoord originTileCoord = {0, 0};
+        /// Snapshotted so the menu label costs no page load.
+        QString originDescription;
+        bool active = false;
+
+        void clear() {
+            originObjectId.clear();
+            originSlotIndex = -1;
+            originIsEdgeless = false;
+            originPageUuid.clear();
+            originTileCoord = {0, 0};
+            originDescription.clear();
+            active = false;
+        }
+    };
+
+    /**
+     * @brief Reload the armed origin, lazily loading its container.
+     * @param pageIndex Receives the origin's page index (paged mode).
+     * @param tileCoord Receives the origin's tile (edgeless mode).
+     * @return nullptr when the origin or its container has gone away.
+     */
+    LinkObject* resolvePairingOrigin(int* pageIndex = nullptr,
+                                     Document::TileCoord* tileCoord = nullptr);
+
+    /**
+     * @brief Point @p slot at @p target, which lives in the given container.
+     *
+     * Writes all three representations the design calls for: the object id,
+     * which survives the target being dragged, the coordinate that navigation
+     * actually runs off, and the far slot index that makes the pairing
+     * releasable from either end. The coordinate is the object's centre,
+     * matching MainWindow::navigateToLinkObject rather than
+     * cloneWithBackLink's top-left, so a highlight lands centred on its mark.
+     *
+     * @param targetSlotIndex The partner slot on @p target, or -1 for a one-way
+     *        link to an object that holds no return path.
+     */
+    void setPositionTarget(LinkSlot& slot, const LinkObject* target,
+                           int targetSlotIndex,
+                           const QString& pageUuid,
+                           Document::TileCoord tileCoord) const;
+
+    /**
+     * @brief Resolve a position slot's partner, if it genuinely points back.
+     *
+     * Both halves of a pairing name each other by object *and* slot, and this
+     * only succeeds when that agreement holds in both directions. Anything
+     * less is treated as a one-way link and left alone, so a slot the user has
+     * since re-pointed by hand is never collateral damage.
+     *
+     * @param partnerSlotIndex Receives the partner's slot index.
+     * @param partnerPageIndex Receives the partner's page index (paged mode).
+     * @param partnerTile Receives the partner's tile (edgeless mode).
+     * @return nullptr when the slot has no verified partner.
+     */
+    LinkObject* resolvePositionLinkPartner(const LinkObject* source, int slotIndex,
+                                           int* partnerSlotIndex,
+                                           int* partnerPageIndex,
+                                           Document::TileCoord* partnerTile);
+
+    /**
+     * @brief Jump to a position slot's destination.
+     *
+     * Navigation runs off the stored coordinate, which always resolves and
+     * which in paged mode is what pulls the destination page into memory. When
+     * the slot also names a target object, it is then looked up on the
+     * container we landed on, so a target that has been dragged is re-aimed
+     * and the stale coordinate repaired. A target that moved to a different
+     * container is deliberately not chased: that would need an id-to-location
+     * index edgeless mode does not have, so such a link degrades to landing
+     * where its target used to be.
+     */
+    void followPositionLink(LinkObject* source, int slotIndex);
+
+    /// Document units of drift before a position slot's coordinate is rewritten.
+    static constexpr qreal POSITION_LINK_DRIFT_SLOP = 1.0;
 
     /// Resolve the session's target, or nullptr if it went away.
     LinkObject* resolveAdjustTarget() const;
@@ -3014,6 +3159,7 @@ private:
     InlineTextBoxEditor* m_inlineTextBoxEditor = nullptr;
     InlineTextEditSession m_inlineEditSession;
     AdjustSession m_adjustSession;
+    PositionLinkPairing m_positionPairing;
     /**
      * @brief Suppresses setCurrentTool()'s leave-ObjectSelect deselect.
      *

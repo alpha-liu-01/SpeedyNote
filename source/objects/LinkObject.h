@@ -32,6 +32,29 @@ struct LinkSlot {
     int edgelessTileX = 0;          ///< Target tile X coordinate (for edgeless)
     int edgelessTileY = 0;          ///< Target tile Y coordinate (for edgeless)
     
+    /**
+     * @brief The LinkObject this position link points at, when it points at one.
+     *
+     * Navigation runs off the coordinates above; this is the correction applied
+     * on arrival, so a link keeps working after its target is dragged. Empty for
+     * a link to a bare coordinate, which is every position link written before
+     * pairing existed and every back-link made by @ref LinkObject::cloneWithBackLink.
+     */
+    QString targetObjectId;
+    
+    /**
+     * @brief Which of the target's slots is this link's partner, or -1.
+     *
+     * A pairing spends a slot at each end, and clearing one end releases the
+     * other -- which needs to name the far slot, not just the far object. The
+     * object id alone is ambiguous once the same two annotations are paired
+     * twice, since then several of the target's slots point back here.
+     *
+     * -1 means "no known partner": a one-way link, or one whose far end has
+     * already been cleared.
+     */
+    int targetSlotIndex = -1;
+    
     // URL link data
     QString url;
     

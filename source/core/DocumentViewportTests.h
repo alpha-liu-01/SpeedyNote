@@ -3823,6 +3823,200 @@ public:
         return true;
     }
 
+    /**
+     * @brief Two-step pairing turns two empty slots into one bidirectional link.
+     *
+     * The two ends normally sit on different pages, which is the whole point of
+     * the gesture and also where it is easiest to get wrong: the origin's page
+     * is not the current one by the time the link is finished, so anything that
+     * assumes otherwise writes to the wrong container.
+     */
+    static bool testPositionLinkPairing() {
+        printf("  testPositionLinkPairing... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto doc = Document::createNew("Position pairing");
+        doc->addPage();
+        DocumentViewport viewport;
+        viewport.resize(900, 700);
+        viewport.setDocument(doc.get());
+        viewport.setCurrentTool(ToolType::ObjectSelect);
+
+        Page* pageA = doc->page(0);
+        Page* pageB = doc->page(1);
+        if (!pageA || !pageB)
+            return fail("pairing fixture is missing a page");
+
+        auto makeLink = [](Page* page, const QPointF& pos, const QString& desc) {
+            auto ptr = std::make_unique<LinkObject>();
+            ptr->position = pos;
+            ptr->description = desc;
+            LinkObject* raw = ptr.get();
+            page->addObject(std::move(ptr));
+            return raw;
+        };
+
+        LinkObject* origin = makeLink(pageA, QPointF(100.0, 120.0),
+                                     QStringLiteral("chapter one"));
+        LinkObject* target = makeLink(pageB, QPointF(300.0, 400.0),
+                                      QStringLiteral("the footnote"));
+
+        // Nothing armed to begin with, so the menu would offer only "start".
+        if (viewport.isPairingPositionLink())
+            return fail("a pairing was armed before anything started one");
+
+        viewport.beginPositionLinkPairing(origin, 0);
+        if (!viewport.isPairingPositionLink())
+            return fail("arming the origin did not take");
+        int armedSlot = -1;
+        if (!viewport.isPairingOrigin(origin, &armedSlot) || armedSlot != 0)
+            return fail("armed slot was not reported back");
+        if (viewport.isPairingOrigin(target))
+            return fail("the target was mistaken for the origin");
+        if (viewport.pairingOriginDescription() != QStringLiteral("chapter one"))
+            return fail("origin description was not captured for the menu");
+
+        // Arming writes nothing: an unfinished link is not a fact about the
+        // document.
+        if (!origin->linkSlots[0].isEmpty())
+            return fail("arming wrote into the slot");
+
+        // The armed slot has to look different, or a half-made link is
+        // invisible. It is still Empty on disk, so the bar applies the state.
+        viewport.selectObject(origin, false);
+        const auto slotButtons =
+            viewport.m_linkObjectBar->findChildren<LinkSlotButton*>();
+        if (slotButtons.size() != LinkObject::SLOT_COUNT)
+            return fail("link bar was missing its slot buttons");
+        if (slotButtons[0]->state() != LinkSlotState::PendingOrigin)
+            return fail("armed slot did not show the pending state");
+        if (slotButtons[1]->state() != LinkSlotState::Empty)
+            return fail("pending state leaked onto another slot");
+
+        // Linking an object to itself would navigate nowhere.
+        viewport.completePositionLinkPairing(origin, 1);
+        if (!origin->linkSlots[1].isEmpty() || !viewport.isPairingPositionLink())
+            return fail("a self-link was allowed");
+
+        // Finding the other end means navigating there, so by the time the link
+        // is finished the current page is the target's, not the origin's. That
+        // is what the assertions below are really testing: anything that
+        // resolves the origin's container as "the current page" gets it wrong.
+        viewport.scrollToPage(1);
+        viewport.selectObject(target, false);
+        if (viewport.currentPageIndex() == 0)
+            return fail("pairing test never left the origin's page");
+        viewport.completePositionLinkPairing(target, 2);
+
+        if (viewport.isPairingPositionLink())
+            return fail("pairing stayed armed after finishing");
+
+        // Both ends spent a slot and point at each other.
+        const LinkSlot& originSlot = origin->linkSlots[0];
+        const LinkSlot& targetSlot = target->linkSlots[2];
+        if (originSlot.type != LinkSlot::Type::Position
+            || targetSlot.type != LinkSlot::Type::Position)
+            return fail("pairing did not make both slots position links");
+        if (originSlot.targetObjectId != target->id
+            || targetSlot.targetObjectId != origin->id)
+            return fail("the two ends do not point at each other");
+
+        // Each end records its partner's page, not its own.
+        if (originSlot.targetPageUuid != pageB->uuid
+            || targetSlot.targetPageUuid != pageA->uuid)
+            return fail("position links recorded the wrong page");
+
+        // The coordinate is the partner's centre, so a highlight lands on its
+        // mark rather than on the corner of its bounding box.
+        const QPointF targetCentre =
+            target->position + QPointF(target->size.width() / 2.0,
+                                       target->size.height() / 2.0);
+        if (QLineF(originSlot.targetPosition, targetCentre).length() > 0.01)
+            return fail("origin slot did not snapshot the target's centre");
+
+        // Each end names the far *slot*, not just the far object. Without that
+        // the pair could not be released from either end, because an object id
+        // alone is ambiguous once two annotations are paired twice.
+        if (originSlot.targetSlotIndex != 2 || targetSlot.targetSlotIndex != 0)
+            return fail("pairing did not record the partner slot index");
+
+        // Back where the origin lives: clearing a slot is something the user
+        // does to the annotation in front of them.
+        viewport.scrollToPage(0);
+
+        // A pairing is only a pairing when both ends agree, in both
+        // directions. Probing the resolver directly keeps the pair intact for
+        // the teardown below.
+        int probeSlot = -1;
+        if (!viewport.resolvePositionLinkPartner(origin, 0, &probeSlot,
+                                                nullptr, nullptr)
+            || probeSlot != 2)
+            return fail("a genuine pairing was not recognised as one");
+
+        target->linkSlots[2].targetSlotIndex = 1;  // names the wrong slot now
+        if (viewport.resolvePositionLinkPartner(origin, 0, nullptr, nullptr,
+                                               nullptr))
+            return fail("a back-reference to the wrong slot counted as a pair");
+        target->linkSlots[2].targetSlotIndex = 0;
+
+        target->linkSlots[2].targetObjectId = QStringLiteral("somebody-else");
+        if (viewport.resolvePositionLinkPartner(origin, 0, nullptr, nullptr,
+                                               nullptr))
+            return fail("a back-reference to another object counted as a pair");
+        target->linkSlots[2].targetObjectId = origin->id;
+
+        // Releasing one end releases the other. The far half is on another
+        // page, which is exactly why leaving it behind would strand a slot the
+        // user cannot see and would not remember.
+        viewport.selectObject(origin, false);
+        viewport.clearLinkSlot(0);
+        if (!origin->linkSlots[0].isEmpty())
+            return fail("clearing a paired slot left the near end filled");
+        if (!target->linkSlots[2].isEmpty())
+            return fail("clearing a paired slot stranded the far end");
+
+        // A one-way link has no far end to release, so clearing it must stay a
+        // purely local edit.
+        target->linkSlots[1].type = LinkSlot::Type::Position;
+        target->linkSlots[1].targetPageUuid = pageA->uuid;
+        target->linkSlots[1].targetPosition = QPointF(10.0, 20.0);
+        if (viewport.resolvePositionLinkPartner(target, 1, nullptr, nullptr,
+                                               nullptr))
+            return fail("a coordinate-only link claimed a partner");
+        target->linkSlots[1].clear();
+
+        // Cancelling puts everything back with nothing written.
+        viewport.beginPositionLinkPairing(origin, 1);
+        if (!viewport.isPairingPositionLink())
+            return fail("could not arm a second link");
+        viewport.cancelPositionLinkPairing();
+        if (viewport.isPairingPositionLink() || !origin->linkSlots[1].isEmpty())
+            return fail("cancelling a pairing did not clear it");
+
+        // Esc is the keyboard route to the same place, and it outranks
+        // deselection so the more specific state goes first.
+        viewport.beginPositionLinkPairing(origin, 1);
+        if (!viewport.handleEscapeKey())
+            return fail("Esc did not consume the armed pairing");
+        if (viewport.isPairingPositionLink())
+            return fail("Esc left the pairing armed");
+
+        // Deleting the armed origin leaves no other end to write, so the
+        // pairing must not outlive it.
+        viewport.beginPositionLinkPairing(origin, 1);
+        viewport.selectObject(origin, false);
+        viewport.deleteSelectedObjects();
+        if (viewport.isPairingPositionLink())
+            return fail("pairing survived deletion of its origin");
+
+        printf("PASSED\n");
+        return true;
+    }
+
     static bool testOcrTextBoxConversion() {
         printf("  testOcrTextBoxConversion... ");
 
@@ -4180,6 +4374,8 @@ public:
                 "testHighlightAdjustMode");
         runTest(testHighlightAppearanceEdit,
                 "testHighlightAppearanceEdit");
+        runTest(testPositionLinkPairing,
+                "testPositionLinkPairing");
         runTest(testOcrTextBoxConversion,
                 "testOcrTextBoxConversion");
         

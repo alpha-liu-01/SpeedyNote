@@ -63,6 +63,16 @@ public:
                    const QColor& regionColor = QColor(),
                    int regionStyle = 0);
 
+    /**
+     * @brief Mark which slots hold one half of a paired position link.
+     *
+     * Clearing such a slot releases the far half too, on a page the user is
+     * very likely not looking at, so the confirmation has to say so. Kept
+     * separate from setValues() because it answers a different question than
+     * "what does this slot contain".
+     */
+    void setSlotPaired(const bool paired[NUM_SLOTS]);
+
     void setDarkMode(bool darkMode);
 
     /**
@@ -98,6 +108,15 @@ signals:
      * @param index The slot index (0, 1, or 2).
      */
     void slotCleared(int index);
+
+    /**
+     * @brief Emitted when an armed position-link slot is long-pressed.
+     *
+     * The gesture that deletes a filled slot abandons a half-made link instead,
+     * since an armed slot holds nothing to delete. No index: only one link can
+     * be half-made at a time.
+     */
+    void pairingCancelRequested();
 
     /**
      * @brief Emitted when the LinkObject color is changed via the color button.
@@ -184,6 +203,8 @@ private:
     bool m_darkMode = false;                          // For the dropdown's icons
     int m_regionStyle = 0;                            // HighlightRegion::Style as int
     LinkSlotButton* m_slotButtons[NUM_SLOTS] = {nullptr, nullptr, nullptr};
+    /// Per-slot "clearing this also clears the far end", for the confirmation.
+    bool m_slotPaired[NUM_SLOTS] = {false, false, false};
 
     static constexpr int PADDING_LEFT = 6;
     static constexpr int PADDING_RIGHT = 6;

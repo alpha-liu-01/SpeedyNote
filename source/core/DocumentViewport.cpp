@@ -382,6 +382,9 @@ void DocumentViewport::setDocument(Document* doc)
     // The session's target belongs to the outgoing document and the undo stacks
     // are cleared below, so there is nothing to commit into.
     discardHighlightAdjust();
+    // Same reasoning: a position link is intra-document, so its armed origin
+    // means nothing once the document changes.
+    m_positionPairing.clear();
     
     // End any active gesture (cached frame is from old document)
     if (m_gesture.isActive()) {
@@ -8182,7 +8185,18 @@ void DocumentViewport::deleteSelectedObjects()
     // Same reasoning as the popup discard above: the delete snapshot already
     // captures the adjusted region, so undo restores what was on screen.
     discardHighlightAdjust();
-    
+
+    // A half-made position link whose origin is among the doomed objects has no
+    // other end left to write, so it goes with them.
+    if (m_positionPairing.active) {
+        for (InsertedObject* obj : m_selectedObjects) {
+            if (obj && obj->id == m_positionPairing.originObjectId) {
+                cancelPositionLinkPairing();
+                break;
+            }
+        }
+    }
+
     // Separate OcrTextObjects (derived cache — no undo) from regular objects
     QVector<InsertedObject*> regularObjects;
     QVector<InsertedObject*> ocrObjects;
@@ -8450,6 +8464,13 @@ void DocumentViewport::forgetObject(const QString& objectId)
     // The object is being destroyed, so a pending description edit has nowhere
     // to land.
     closeLinkObjectBarPopups(false);
+
+    // A half-made position link whose origin is being deleted has no other end
+    // left to write, so drop it rather than let it strand.
+    if (m_positionPairing.active
+        && m_positionPairing.originObjectId == objectId) {
+        cancelPositionLinkPairing();
+    }
 
     if (m_hoveredObject && m_hoveredObject->id == objectId)
         m_hoveredObject = nullptr;
@@ -9609,6 +9630,8 @@ void DocumentViewport::ensureLinkObjectBar()
             this, &DocumentViewport::activateLinkSlot);
     connect(m_linkObjectBar, &LinkObjectBar::slotCleared,
             this, &DocumentViewport::clearLinkSlot);
+    connect(m_linkObjectBar, &LinkObjectBar::pairingCancelRequested,
+            this, &DocumentViewport::cancelPositionLinkPairing);
     connect(m_linkObjectBar, &LinkObjectBar::linkObjectColorChanged,
             this, &DocumentViewport::setSelectedLinkColor);
     connect(m_linkObjectBar, &LinkObjectBar::regionColorChanged,
@@ -9656,6 +9679,28 @@ void DocumentViewport::syncLinkObjectBar()
             case LinkSlot::Type::Markdown: states[i] = LinkSlotState::Markdown; break;
         }
     }
+
+    // An armed slot is still Empty on disk, so the pending look is applied here
+    // rather than being derivable from the slot's type.
+    int armedSlot = -1;
+    if (isPairingOrigin(link, &armedSlot)
+        && armedSlot >= 0 && armedSlot < LinkObject::SLOT_COUNT
+        && states[armedSlot] == LinkSlotState::Empty) {
+        states[armedSlot] = LinkSlotState::PendingOrigin;
+    }
+
+    // Which slots would take a second slot with them if cleared. Read straight
+    // off the slot rather than resolving the partner, so selecting an
+    // annotation never loads another page just to build its bar; the clear
+    // itself does the real verification.
+    bool paired[LinkObject::SLOT_COUNT];
+    for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
+        const LinkSlot& s = link->linkSlots[i];
+        paired[i] = s.type == LinkSlot::Type::Position
+                    && !s.targetObjectId.isEmpty()
+                    && s.targetSlotIndex >= 0;
+    }
+    m_linkObjectBar->setSlotPaired(paired);
 
     // hasRegion drives which colour the single swatch edits and whether the
     // style dropdown shows; regionAdjustable additionally requires the object
@@ -10640,23 +10685,7 @@ void DocumentViewport::activateLinkSlot(int slotIndex)
     // Activate the slot based on type
     switch (slot.type) {
         case LinkSlot::Type::Position:
-            // Navigate to position (paged or edgeless)
-            if (slot.isEdgelessTarget) {
-#ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "activateLinkSlot: Edgeless position link"
-                         << "tileX =" << slot.edgelessTileX
-                         << "tileY =" << slot.edgelessTileY
-                         << "targetPosition =" << slot.targetPosition;
-#endif
-                // Save current position before jumping (Phase 4)
-                pushPositionHistory();
-                
-                // Edgeless mode: navigate to tile + document position
-                navigateToEdgelessPosition(slot.edgelessTileX, slot.edgelessTileY, slot.targetPosition);
-            } else {
-                // Paged mode: navigate to page UUID + page-local position
-            navigateToPosition(slot.targetPageUuid, slot.targetPosition);
-            }
+            followPositionLink(link, slotIndex);
             break;
             
         case LinkSlot::Type::Url:
@@ -10729,17 +10758,42 @@ void DocumentViewport::addLinkToSlot(int slotIndex)
     
     // Simple context menu (TEMPORARY UI)
     QMenu menu;
-    QAction* posAction = menu.addAction(tr("Add Position Link"));
+
+    // The position entry depends on whether a link is already half-made, and on
+    // whether this is the annotation it was started from. Only one of start /
+    // finish is ever offered, so there is no way to link an object to itself.
+    const bool pairing = m_positionPairing.active;
+    const bool isOrigin = isPairingOrigin(link);
+
+    QAction* startAction = nullptr;
+    QAction* finishAction = nullptr;
+    QAction* cancelPairAction = nullptr;
+
+    if (!pairing) {
+        startAction = menu.addAction(tr("Start position link"));
+    } else {
+        if (!isOrigin) {
+            const QString from = m_positionPairing.originDescription.trimmed();
+            finishAction = menu.addAction(
+                from.isEmpty()
+                    ? tr("Finish position link here")
+                    : tr("Finish position link from \"%1\"")
+                          .arg(from.left(40)));
+        }
+        cancelPairAction = menu.addAction(tr("Cancel position link"));
+    }
+
     QAction* urlAction = menu.addAction(tr("Add URL Link"));
     QAction* mdAction = menu.addAction(tr("Add Markdown Note"));
     
     QAction* selected = menu.exec(QCursor::pos());
     
-    if (selected == posAction) {
-        // TODO: Enter "pick position" mode (requires additional UI work)
-        #ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "addLinkToSlot: Position link - TODO: implement pick position mode";
-        #endif
+    if (selected && selected == startAction) {
+        beginPositionLinkPairing(link, slotIndex);
+    } else if (selected && selected == finishAction) {
+        completePositionLinkPairing(link, slotIndex);
+    } else if (selected && selected == cancelPairAction) {
+        cancelPositionLinkPairing();
     } else if (selected == urlAction) {
         QString url = QInputDialog::getText(this, tr("Add URL"), tr("Enter URL:"));
         if (!url.isEmpty()) {
@@ -10763,6 +10817,310 @@ void DocumentViewport::addLinkToSlot(int slotIndex)
         // Phase M.2: Create markdown note for this slot
         createMarkdownNoteForSlot(slotIndex);
     }
+}
+
+// ============================================================================
+// Position link navigation
+// ============================================================================
+
+void DocumentViewport::followPositionLink(LinkObject* source, int slotIndex)
+{
+    if (!source || !m_document) return;
+    if (slotIndex < 0 || slotIndex >= LinkObject::SLOT_COUNT) return;
+
+    // Copied out before navigating: bringing the destination into view can
+    // evict the source's page, which would leave `source` dangling. The
+    // container is recorded for the same reason, so the repair below can find
+    // its way back without assuming the source is still on the current page.
+    const LinkSlot slot = source->linkSlots[slotIndex];
+    const QString sourceId = source->id;
+    int sourcePageIndex = -1;
+    Document::TileCoord sourceTile{};
+    locateObjectContainer(sourceId, sourcePageIndex, sourceTile);
+
+    if (slot.isEdgelessTarget) {
+        // Save current position before jumping (Phase 4)
+        pushPositionHistory();
+        navigateToEdgelessPosition(slot.edgelessTileX, slot.edgelessTileY,
+                                   slot.targetPosition);
+    } else {
+        navigateToPosition(slot.targetPageUuid, slot.targetPosition);
+    }
+
+    // A bare coordinate, which is every link written before pairing existed and
+    // every back-link made by copying an annotation. Nothing to correct against.
+    if (slot.targetObjectId.isEmpty()) return;
+
+    Page* targetContainer = nullptr;
+    Document::TileCoord targetTile{};
+    int targetPageIndex = -1;
+    if (slot.isEdgelessTarget) {
+        targetTile = {slot.edgelessTileX, slot.edgelessTileY};
+        targetContainer = m_document->getTile(targetTile.first, targetTile.second);
+        targetPageIndex = 0;
+    } else {
+        targetPageIndex = m_document->pageIndexByUuid(slot.targetPageUuid);
+        if (targetPageIndex >= 0) targetContainer = m_document->page(targetPageIndex);
+    }
+    if (!targetContainer) return;
+
+    auto* target =
+        dynamic_cast<LinkObject*>(targetContainer->objectById(slot.targetObjectId));
+    if (!target) return;  // Deleted, or moved off this container.
+
+    // Where the target is now, in the space the slot stores.
+    QPointF centre = target->position + QPointF(target->size.width() / 2.0,
+                                                target->size.height() / 2.0);
+    if (slot.isEdgelessTarget) {
+        centre += QPointF(targetTile.first * Document::EDGELESS_TILE_SIZE,
+                          targetTile.second * Document::EDGELESS_TILE_SIZE);
+    }
+
+    if (QLineF(centre, slot.targetPosition).length() > POSITION_LINK_DRIFT_SLOP) {
+        // Re-aim, then repair the slot so the drift is not re-measured on every
+        // future jump. Writing during activation follows the markdown branch
+        // above, which likewise clears a broken reference as it is followed.
+        if (slot.isEdgelessTarget) {
+            navigateToEdgelessPosition(targetTile.first, targetTile.second, centre);
+        } else {
+            navigateToPosition(slot.targetPageUuid, centre);
+        }
+
+        Page* sourceContainer =
+            m_document->isEdgeless()
+                ? m_document->getTile(sourceTile.first, sourceTile.second)
+                : (sourcePageIndex >= 0 ? m_document->page(sourcePageIndex) : nullptr);
+        auto* freshSource = sourceContainer
+            ? dynamic_cast<LinkObject*>(sourceContainer->objectById(sourceId))
+            : nullptr;
+        if (freshSource) {
+            freshSource->linkSlots[slotIndex].targetPosition = centre;
+            markLinkContainerDirty(sourcePageIndex, sourceTile);
+            emit documentModified();
+        }
+    }
+
+    // Selecting the destination surfaces its bar with the return slot on it, so
+    // the pairing is visible and the way back is one click.
+    selectObject(target, false);
+}
+
+// ============================================================================
+// Position link pairing
+// ============================================================================
+
+bool DocumentViewport::isPairingOrigin(const LinkObject* link, int* slotIndex) const
+{
+    if (!m_positionPairing.active || !link) return false;
+    if (link->id != m_positionPairing.originObjectId) return false;
+    if (slotIndex) *slotIndex = m_positionPairing.originSlotIndex;
+    return true;
+}
+
+void DocumentViewport::beginPositionLinkPairing(LinkObject* origin, int slotIndex)
+{
+    if (!origin || !m_document) return;
+    if (slotIndex < 0 || slotIndex >= LinkObject::SLOT_COUNT) return;
+    if (!origin->linkSlots[slotIndex].isEmpty()) return;
+
+    int pageIndex = -1;
+    Document::TileCoord tileCoord{};
+    Page* container = locateObjectContainer(origin->id, pageIndex, tileCoord);
+    if (!container) {
+        // With nowhere recorded to come back to, arming would strand the link.
+        emit userWarning(tr("Cannot start a position link from this annotation."));
+        return;
+    }
+
+    m_positionPairing.clear();
+    m_positionPairing.originObjectId = origin->id;
+    m_positionPairing.originSlotIndex = slotIndex;
+    m_positionPairing.originIsEdgeless = m_document->isEdgeless();
+    if (!m_positionPairing.originIsEdgeless) {
+        m_positionPairing.originPageUuid = container->uuid;
+    }
+    m_positionPairing.originTileCoord = tileCoord;
+    m_positionPairing.originDescription = origin->description;
+    m_positionPairing.active = true;
+
+    // Repaints the armed slot in its accent colour, which is the only standing
+    // sign that a link is half-made.
+    syncLinkObjectBar();
+    update();
+}
+
+void DocumentViewport::cancelPositionLinkPairing()
+{
+    if (!m_positionPairing.active) return;
+
+    m_positionPairing.clear();
+    syncLinkObjectBar();
+    update();
+}
+
+LinkObject* DocumentViewport::resolvePairingOrigin(int* pageIndex,
+                                                  Document::TileCoord* tileCoord)
+{
+    if (!m_positionPairing.active || !m_document) return nullptr;
+
+    Page* container = nullptr;
+    if (m_positionPairing.originIsEdgeless) {
+        container = m_document->getTile(m_positionPairing.originTileCoord.first,
+                                       m_positionPairing.originTileCoord.second);
+        if (pageIndex) *pageIndex = 0;
+        if (tileCoord) *tileCoord = m_positionPairing.originTileCoord;
+    } else {
+        const int idx =
+            m_document->pageIndexByUuid(m_positionPairing.originPageUuid);
+        if (idx < 0) return nullptr;
+        // Lazily reloads the page: the user had to navigate away to find the
+        // other end, which normally evicted it.
+        container = m_document->page(idx);
+        if (pageIndex) *pageIndex = idx;
+        if (tileCoord) *tileCoord = {0, 0};
+    }
+    if (!container) return nullptr;
+
+    return dynamic_cast<LinkObject*>(
+        container->objectById(m_positionPairing.originObjectId));
+}
+
+void DocumentViewport::setPositionTarget(LinkSlot& slot, const LinkObject* target,
+                                         int targetSlotIndex,
+                                         const QString& pageUuid,
+                                         Document::TileCoord tileCoord) const
+{
+    if (!target) return;
+
+    slot.type = LinkSlot::Type::Position;
+    slot.targetObjectId = target->id;
+    slot.targetSlotIndex = targetSlotIndex;
+
+    const QPointF centre =
+        target->position + QPointF(target->size.width() / 2.0,
+                                   target->size.height() / 2.0);
+
+    if (m_document && m_document->isEdgeless()) {
+        slot.isEdgelessTarget = true;
+        slot.edgelessTileX = tileCoord.first;
+        slot.edgelessTileY = tileCoord.second;
+        // Object positions are tile-local but edgeless navigation takes
+        // document space, so the tile origin has to be folded in.
+        slot.targetPosition =
+            centre + QPointF(tileCoord.first * Document::EDGELESS_TILE_SIZE,
+                             tileCoord.second * Document::EDGELESS_TILE_SIZE);
+    } else {
+        slot.isEdgelessTarget = false;
+        slot.targetPageUuid = pageUuid;
+        slot.targetPosition = centre;
+    }
+}
+
+LinkObject* DocumentViewport::resolvePositionLinkPartner(
+    const LinkObject* source, int slotIndex, int* partnerSlotIndex,
+    int* partnerPageIndex, Document::TileCoord* partnerTile)
+{
+    if (!source || !m_document) return nullptr;
+    if (slotIndex < 0 || slotIndex >= LinkObject::SLOT_COUNT) return nullptr;
+
+    const LinkSlot& slot = source->linkSlots[slotIndex];
+    if (slot.type != LinkSlot::Type::Position) return nullptr;
+    if (slot.targetObjectId.isEmpty()) return nullptr;
+    if (slot.targetSlotIndex < 0 || slot.targetSlotIndex >= LinkObject::SLOT_COUNT)
+        return nullptr;
+
+    // The slot records where its target lives, so the partner is reachable even
+    // when its page is not currently loaded.
+    Page* container = nullptr;
+    int pageIndex = -1;
+    Document::TileCoord tileCoord{};
+    if (slot.isEdgelessTarget) {
+        tileCoord = {slot.edgelessTileX, slot.edgelessTileY};
+        container = m_document->getTile(tileCoord.first, tileCoord.second);
+        pageIndex = 0;
+    } else {
+        pageIndex = m_document->pageIndexByUuid(slot.targetPageUuid);
+        if (pageIndex >= 0) container = m_document->page(pageIndex);
+    }
+    if (!container) return nullptr;
+
+    auto* partner =
+        dynamic_cast<LinkObject*>(container->objectById(slot.targetObjectId));
+    if (!partner) return nullptr;
+
+    // The agreement has to hold in the other direction too. Without this a slot
+    // the user re-pointed by hand, or a stale half left by an earlier teardown,
+    // would be cleared as though it were still part of this pair.
+    const LinkSlot& back = partner->linkSlots[slot.targetSlotIndex];
+    if (back.type != LinkSlot::Type::Position
+        || back.targetObjectId != source->id
+        || back.targetSlotIndex != slotIndex) {
+        return nullptr;
+    }
+
+    if (partnerSlotIndex) *partnerSlotIndex = slot.targetSlotIndex;
+    if (partnerPageIndex) *partnerPageIndex = pageIndex;
+    if (partnerTile) *partnerTile = tileCoord;
+    return partner;
+}
+
+void DocumentViewport::completePositionLinkPairing(LinkObject* target,
+                                                   int targetSlotIndex)
+{
+    if (!m_positionPairing.active || !target || !m_document) return;
+    if (targetSlotIndex < 0 || targetSlotIndex >= LinkObject::SLOT_COUNT) return;
+
+    // A link from an object to itself would navigate nowhere. The menu never
+    // offers it; this guards the programmatic path.
+    if (target->id == m_positionPairing.originObjectId) return;
+
+    int originPageIndex = -1;
+    Document::TileCoord originTile{};
+    LinkObject* origin = resolvePairingOrigin(&originPageIndex, &originTile);
+    if (!origin) {
+        emit userWarning(tr("The other end of this link no longer exists."));
+        cancelPositionLinkPairing();
+        return;
+    }
+
+    const int originSlotIndex = m_positionPairing.originSlotIndex;
+    if (originSlotIndex < 0 || originSlotIndex >= LinkObject::SLOT_COUNT
+        || !origin->linkSlots[originSlotIndex].isEmpty()
+        || !target->linkSlots[targetSlotIndex].isEmpty()) {
+        emit userWarning(tr("That link slot is no longer free."));
+        cancelPositionLinkPairing();
+        return;
+    }
+
+    int targetPageIndex = -1;
+    Document::TileCoord targetTile{};
+    Page* targetContainer =
+        locateObjectContainer(target->id, targetPageIndex, targetTile);
+    if (!targetContainer) {
+        emit userWarning(tr("Cannot finish the position link here."));
+        return;
+    }
+
+    // Each end names the other by object and by slot, so either one navigates
+    // to its partner and either one can release the pair.
+    setPositionTarget(origin->linkSlots[originSlotIndex], target, targetSlotIndex,
+                      targetContainer->uuid, targetTile);
+    setPositionTarget(target->linkSlots[targetSlotIndex], origin, originSlotIndex,
+                      m_positionPairing.originPageUuid,
+                      m_positionPairing.originTileCoord);
+
+    // Two objects that can sit on two different pages, so both containers have
+    // to be marked; the pointer-based helper would resolve both to the current
+    // page and quietly lose the origin's edit.
+    markLinkContainerDirty(originPageIndex, originTile);
+    markLinkContainerDirty(targetPageIndex, targetTile);
+
+    m_positionPairing.clear();
+
+    emit documentModified();
+    emit linkObjectListMayHaveChanged();
+    emit linkSlotsChanged();
+    update();
 }
 
 void DocumentViewport::clearLinkSlot(int slotIndex)
@@ -10801,7 +11159,18 @@ void DocumentViewport::clearLinkSlot(int slotIndex)
     
     LinkSlot& slot = link->linkSlots[slotIndex];
     LinkSlot::Type oldType = slot.type;
-    
+
+    // A pairing spends a slot at each end, so releasing one end releases the
+    // other: leaving the far half behind would strand a slot on a page the user
+    // is not looking at and may not remember. Resolved before the local clear,
+    // since it reads this slot's target fields. Loading the partner's page
+    // cannot evict this one -- Document::page() only ever loads on demand.
+    int partnerSlotIndex = -1;
+    int partnerPageIndex = -1;
+    Document::TileCoord partnerTile{};
+    LinkObject* partner = resolvePositionLinkPartner(
+        link, slotIndex, &partnerSlotIndex, &partnerPageIndex, &partnerTile);
+
     // Phase M.2: If markdown slot, delete the note file
     if (slot.type == LinkSlot::Type::Markdown) {
         QString noteId = slot.markdownNoteId;
@@ -10815,15 +11184,28 @@ void DocumentViewport::clearLinkSlot(int slotIndex)
     
     // Clear the slot using LinkSlot::clear() which resets to default state
     slot.clear();
-    
+
     #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "clearLinkSlot: Cleared slot" << slotIndex 
+    qDebug() << "clearLinkSlot: Cleared slot" << slotIndex
              << "(was type" << static_cast<int>(oldType) << ")";
     #endif
     // Mark page/tile dirty and refresh the outline cache so the right
     // sidebar drops the cleared slot instead of rendering it as
     // "(missing note)" on its next lazy populate.
     markLinkContainerDirtyAndRefreshOutline(link);
+
+    if (partner) {
+        partner->linkSlots[partnerSlotIndex].clear();
+        // The partner's own container, not the pointer-based helper: the two
+        // ends can sit on different pages, and that helper would resolve this
+        // one to the current page and lose the edit.
+        markLinkContainerDirty(partnerPageIndex, partnerTile);
+
+        #ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "clearLinkSlot: Also released partner slot"
+                 << partnerSlotIndex << "on" << partner->id;
+        #endif
+    }
 
     emit documentModified();
     emit linkObjectListMayHaveChanged();   // M.7.3: refresh the right sidebar
@@ -13030,7 +13412,15 @@ bool DocumentViewport::handleEscapeKey()
         return true;
     }
 
-    // Priority 3: Deselect objects or clear object clipboard (ObjectSelect tool only)
+    // Priority 3: Abandon a half-made position link. Ranked above deselection
+    // because it is the more specific state and is not tied to a tool, and
+    // because deselecting is still one more Esc away.
+    if (m_positionPairing.active) {
+        cancelPositionLinkPairing();
+        return true;
+    }
+
+    // Priority 4: Deselect objects or clear object clipboard (ObjectSelect tool only)
     if (m_currentTool == ToolType::ObjectSelect) {
         if (hasSelectedObjects() || !s_objectClipboard.isEmpty()) {
             cancelObjectSelectAction();
@@ -13038,7 +13428,7 @@ bool DocumentViewport::handleEscapeKey()
         }
     }
     
-    // Priority 4: Cancel text selection (Highlighter tool only)
+    // Priority 5: Cancel text selection (Highlighter tool only)
     // Note: Text selection is cleared when switching away from Highlighter tool.
     if (m_currentTool == ToolType::Highlighter) {
         if (m_textSelection.isValid() || m_textSelection.isSelecting) {
@@ -17977,15 +18367,24 @@ void DocumentViewport::markLinkContainerDirtyAndRefreshOutline(LinkObject* link)
     if (!page) return;
 
     if (m_document->isEdgeless()) {
-        m_document->markTileDirty(tileCoord);
-        m_document->refreshLinkOutlineFor(tileCoord);
+        markLinkContainerDirty(0, tileCoord);
     } else {
         // Use cached UUID→index lookup (O(1) from Phase C.0.2)
-        int pageIndex = m_document->pageIndexByUuid(page->uuid);
-        if (pageIndex >= 0) {
-            m_document->markPageDirty(pageIndex);
-            m_document->refreshLinkOutlineFor(pageIndex);
-        }
+        markLinkContainerDirty(m_document->pageIndexByUuid(page->uuid), tileCoord);
+    }
+}
+
+void DocumentViewport::markLinkContainerDirty(int pageIndex,
+                                              Document::TileCoord tileCoord)
+{
+    if (!m_document) return;
+
+    if (m_document->isEdgeless()) {
+        m_document->markTileDirty(tileCoord);
+        m_document->refreshLinkOutlineFor(tileCoord);
+    } else if (pageIndex >= 0) {
+        m_document->markPageDirty(pageIndex);
+        m_document->refreshLinkOutlineFor(pageIndex);
     }
 }
 
