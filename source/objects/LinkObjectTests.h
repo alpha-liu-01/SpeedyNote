@@ -796,6 +796,139 @@ inline bool testSlotClear()
 }
 
 /**
+ * @brief Test a position slot's targetObjectId, including old files.
+ *
+ * The id is what lets a position link survive its target being dragged, and it
+ * is written only when present so that a coordinate-only link round-trips
+ * unchanged and an older build reading the file sees what it wrote.
+ */
+inline bool testPositionTargetObjectId()
+{
+    qDebug() << "=== Test: position slot targetObjectId ===";
+
+    bool success = true;
+
+    // Round-trip with an id.
+    {
+        LinkSlot slot;
+        slot.type = LinkSlot::Type::Position;
+        slot.targetPageUuid = QStringLiteral("page-uuid-9");
+        slot.targetPosition = QPointF(12.5, 34.25);
+        slot.targetObjectId = QStringLiteral("link-target-42");
+
+        slot.targetSlotIndex = 2;
+
+        const LinkSlot restored = LinkSlot::fromJson(slot.toJson());
+        if (restored.targetObjectId != QStringLiteral("link-target-42")) {
+            qDebug() << "FAIL: targetObjectId not preserved, got"
+                     << restored.targetObjectId;
+            success = false;
+        }
+        if (restored.targetSlotIndex != 2) {
+            qDebug() << "FAIL: targetSlotIndex not preserved, got"
+                     << restored.targetSlotIndex;
+            success = false;
+        }
+        if (restored.targetPageUuid != slot.targetPageUuid
+            || restored.targetPosition != slot.targetPosition) {
+            qDebug() << "FAIL: coordinate lost when an id is present";
+            success = false;
+        }
+    }
+
+    // Slot 0 is a legitimate partner index, so it must survive a round trip
+    // rather than being mistaken for "unset" and dropped.
+    {
+        LinkSlot slot;
+        slot.type = LinkSlot::Type::Position;
+        slot.targetPageUuid = QStringLiteral("page-uuid-0");
+        slot.targetObjectId = QStringLiteral("partner-in-slot-zero");
+        slot.targetSlotIndex = 0;
+
+        const LinkSlot restored = LinkSlot::fromJson(slot.toJson());
+        if (restored.targetSlotIndex != 0) {
+            qDebug() << "FAIL: partner index 0 did not round-trip, got"
+                     << restored.targetSlotIndex;
+            success = false;
+        }
+    }
+
+    // Round-trip in edgeless form, where the tile carries the location.
+    {
+        LinkSlot slot;
+        slot.type = LinkSlot::Type::Position;
+        slot.isEdgelessTarget = true;
+        slot.edgelessTileX = 3;
+        slot.edgelessTileY = -2;
+        slot.targetPosition = QPointF(4000, -1000);
+        slot.targetObjectId = QStringLiteral("tile-target-7");
+
+        const LinkSlot restored = LinkSlot::fromJson(slot.toJson());
+        if (!restored.isEdgelessTarget
+            || restored.edgelessTileX != 3 || restored.edgelessTileY != -2
+            || restored.targetObjectId != QStringLiteral("tile-target-7")) {
+            qDebug() << "FAIL: edgeless position slot with an id not preserved";
+            success = false;
+        }
+    }
+
+    // A coordinate-only slot must not gain the key, or every existing file
+    // would be rewritten on save for no reason.
+    {
+        LinkSlot slot;
+        slot.type = LinkSlot::Type::Position;
+        slot.targetPageUuid = QStringLiteral("page-uuid-1");
+        slot.targetPosition = QPointF(1, 2);
+
+        if (slot.toJson().contains(QStringLiteral("targetObjectId"))) {
+            qDebug() << "FAIL: empty targetObjectId was still written";
+            success = false;
+        }
+        if (slot.toJson().contains(QStringLiteral("targetSlotIndex"))) {
+            qDebug() << "FAIL: unset targetSlotIndex was still written";
+            success = false;
+        }
+    }
+
+    // A file written before pairing existed: the key is simply absent.
+    {
+        QJsonObject legacy;
+        legacy[QStringLiteral("type")] = QStringLiteral("position");
+        legacy[QStringLiteral("x")] = 10.0;
+        legacy[QStringLiteral("y")] = 20.0;
+        legacy[QStringLiteral("pageUuid")] = QStringLiteral("legacy-page");
+
+        const LinkSlot restored = LinkSlot::fromJson(legacy);
+        if (restored.type != LinkSlot::Type::Position) {
+            qDebug() << "FAIL: legacy position slot did not load";
+            success = false;
+        }
+        if (!restored.targetObjectId.isEmpty()) {
+            qDebug() << "FAIL: legacy slot invented a targetObjectId";
+            success = false;
+        }
+        // toInt()'s default is 0, which would read as "partnered with slot 1"
+        // and make every legacy position link look like half of a pair.
+        if (restored.targetSlotIndex != -1) {
+            qDebug() << "FAIL: legacy slot invented a partner slot index, got"
+                     << restored.targetSlotIndex;
+            success = false;
+        }
+        if (restored.targetPosition != QPointF(10, 20)
+            || restored.targetPageUuid != QStringLiteral("legacy-page")) {
+            qDebug() << "FAIL: legacy position slot lost its coordinate";
+            success = false;
+        }
+    }
+
+    if (success) {
+        qDebug() << "PASS: position slot targetObjectId successful!";
+    }
+
+    return success;
+}
+
+/**
  * @brief Run all LinkObject tests.
  * @return True if all tests pass.
  */
@@ -829,6 +962,9 @@ inline bool runAllTests()
     qDebug() << "";
     
     allPass &= testSlotClear();
+    qDebug() << "";
+    
+    allPass &= testPositionTargetObjectId();
     qDebug() << "";
     
     qDebug() << "\n========================================";

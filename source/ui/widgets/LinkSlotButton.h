@@ -11,7 +11,16 @@ enum class LinkSlotState {
     Empty,      ///< Slot has no content (shows + icon)
     Position,   ///< Slot contains a position link (📍)
     Url,        ///< Slot contains a URL link (🔗)
-    Markdown    ///< Slot contains a markdown link (📝)
+    Markdown,   ///< Slot contains a markdown link (📝)
+    /**
+     * @brief Armed as one end of a position link that has no other end yet.
+     *
+     * Presentation only: the slot is still Empty on disk, because a link that
+     * was never finished is not a fact about the document. Drawn as the
+     * position icon on an accent chip, which is the one standing sign that a
+     * link is half-made.
+     */
+    PendingOrigin
 };
 
 // Register with Qt meta-object system for use in signals/slots

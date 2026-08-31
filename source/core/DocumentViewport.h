@@ -237,6 +237,7 @@ class QDropEvent;
 class TouchGestureHandler;
 class MissingPdfBanner;
 class LinkObject;
+struct LinkSlot;
 
 /**
  * @brief Layout mode for page arrangement.
@@ -451,6 +452,15 @@ public:
      * @brief Hide the missing PDF banner.
      */
     void hidePdfSourceWarning();
+
+    /**
+     * @brief Height of the strip the missing-PDF banner occupies at the top of
+     *        the viewport, or 0 when it is not showing.
+     *
+     * Lets overlays anchored to the top of the viewport (the search bar) keep
+     * clear of the banner so its buttons stay reachable.
+     */
+    int topBannerReserve() const;
     
     // ===== Theme / Dark Mode =====
     
@@ -485,6 +495,18 @@ public:
 
     static void setWheelScrollSpeed(qreal speed) { s_wheelScrollSpeed = qBound(5.0, speed, 200.0); }
     static qreal wheelScrollSpeed() { return s_wheelScrollSpeed; }
+
+    // ===== Off-Page Pan =====
+
+    /**
+     * @brief Enable/disable panning by dragging the empty space around pages.
+     *
+     * Global preference (no per-document override), so it lives as a static and
+     * takes effect in every tab and split pane at once. Paged documents only:
+     * an edgeless canvas has no space that is outside a page.
+     */
+    static void setPanOutsidePagesEnabled(bool enabled) { s_panOutsidePagesEnabled = enabled; }
+    static bool panOutsidePagesEnabled() { return s_panOutsidePagesEnabled; }
 
     // ===== View State Getters =====
     
@@ -903,6 +925,20 @@ public:
      * documentModified() / linkObjectListMayHaveChanged().
      */
     void markLinkContainerDirtyAndRefreshOutline(LinkObject* link);
+
+    /**
+     * @brief The same dirty-mark and outline refresh, for a known container.
+     *
+     * The overload above locates the container with findPageContainingObject(),
+     * which in paged mode answers "the current page" without checking. Position
+     * link pairing writes to an object on whichever page the link was started
+     * from, so it has to name the container or it would mark the wrong page
+     * dirty and lose the edit.
+     *
+     * @param pageIndex Notebook page index; ignored in edgeless mode.
+     * @param tileCoord Owning tile; ignored in paged mode.
+     */
+    void markLinkContainerDirty(int pageIndex, Document::TileCoord tileCoord);
 
     /**
      * @brief Get the maximum valid affinity value.
@@ -1591,6 +1627,43 @@ public:
      */
     void addLinkToSlot(int slotIndex);
     
+    // ===== Position link pairing =====
+
+    /// True while a position link is half-made, waiting for its other end.
+    bool isPairingPositionLink() const { return m_positionPairing.active; }
+
+    /**
+     * @brief Arm a position link on the selected annotation's empty slot.
+     *
+     * Deliberately not a canvas mode: between arming and finishing, every
+     * gesture is ordinary navigation and selection. That is what makes the
+     * two-step pairing usable where a "tap the destination" mode is not, since
+     * the bar carrying the only cancel affordance scrolls away with its object.
+     */
+    void beginPositionLinkPairing(LinkObject* origin, int slotIndex);
+
+    /// Drop a half-made link. Nothing is written, so nothing is lost.
+    void cancelPositionLinkPairing();
+
+    /**
+     * @brief Finish the armed link, spending a slot at each end.
+     *
+     * Both slots become Position links pointing at each other, so either end
+     * navigates to the other. Rejects linking an object to itself.
+     */
+    void completePositionLinkPairing(LinkObject* target, int targetSlotIndex);
+
+    /**
+     * @brief The armed origin's description, for menu labels.
+     *
+     * Captured when arming so building the menu never has to reload the
+     * origin's page, which is normally evicted by the time the user gets here.
+     */
+    QString pairingOriginDescription() const { return m_positionPairing.originDescription; }
+
+    /// Whether @p link is the armed origin, and if so which slot is armed.
+    bool isPairingOrigin(const LinkObject* link, int* slotIndex = nullptr) const;
+
     /**
      * @brief Clear the content of a LinkObject slot.
      * @param slotIndex The slot index (0-2) to clear.
@@ -1752,6 +1825,99 @@ public:
             endpointsResolved = false;
         }
     };
+
+    /**
+     * @brief One half-made position link, waiting for its other end.
+     *
+     * In-memory only and never serialized: a link that was never finished is
+     * not a fact about the document. Per-viewport, like AdjustSession, so the
+     * gesture belongs to the view the user started it in.
+     */
+    struct PositionLinkPairing {
+        QString originObjectId;
+        int originSlotIndex = -1;
+        /// Container captured while the origin was still loaded. Finding the
+        /// other end means navigating away, which normally evicts that page, so
+        /// the id alone would not be enough to resolve the origin again.
+        bool originIsEdgeless = false;
+        QString originPageUuid;
+        Document::TileCoord originTileCoord = {0, 0};
+        /// Snapshotted so the menu label costs no page load.
+        QString originDescription;
+        bool active = false;
+
+        void clear() {
+            originObjectId.clear();
+            originSlotIndex = -1;
+            originIsEdgeless = false;
+            originPageUuid.clear();
+            originTileCoord = {0, 0};
+            originDescription.clear();
+            active = false;
+        }
+    };
+
+    /**
+     * @brief Reload the armed origin, lazily loading its container.
+     * @param pageIndex Receives the origin's page index (paged mode).
+     * @param tileCoord Receives the origin's tile (edgeless mode).
+     * @return nullptr when the origin or its container has gone away.
+     */
+    LinkObject* resolvePairingOrigin(int* pageIndex = nullptr,
+                                     Document::TileCoord* tileCoord = nullptr);
+
+    /**
+     * @brief Point @p slot at @p target, which lives in the given container.
+     *
+     * Writes all three representations the design calls for: the object id,
+     * which survives the target being dragged, the coordinate that navigation
+     * actually runs off, and the far slot index that makes the pairing
+     * releasable from either end. The coordinate is the object's centre,
+     * matching MainWindow::navigateToLinkObject rather than
+     * cloneWithBackLink's top-left, so a highlight lands centred on its mark.
+     *
+     * @param targetSlotIndex The partner slot on @p target, or -1 for a one-way
+     *        link to an object that holds no return path.
+     */
+    void setPositionTarget(LinkSlot& slot, const LinkObject* target,
+                           int targetSlotIndex,
+                           const QString& pageUuid,
+                           Document::TileCoord tileCoord) const;
+
+    /**
+     * @brief Resolve a position slot's partner, if it genuinely points back.
+     *
+     * Both halves of a pairing name each other by object *and* slot, and this
+     * only succeeds when that agreement holds in both directions. Anything
+     * less is treated as a one-way link and left alone, so a slot the user has
+     * since re-pointed by hand is never collateral damage.
+     *
+     * @param partnerSlotIndex Receives the partner's slot index.
+     * @param partnerPageIndex Receives the partner's page index (paged mode).
+     * @param partnerTile Receives the partner's tile (edgeless mode).
+     * @return nullptr when the slot has no verified partner.
+     */
+    LinkObject* resolvePositionLinkPartner(const LinkObject* source, int slotIndex,
+                                           int* partnerSlotIndex,
+                                           int* partnerPageIndex,
+                                           Document::TileCoord* partnerTile);
+
+    /**
+     * @brief Jump to a position slot's destination.
+     *
+     * Navigation runs off the stored coordinate, which always resolves and
+     * which in paged mode is what pulls the destination page into memory. When
+     * the slot also names a target object, it is then looked up on the
+     * container we landed on, so a target that has been dragged is re-aimed
+     * and the stale coordinate repaired. A target that moved to a different
+     * container is deliberately not chased: that would need an id-to-location
+     * index edgeless mode does not have, so such a link degrades to landing
+     * where its target used to be.
+     */
+    void followPositionLink(LinkObject* source, int slotIndex);
+
+    /// Document units of drift before a position slot's coordinate is rewritten.
+    static constexpr qreal POSITION_LINK_DRIFT_SLOP = 1.0;
 
     /// Resolve the session's target, or nullptr if it went away.
     LinkObject* resolveAdjustTarget() const;
@@ -2596,6 +2762,12 @@ signals:
     void requestPdfSources();
 
     /**
+     * @brief The missing-PDF banner appeared or went away, so topBannerReserve()
+     *        has changed and top-anchored overlays need repositioning.
+     */
+    void topBannerReserveChanged();
+
+    /**
      * @brief A recognized OCR block was double-clicked to be made editable.
      *
      * The viewport does not own dialogs, so MainWindow confirms the exchange
@@ -2677,6 +2849,23 @@ private:
     // ===== Pan Tool State =====
     bool m_isPanToolDragging = false;
     QPointF m_panToolLastPos;
+
+    // ===== Off-Page Pan State =====
+    // A press that lands in the empty space around the pages pans instead of
+    // reaching the current tool. The gesture is only armed on press: it becomes
+    // a real pan once the pointer moves past the slop, and a release before that
+    // is treated as a tap so the old "click empty space to deselect" survives.
+    bool m_offPagePanArmed = false;     ///< Press landed off-page; still undecided
+    bool m_offPagePanDragging = false;  ///< Slop exceeded, pan gesture running
+    QPointF m_offPagePanStart;          ///< Viewport position of the arming press
+    Qt::KeyboardModifiers m_offPagePanModifiers = Qt::NoModifier;  ///< Modifiers at press time
+    bool m_offPageHoverCursor = false;  ///< Open-hand hover cursor is currently shown
+
+    /// Presses within this many viewport pixels of a page still reach the tool,
+    /// so a near-miss at the page edge does not yank the view.
+    static constexpr qreal OFF_PAGE_EDGE_TOLERANCE_PX = 6.0;
+    /// Movement below this many viewport pixels makes the release a tap.
+    static constexpr qreal OFF_PAGE_PAN_TAP_SLOP_PX = 4.0;
     
     // ===== Middle Mouse Pan (independent of tool system) =====
     bool m_isMiddleMousePanning = false;
@@ -2712,6 +2901,9 @@ private:
 
     // ----- Mouse Wheel Scroll Speed -----
     static inline qreal s_wheelScrollSpeed = 40.0;  ///< Document units per wheel click
+
+    // ----- Off-Page Pan -----
+    static inline bool s_panOutsidePagesEnabled = true;  ///< Empty space around pages acts as the Pan tool
     
     // ----- Tool Defaults -----
     // These are initial values; MainWindow will set them from user preferences.
@@ -3014,6 +3206,7 @@ private:
     InlineTextBoxEditor* m_inlineTextBoxEditor = nullptr;
     InlineTextEditSession m_inlineEditSession;
     AdjustSession m_adjustSession;
+    PositionLinkPairing m_positionPairing;
     /**
      * @brief Suppresses setCurrentTool()'s leave-ObjectSelect deselect.
      *
@@ -4054,6 +4247,46 @@ private:
     void handlePointerPress_Pan(const PointerEvent& pe);
     void handlePointerMove_Pan(const PointerEvent& pe);
     void handlePointerRelease_Pan(const PointerEvent& pe);
+
+    // ----- Off-Page Pan -----
+
+    /**
+     * @brief True if this press should arm an off-page pan instead of the tool.
+     *
+     * Paged documents only, non-touch sources, left/stylus tip only, and only
+     * when the press misses every page by more than OFF_PAGE_EDGE_TOLERANCE_PX
+     * and the current tool has nothing to grab there.
+     */
+    bool shouldArmOffPagePan(const PointerEvent& pe) const;
+
+    /**
+     * @brief True if the current tool owns this off-page press.
+     *
+     * Some interactive geometry legitimately sits outside pageRect(): lasso
+     * transform handles, object resize/rotate handles, and rotated objects.
+     */
+    bool toolClaimsOffPagePress(const PointerEvent& pe) const;
+
+    /**
+     * @brief True if the point is outside every page plus the edge tolerance.
+     */
+    bool isPointOutsideAllPages(const QPointF& viewportPos) const;
+
+    /**
+     * @brief Apply the deselect an off-page press would have caused.
+     *
+     * Runs when an armed off-page pan is released without moving, keeping the
+     * "tap the empty space to drop the selection" gesture the tools relied on.
+     */
+    void handleOffPagePanTap();
+
+    /**
+     * @brief Abandon an armed or running off-page pan without acting on it.
+     *
+     * For the paths that can steal the release: tool switch, focus loss and the
+     * viewport being hidden.
+     */
+    void cancelOffPagePan();
     
     /**
      * @brief Load text boxes from PDF for the specified page.

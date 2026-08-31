@@ -7,6 +7,7 @@
 #include "TabManager.h"
 #include "widgets/ViewportScrollBar.h"
 #include "widgets/PageWheelPicker.h"  // SP3: floating page-wheel next to the handle
+#include "widgets/ActionBarButton.h"  // floating search button under the page-wheel
 #include "../core/DocumentViewport.h"
 #include "../core/Document.h"
 #include "../core/DarkModeUtils.h"
@@ -20,6 +21,13 @@
 #include <QTimer>
 #include <QSettings>
 #include <QHash>
+
+namespace {
+/// Inset of a docked scroll bar from its pane edge.
+constexpr int kBarMargin = 3;
+/// Gap left at the end of each bar where the two would otherwise meet.
+constexpr int kBarCorner = 15;
+}  // namespace
 
 // ============================================================================
 // Constructor / Destructor
@@ -139,6 +147,15 @@ DocumentViewport* SplitViewManager::activeViewport() const
 {
     TabManager* tm = activeTabManager();
     return tm ? tm->currentViewport() : nullptr;
+}
+
+QWidget* SplitViewManager::activePaneContainer() const
+{
+    QStackedWidget* stack = stackForPane(m_activePane);
+    // Falls back to the left stack, which always exists, if the right pane was
+    // torn down while still marked active.
+    return stack ? static_cast<QWidget*>(stack)
+                 : static_cast<QWidget*>(m_leftViewportStack);
 }
 
 DocumentViewport* SplitViewManager::inactiveViewport() const
@@ -619,6 +636,24 @@ void SplitViewManager::createScrollBars(Pane pane)
         emit jumpToPageRequested();
     });
 
+    // Search button stacked under the wheel. The page-panel action bar's search
+    // button is deep in a bar that is often collapsed, so this puts the same
+    // action within reach of the hand already on the scroll handle.
+    b.searchBtn = new ActionBarButton(stack);
+    b.searchBtn->setIconName(QStringLiteral("zoom"));
+    b.searchBtn->setToolTip(tr("Find in Document (Ctrl+F)"));
+    b.searchBtn->setDarkMode(m_darkMode);
+    b.searchBtn->setVisible(false);
+    connect(b.searchBtn, &ActionBarButton::clicked, this, [this, pane]() {
+        PaneBars& bars = m_paneBars[static_cast<int>(pane)];
+        if (!bars.bound) return;
+
+        // The search bar acts on MainWindow's active viewport, so without this
+        // the right pane's button would search the left pane's document.
+        setActivePane(pane);
+        emit searchRequested();
+    });
+
     // Independent fade timers so each axis hides on its own inactivity.
     b.vFadeTimer = new QTimer(this);
     b.vFadeTimer->setSingleShot(true);
@@ -657,6 +692,7 @@ void SplitViewManager::destroyScrollBars(Pane pane)
     delete b.vBar;
     delete b.hBar;
     delete b.wheel;
+    delete b.searchBtn;
     b = PaneBars{};
 }
 
@@ -667,8 +703,8 @@ void SplitViewManager::repositionScrollBars(Pane pane)
     if (!stack || !b.vBar || !b.hBar) return;
 
     const int thickness = ViewportScrollBar::barThickness();
-    const int margin = 3;
-    const int corner = 15;  // gap where the two bars would meet
+    const int margin = kBarMargin;
+    const int corner = kBarCorner;
     const int w = stack->width();
     const int h = stack->height();
 
@@ -679,17 +715,15 @@ void SplitViewManager::repositionScrollBars(Pane pane)
     // the corner reserved at the end the horizontal bar occupies.
     const int vX = vRight ? (w - thickness - margin) : margin;
     const int vY = hBottom ? margin : (corner + margin);
-    const int vBottomReserve = hBottom ? m_bottomInset : 0;
     b.vBar->setGeometry(vX,
                         vY,
                         thickness,
-                        qMax(0, h - corner - margin * 2 - vBottomReserve));
+                        qMax(0, h - corner - margin * 2));
 
     // Horizontal (cross-axis) bar: docked top or bottom, spanning the width with
-    // the corner reserved at the end the vertical bar occupies. When docked at
-    // the bottom it is lifted by m_bottomInset to clear the search bar (SB4).
+    // the corner reserved at the end the vertical bar occupies.
     const int hX = vRight ? margin : (corner + margin);
-    const int hY = hBottom ? (h - thickness - margin - m_bottomInset) : margin;
+    const int hY = hBottom ? (h - thickness - margin) : margin;
     b.hBar->setGeometry(hX,
                         hY,
                         qMax(0, w - corner - margin * 2),
@@ -712,10 +746,16 @@ void SplitViewManager::repositionPageWheel(Pane pane)
     const int wh = b.wheel->height();
     const int gap = 4;
 
+    // The wheel and the search button move as one block, so the clamp has to
+    // consider the whole height or the button would be pushed off the bottom
+    // edge whenever the handle sits near it.
+    const int btnH = b.searchBtn ? b.searchBtn->height() : 0;
+    const int groupH = b.searchBtn ? (wh + gap + btnH) : wh;
+
     // Vertical: center the wheel on the handle midpoint, clamped inside the pane.
     const int handleCenterY = b.vBar->y() + qRound(b.vBar->handleCenterPx());
     int y = handleCenterY - wh / 2;
-    y = qBound(0, y, qMax(0, stack->height() - wh));
+    y = qBound(0, y, qMax(0, stack->height() - groupH));
 
     // Horizontal: sit on the content-facing side of the vertical bar so the wheel
     // never overlaps the bar itself.
@@ -729,6 +769,13 @@ void SplitViewManager::repositionPageWheel(Pane pane)
 
     b.wheel->move(x, y);
     if (b.wheel->isVisible()) b.wheel->raise();
+
+    if (b.searchBtn) {
+        // Centred on the wheel's column, since the button is narrower only if
+        // the two sizes ever diverge.
+        b.searchBtn->move(x + (ww - b.searchBtn->width()) / 2, y + wh + gap);
+        if (b.searchBtn->isVisible()) b.searchBtn->raise();
+    }
 }
 
 void SplitViewManager::syncPageWheelVisibility(Pane pane)
@@ -754,6 +801,15 @@ void SplitViewManager::syncPageWheelVisibility(Pane pane)
         b.wheel->raise();
     } else {
         b.wheel->setVisible(false);
+    }
+
+    // The search button follows the wheel exactly, which lands both wanted
+    // behaviours for free: it stays away from edgeless panes, where search is a
+    // page concept with nothing to scan, and it disappears precisely when the
+    // page-panel action bar (carrying its own search button) is on screen.
+    if (b.searchBtn) {
+        b.searchBtn->setVisible(visible);
+        if (visible) b.searchBtn->raise();
     }
 }
 
@@ -1190,6 +1246,7 @@ void SplitViewManager::applyScrollBarDarkMode()
         if (m_paneBars[i].vBar) m_paneBars[i].vBar->setDarkMode(m_darkMode);
         if (m_paneBars[i].hBar) m_paneBars[i].hBar->setDarkMode(m_darkMode);
         if (m_paneBars[i].wheel) m_paneBars[i].wheel->setDarkMode(m_darkMode);  // SP3
+        if (m_paneBars[i].searchBtn) m_paneBars[i].searchBtn->setDarkMode(m_darkMode);
         // SB2 accent colors are theme-dependent, so recompute the document map.
         if (m_paneBars[i].bound) updateScrollBarDocumentMap(m_paneBars[i].bound);
     }
@@ -1264,13 +1321,14 @@ void SplitViewManager::setScrollBarHorizontalEdge(ViewportScrollBar::DockEdge ed
     }
 }
 
-void SplitViewManager::setViewportBottomInset(int px)
+int SplitViewManager::viewportTopReserve() const
 {
-    px = qMax(0, px);
-    if (m_bottomInset == px) return;
-    m_bottomInset = px;
-    repositionScrollBars(Left);
-    if (isSplit()) repositionScrollBars(Right);
+    if (m_hEdge != ViewportScrollBar::DockEdge::Top) {
+        return 0;
+    }
+    // Mirrors the top-docked geometry in repositionScrollBars: the bar starts one
+    // margin down and a second margin separates it from whatever follows.
+    return kBarMargin + ViewportScrollBar::barThickness() + kBarMargin;
 }
 
 void SplitViewManager::proximityFloatCheck(QEvent* event)

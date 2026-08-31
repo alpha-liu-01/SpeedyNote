@@ -27,6 +27,7 @@ class DocumentViewport;
 class QStackedWidget;
 class QTimer;
 class PageWheelPicker;   // SP3: floating page-wheel next to the page-axis handle
+class ActionBarButton;   // floating search button stacked under the page-wheel
 struct PdfSearchMatch;  // SBS3: search-hit results feed the scroll-bar markers
 
 class SplitViewManager : public QWidget {
@@ -46,6 +47,15 @@ public:
     void setActivePane(Pane pane);
     DocumentViewport* activeViewport() const;
     DocumentViewport* inactiveViewport() const;
+
+    /**
+     * @brief The widget occupying the active pane's share of the splitter.
+     *
+     * Lets overlays that live above the whole canvas (the search bar) anchor to
+     * the active pane's corner rather than the window's, which are the same
+     * thing only when not split. Never null.
+     */
+    QWidget* activePaneContainer() const;
 
     // =========================================================================
     // Split control
@@ -159,12 +169,15 @@ public:
     void setPagePanelActionBarShown(bool shown);
 
     /**
-     * @brief Reserve @p px at the bottom of each pane so a bottom-docked
-     *        cross-axis bar clears the Ctrl+F search bar (Plan SB4).
+     * @brief Height of the strip a top-docked cross-axis bar occupies, in pane
+     *        coordinates, or 0 when that bar is docked at the bottom.
      *
-     * A no-op visually when the cross-axis bar is docked at the Top.
+     * Lets an overlay anchored to the top of the viewport clear the bar rather
+     * than sit on top of it. Reports the reserved band whether or not the bar is
+     * currently faded in, so an overlay positioned against it does not jump
+     * every time the bar floats in and out.
      */
-    void setViewportBottomInset(int px);
+    int viewportTopReserve() const;
 
     /**
      * @brief Recompute the SB2 document map (per-source accents + link markers)
@@ -225,6 +238,15 @@ signals:
      */
     void jumpToPageRequested();
 
+    /**
+     * @brief Emitted when a floating search button is pressed.
+     *
+     * The originating pane is made active first, the same way the page wheel's
+     * jump request does, because the search bar acts on MainWindow's active
+     * viewport rather than on a pane it is told about.
+     */
+    void searchRequested();
+
 private slots:
     void onLeftViewportChanged(DocumentViewport* vp);
     void onRightViewportChanged(DocumentViewport* vp);
@@ -250,6 +272,7 @@ private:
         ViewportScrollBar* vBar = nullptr;   // page axis (vertical), docked left
         ViewportScrollBar* hBar = nullptr;   // cross axis (horizontal), docked top
         PageWheelPicker* wheel = nullptr;    // SP3: floats beside the vertical handle
+        ActionBarButton* searchBtn = nullptr;  // stacked under the wheel, same visibility
         QTimer* vFadeTimer = nullptr;        // fades the vertical (page-axis) bar
         QTimer* hFadeTimer = nullptr;        // fades the horizontal (cross-axis) bar
         QPointer<DocumentViewport> bound;
@@ -269,7 +292,9 @@ private:
     void destroyScrollBars(Pane pane);
     void repositionScrollBars(Pane pane);
     void bindScrollBars(Pane pane, DocumentViewport* vp);
-    // SP3: float the page-wheel next to the vertical handle / track its visibility.
+    // SP3: float the page-wheel next to the vertical handle / track its
+    // visibility. The search button rides along directly beneath it, sharing
+    // both the anchor and the visibility rule.
     void repositionPageWheel(Pane pane);
     void syncPageWheelVisibility(Pane pane);
     void refreshHandleSizes(Pane pane);
@@ -319,9 +344,6 @@ private:
     // Docked edges (SB4): page-axis bar = Left/Right, cross-axis bar = Top/Bottom.
     ViewportScrollBar::DockEdge m_vEdge = ViewportScrollBar::DockEdge::Left;
     ViewportScrollBar::DockEdge m_hEdge = ViewportScrollBar::DockEdge::Top;
-    // Bottom space reserved for the search bar (SB4); shifts a bottom-docked hBar up.
-    int m_bottomInset = 0;
-
     // SP3: page-panel action bar (left-docked, has its own wheel) currently shown.
     // Suppresses the floating page-wheel when the vertical bar is also on the left.
     bool m_pagePanelActionBarShown = false;

@@ -83,6 +83,7 @@ private:
     // === Tools tab ===
     QWidget *toolsTab;
     QDoubleSpinBox *wheelScrollSpeedSpin;
+    QCheckBox *panOutsidePagesCheck = nullptr;
     QCheckBox *ocrCjkGridModeCheck = nullptr;
     void createToolsTab();
 

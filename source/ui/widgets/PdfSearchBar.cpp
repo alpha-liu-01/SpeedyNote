@@ -43,10 +43,17 @@ bool PdfSearchBar::wholeWord() const
 
 void PdfSearchBar::setStatus(const QString& status)
 {
-    if (m_statusLabel) {
-        m_statusLabel->setText(status);
-        m_statusLabel->setVisible(!status.isEmpty());
+    if (!m_statusLabel) {
+        return;
     }
+    // The label stays in the layout while empty so the match count appearing
+    // does not shove the input narrower mid-typing. Since its width is fixed,
+    // anything longer than a count (a translated "no results", say) is elided
+    // rather than clipped, with the full text on the tooltip.
+    const QString elided = m_statusLabel->fontMetrics().elidedText(
+        status, Qt::ElideRight, m_statusLabel->width());
+    m_statusLabel->setText(elided);
+    m_statusLabel->setToolTip(elided == status ? QString() : status);
 }
 
 void PdfSearchBar::clearStatus()
@@ -140,43 +147,44 @@ void PdfSearchBar::setupUi()
     connect(m_closeButton, &QPushButton::clicked, this, &PdfSearchBar::onCloseClicked);
     layout->addWidget(m_closeButton);
     
-    // "Find:" label
-    QLabel *findLabel = new QLabel(tr("Find:"), this);
-    layout->addWidget(findLabel);
-    
-    // Search input
+    // Search input. The placeholder carries what the dropped "Find:" label said.
     m_searchInput = new QLineEdit(this);
-    m_searchInput->setPlaceholderText(tr("Search in PDF..."));
-    m_searchInput->setMinimumWidth(110);
+    m_searchInput->setPlaceholderText(tr("Find"));
+    m_searchInput->setMinimumWidth(80);
     m_searchInput->setClearButtonEnabled(true);
     connect(m_searchInput, &QLineEdit::textChanged, this, &PdfSearchBar::searchTextChanged);
     layout->addWidget(m_searchInput, 1);  // Stretch
     
-    // Status label
+    // Status label. Its width is reserved up front and it is never hidden, so
+    // the input keeps a stable width whether or not a count is showing.
     m_statusLabel = new QLabel(this);
     m_statusLabel->setStyleSheet("color: #cc6600; font-style: italic;");
-    m_statusLabel->setVisible(false);
+    m_statusLabel->setFixedWidth(STATUS_WIDTH);
+    m_statusLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     layout->addWidget(m_statusLabel);
     
-    // Next button
-    m_nextButton = new QPushButton(tr("Next"), this);
-    m_nextButton->setFixedHeight(24);
+    // Next / Previous / Options are icon-only squares; their tooltips already
+    // name the shortcuts, so dropping the captions costs no discoverability.
+    m_prevButton = new QPushButton(this);
+    m_prevButton->setFixedSize(24, 24);
+    m_prevButton->setFlat(true);
+    m_prevButton->setCursor(Qt::PointingHandCursor);
+    m_prevButton->setToolTip(tr("Find Previous (Shift+F3)"));
+    connect(m_prevButton, &QPushButton::clicked, this, &PdfSearchBar::onPrevClicked);
+    layout->addWidget(m_prevButton);
+
+    m_nextButton = new QPushButton(this);
+    m_nextButton->setFixedSize(24, 24);
+    m_nextButton->setFlat(true);
     m_nextButton->setCursor(Qt::PointingHandCursor);
     m_nextButton->setToolTip(tr("Find Next (F3)"));
     connect(m_nextButton, &QPushButton::clicked, this, &PdfSearchBar::onNextClicked);
     layout->addWidget(m_nextButton);
     
-    // Previous button
-    m_prevButton = new QPushButton(tr("Previous"), this);
-    m_prevButton->setFixedHeight(24);
-    m_prevButton->setCursor(Qt::PointingHandCursor);
-    m_prevButton->setToolTip(tr("Find Previous (Shift+F3)"));
-    connect(m_prevButton, &QPushButton::clicked, this, &PdfSearchBar::onPrevClicked);
-    layout->addWidget(m_prevButton);
-    
     // Options button with dropdown menu
-    m_optionsButton = new QPushButton(tr("Options"), this);
-    m_optionsButton->setFixedHeight(24);
+    m_optionsButton = new QPushButton(this);
+    m_optionsButton->setFixedSize(24, 24);
+    m_optionsButton->setFlat(true);
     m_optionsButton->setCursor(Qt::PointingHandCursor);
     m_optionsButton->setToolTip(tr("Search Options"));
     layout->addWidget(m_optionsButton);
@@ -203,9 +211,26 @@ void PdfSearchBar::setupUi()
     
     // Set fixed height for the bar
     setFixedHeight(36);
-    
-    // Style the background
-    setAutoFillBackground(true);
+
+    // The card border and rounded corners come from a stylesheet, which a plain
+    // QWidget only paints once it is told to honour styled backgrounds.
+    setAttribute(Qt::WA_StyledBackground, true);
+    applyCardStyle();
+}
+
+void PdfSearchBar::applyCardStyle()
+{
+    const QString background = m_darkMode ? QStringLiteral("#323232")
+                                          : QStringLiteral("#f0f0f0");
+    const QString border = m_darkMode ? QStringLiteral("#5a5a5a")
+                                      : QStringLiteral("#b4b4b4");
+    setStyleSheet(QStringLiteral(
+        "PdfSearchBar { background-color: %1; border: 1px solid %2;"
+        " border-radius: 6px; }"
+        // A 24px square has no room for Qt's automatic dropdown arrow next to
+        // the icon, so suppress the indicator on the options button.
+        "PdfSearchBar QPushButton::menu-indicator { image: none; width: 0px; }")
+        .arg(background, border));
 }
 
 void PdfSearchBar::updateIcons()
@@ -218,30 +243,30 @@ void PdfSearchBar::updateIcons()
         m_closeButton->setIconSize(QSize(16, 16));
     }
     
-    // Options button - no icon needed, text-only with dropdown arrow
-    // (Qt automatically adds dropdown arrow when menu is attached)
+    if (m_optionsButton) {
+        m_optionsButton->setIcon(QIcon(QString(":/resources/icons/settings%1.png").arg(suffix)));
+        m_optionsButton->setIconSize(QSize(16, 16));
+    }
     
     // Next/Prev buttons with arrows
     if (m_nextButton) {
         m_nextButton->setIcon(QIcon(QString(":/resources/icons/down_arrow%1.png").arg(suffix)));
-        m_nextButton->setIconSize(QSize(12, 12));
+        m_nextButton->setIconSize(QSize(16, 16));
     }
     
     if (m_prevButton) {
         m_prevButton->setIcon(QIcon(QString(":/resources/icons/up_arrow%1.png").arg(suffix)));
-        m_prevButton->setIconSize(QSize(12, 12));
+        m_prevButton->setIconSize(QSize(16, 16));
     }
     
-    // Update background color based on theme
     QPalette pal = palette();
     if (m_darkMode) {
-        pal.setColor(QPalette::Window, QColor(50, 50, 50));
         pal.setColor(QPalette::WindowText, QColor(220, 220, 220));
     } else {
-        pal.setColor(QPalette::Window, QColor(240, 240, 240));
         pal.setColor(QPalette::WindowText, QColor(40, 40, 40));
     }
     setPalette(pal);
+    applyCardStyle();
 }
 
 bool PdfSearchBar::isDarkMode() const

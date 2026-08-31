@@ -341,8 +341,22 @@ void LinkObjectBar::onSlotDeleteRequested(int index)
         return;
     }
 
+    // An armed slot holds nothing yet, so the long-press abandons the half-made
+    // link instead of deleting content. Nothing is lost, hence no confirmation.
+    if (m_slotButtons[index]->state() == LinkSlotState::PendingOrigin) {
+        emit pairingCancelRequested();
+        return;
+    }
+
     if (confirmSlotDelete(index)) {
         emit slotCleared(index);
+    }
+}
+
+void LinkObjectBar::setSlotPaired(const bool paired[NUM_SLOTS])
+{
+    for (int i = 0; i < NUM_SLOTS; ++i) {
+        m_slotPaired[i] = paired[i];
     }
 }
 
@@ -363,10 +377,21 @@ bool LinkObjectBar::confirmSlotDelete(int index)
             return false;  // Empty slot, nothing to delete
     }
 
+    QString question = tr("Clear the %1 from slot %2?")
+                           .arg(slotName)
+                           .arg(index + 1);
+    if (m_slotPaired[index]) {
+        // The far half lives on whatever page the link points at, so without
+        // this the user would have no way to know a second slot went with it.
+        question += QStringLiteral("\n\n")
+                    + tr("This also clears the matching slot on the linked "
+                         "annotation, freeing it at both ends.");
+    }
+
     QMessageBox::StandardButton result = QMessageBox::question(
         this,
         tr("Clear Slot"),
-        tr("Clear the %1 from slot %2?").arg(slotName).arg(index + 1),
+        question,
         QMessageBox::Yes | QMessageBox::No,
         QMessageBox::No
     );

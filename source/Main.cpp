@@ -912,6 +912,8 @@ int main(int argc, char* argv[])
         QSettings toolSettings("SpeedyNote", "App");
         DocumentViewport::setWheelScrollSpeed(
             toolSettings.value("tools/wheelScrollSpeed", 40.0).toDouble());
+        DocumentViewport::setPanOutsidePagesEnabled(
+            toolSettings.value("tools/panOutsidePages", true).toBool());
     }
 
     // ========== Initialize System Notifications ==========

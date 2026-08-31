@@ -169,6 +169,9 @@ void LinkSlotButton::paintEvent(QPaintEvent* event)
             case LinkSlotState::Markdown:
                 symbol = "M";  // Markdown
                 break;
+            case LinkSlotState::PendingOrigin:
+                symbol = "P";  // A position link, just not pointed anywhere yet
+                break;
         }
         
         painter.drawText(rect(), Qt::AlignCenter, symbol);
@@ -255,13 +258,24 @@ QColor LinkSlotButton::borderColor() const
 
 QColor LinkSlotButton::backgroundColor() const
 {
+    if (m_state == LinkSlotState::PendingOrigin) {
+        // The accent SubToolbarToggle uses when checked, so an armed slot reads
+        // the same way as any other active control in the app.
+        return m_darkMode ? QColor(70, 130, 180) : QColor(100, 149, 237);
+    }
     return m_darkMode ? Qt::black : Qt::white;
 }
 
 QIcon LinkSlotButton::currentIcon() const
 {
     if (m_hasCustomIcons) {
-        return m_icons[static_cast<int>(m_state)];
+        // PendingOrigin borrows the position icon rather than owning an entry:
+        // it is the same destination, not yet pointed anywhere. Keeps the icon
+        // arrays and setStateIconNames() at four states.
+        const int index = static_cast<int>(m_state == LinkSlotState::PendingOrigin
+                                               ? LinkSlotState::Position
+                                               : m_state);
+        return m_icons[index];
     }
     // Return null icon - fallback text symbols will be drawn in paintEvent
     return QIcon();
@@ -297,6 +311,10 @@ void LinkSlotButton::updateToolTip()
             break;
         case LinkSlotState::Markdown:
             tip = tr("Markdown link (click to view, long-press to delete)");
+            break;
+        case LinkSlotState::PendingOrigin:
+            tip = tr("Position link started (open a slot on another annotation "
+                     "to finish, long-press to cancel)");
             break;
     }
     setToolTip(tip);

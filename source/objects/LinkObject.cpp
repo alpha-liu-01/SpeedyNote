@@ -30,6 +30,15 @@ QJsonObject LinkSlot::toJson() const
                 // Paged mode: store page UUID
                 obj["pageUuid"] = targetPageUuid;
             }
+            // Omitted when absent so a coordinate-only link round-trips byte for
+            // byte, and so an older build reading this file sees exactly what it
+            // wrote before.
+            if (!targetObjectId.isEmpty()) {
+                obj["targetObjectId"] = targetObjectId;
+            }
+            if (targetSlotIndex >= 0) {
+                obj["targetSlotIndex"] = targetSlotIndex;
+            }
             break;
         case Type::Url:
             obj["type"] = "url";
@@ -62,6 +71,11 @@ LinkSlot LinkSlot::fromJson(const QJsonObject& obj)
             slot.isEdgelessTarget = false;
             slot.targetPageUuid = obj["pageUuid"].toString();
         }
+        // Absent in every file written before pairing existed; those links stay
+        // coordinate-only, which is what they always were. The slot index must
+        // default to -1 rather than toInt()'s 0, which would read as "slot 1".
+        slot.targetObjectId = obj["targetObjectId"].toString();
+        slot.targetSlotIndex = obj["targetSlotIndex"].toInt(-1);
     } else if (typeStr == "url") {
         slot.type = Type::Url;
         slot.url = obj["url"].toString();

@@ -447,6 +447,205 @@ public:
     }
 
     /**
+     * @brief Test that the empty space around pages acts as the Pan tool.
+     */
+    static bool testOffPagePanFromEmptySpace() {
+        printf("  testOffPagePanFromEmptySpace... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        const bool savedSetting = DocumentViewport::panOutsidePagesEnabled();
+        DocumentViewport::setPanOutsidePagesEnabled(true);
+
+        auto doc = Document::createNew("Off-page pan");
+        for (int i = 0; i < 4; ++i) {
+            doc->addPage();
+        }
+
+        DocumentViewport viewport;
+        viewport.resize(1200, 800);
+        // beginPanGesture() refuses to run on a hidden widget, so the pan path
+        // only exists once the viewport has been (offscreen-) shown.
+        viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+        viewport.show();
+        QApplication::processEvents();
+        viewport.setDocument(doc.get());
+        viewport.setZoomLevel(1.0);
+        viewport.setPanOffset(QPointF(0, 0));
+
+        auto makeEvent = [&](PointerEvent::Type type, QPointF pos) {
+            PointerEvent pe;
+            pe.type = type;
+            pe.source = PointerEvent::Stylus;
+            pe.viewportPos = pos;
+            pe.button = Qt::LeftButton;
+            pe.pressure = 1.0;
+            pe.pageHit = viewport.viewportToPage(pos);
+            return pe;
+        };
+
+        const QRectF page0 = viewport.pageRect(0);
+        // Zoom is 1.0, so a document-space offset is also a viewport-pixel one:
+        // 60 units left of the page clears the tolerance band, 2 does not.
+        const QPointF farOffPage = viewport.documentToViewport(
+            QPointF(page0.left() - 60.0, page0.center().y()));
+        const QPointF nearMiss = viewport.documentToViewport(
+            QPointF(page0.left() - 2.0, page0.center().y()));
+        const QPointF onPage = viewport.documentToViewport(page0.center());
+
+        // ----- A press in the empty space pans instead of drawing -----
+        viewport.setCurrentTool(ToolType::Pen);
+        viewport.setPanOffset(QPointF(0, 0));
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Press, farOffPage));
+        if (!viewport.m_offPagePanArmed)
+            return fail("off-page press did not arm the pan");
+        if (viewport.m_isDrawing)
+            return fail("off-page press started a stroke");
+        if (viewport.m_offPagePanDragging)
+            return fail("pan started before the pointer left the tap slop");
+
+        viewport.handlePointerEvent(
+            makeEvent(PointerEvent::Move, farOffPage + QPointF(0, -150)));
+        if (!viewport.m_offPagePanDragging)
+            return fail("moving past the slop did not start the pan");
+        viewport.handlePointerEvent(
+            makeEvent(PointerEvent::Release, farOffPage + QPointF(0, -150)));
+        if (viewport.m_offPagePanArmed || viewport.m_offPagePanDragging)
+            return fail("release left off-page pan state behind");
+        if (viewport.panOffset().y() < 100.0)
+            return fail("off-page drag did not scroll the viewport");
+
+        // ----- The setting gates the whole feature -----
+        DocumentViewport::setPanOutsidePagesEnabled(false);
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Press, farOffPage));
+        const bool armedWhileDisabled = viewport.m_offPagePanArmed;
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Release, farOffPage));
+        DocumentViewport::setPanOutsidePagesEnabled(true);
+        if (armedWhileDisabled)
+            return fail("disabled setting still armed an off-page pan");
+
+        // ----- A near-miss at the page edge still belongs to the tool -----
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Press, nearMiss));
+        const bool armedOnNearMiss = viewport.m_offPagePanArmed;
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Release, nearMiss));
+        if (armedOnNearMiss)
+            return fail("a near-miss at the page edge should reach the tool");
+
+        // ----- The edgeless canvas has no space outside a page -----
+        auto edgelessDoc =
+            Document::createNew("Off-page pan edgeless", Document::Mode::Edgeless);
+        DocumentViewport edgelessViewport;
+        edgelessViewport.resize(1200, 800);
+        edgelessViewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+        edgelessViewport.show();
+        QApplication::processEvents();
+        edgelessViewport.setDocument(edgelessDoc.get());
+        PointerEvent edgelessPress;
+        edgelessPress.type = PointerEvent::Press;
+        edgelessPress.source = PointerEvent::Stylus;
+        edgelessPress.button = Qt::LeftButton;
+        edgelessPress.viewportPos = QPointF(-400.0, 120.0);
+        edgelessPress.pageHit =
+            edgelessViewport.viewportToPage(edgelessPress.viewportPos);
+        if (edgelessViewport.shouldArmOffPagePan(edgelessPress))
+            return fail("edgeless canvas should never arm an off-page pan");
+        edgelessViewport.hide();
+        edgelessViewport.setDocument(nullptr);
+
+        // ----- An in-progress lasso keeps going outside the page -----
+        viewport.setCurrentTool(ToolType::Lasso);
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Press, onPage));
+        if (!viewport.m_isDrawingLasso)
+            return fail("lasso press on a page did not start a path");
+        const int lassoPointsOnPage = viewport.m_lassoPath.size();
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Move, farOffPage));
+        if (viewport.m_offPagePanArmed)
+            return fail("an in-progress lasso was hijacked by the off-page pan");
+        if (viewport.m_lassoPath.size() <= lassoPointsOnPage)
+            return fail("lasso path did not continue outside the page");
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Release, farOffPage));
+
+        // ----- A hardware eraser off-page pans and erases nothing -----
+        viewport.setCurrentTool(ToolType::Pen);
+        Page* firstPage = doc->page(0);
+        if (!firstPage || !firstPage->activeLayer())
+            return fail("first page has no active layer");
+        VectorStroke stroke;
+        stroke.color = Qt::black;
+        stroke.baseThickness = 4.0;
+        for (int i = 0; i <= 10; ++i) {
+            StrokePoint pt;
+            pt.pos = QPointF(60.0 + i * 20.0, 120.0);
+            pt.pressure = 1.0;
+            stroke.points.append(pt);
+        }
+        stroke.updateBoundingBox();
+        firstPage->activeLayer()->addStroke(stroke);
+        const int strokesBefore = firstPage->activeLayer()->strokes().size();
+
+        viewport.setPanOffset(QPointF(0, 0));
+        PointerEvent eraserPress = makeEvent(PointerEvent::Press, farOffPage);
+        eraserPress.isEraser = true;
+        viewport.handlePointerEvent(eraserPress);
+        if (!viewport.m_offPagePanArmed)
+            return fail("hardware eraser press off-page did not arm the pan");
+        PointerEvent eraserMove =
+            makeEvent(PointerEvent::Move, farOffPage + QPointF(0, -130));
+        eraserMove.isEraser = true;
+        viewport.handlePointerEvent(eraserMove);
+        PointerEvent eraserRelease =
+            makeEvent(PointerEvent::Release, farOffPage + QPointF(0, -130));
+        eraserRelease.isEraser = true;
+        viewport.handlePointerEvent(eraserRelease);
+        if (viewport.m_isDrawingEraserLasso)
+            return fail("hardware eraser off-page started an eraser lasso");
+        if (firstPage->activeLayer()->strokes().size() != strokesBefore)
+            return fail("hardware eraser off-page deleted strokes while panning");
+        if (viewport.panOffset().y() < 80.0)
+            return fail("eraser branch swallowed the off-page pan move");
+
+        // ----- A tap in the empty space still drops the selection -----
+        auto image = std::make_unique<ImageObject>();
+        image->position = QPointF(50.0, 50.0);
+        image->size = QSizeF(120.0, 90.0);
+        ImageObject* imageRaw = image.get();
+        firstPage->addObject(std::move(image));
+
+        viewport.setCurrentTool(ToolType::ObjectSelect);
+        viewport.selectObject(imageRaw, false);
+        if (viewport.m_selectedObjects.isEmpty())
+            return fail("object was not selected for the tap test");
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Press, farOffPage));
+        if (!viewport.m_offPagePanArmed)
+            return fail("off-page press under ObjectSelect did not arm the pan");
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Release, farOffPage));
+        if (!viewport.m_selectedObjects.isEmpty())
+            return fail("off-page tap did not clear the object selection");
+
+        // ----- Handles that hang off the page still belong to the tool -----
+        viewport.selectObject(imageRaw, false);
+        const QRectF bounds = viewport.objectBoundsInViewport(imageRaw);
+        if (bounds.isEmpty())
+            return fail("selected object had no viewport bounds");
+        if (viewport.objectHandleAtPoint(bounds.topLeft())
+                == DocumentViewport::HandleHit::None)
+            return fail("object corner was not recognised as a resize handle");
+        if (!viewport.toolClaimsOffPagePress(
+                makeEvent(PointerEvent::Press, bounds.topLeft())))
+            return fail("resize handle press was not claimed by the tool");
+
+        viewport.deselectAllObjects();
+        viewport.hide();
+        viewport.setDocument(nullptr);
+        DocumentViewport::setPanOutsidePagesEnabled(savedSetting);
+
+        printf("PASSED\n");
+        return true;
+    }
+
+    /**
      * @brief Test left/current and right/alternate ObjectSelect mode resolution.
      */
     static bool testObjectAlternateMouseMode() {
@@ -3823,6 +4022,200 @@ public:
         return true;
     }
 
+    /**
+     * @brief Two-step pairing turns two empty slots into one bidirectional link.
+     *
+     * The two ends normally sit on different pages, which is the whole point of
+     * the gesture and also where it is easiest to get wrong: the origin's page
+     * is not the current one by the time the link is finished, so anything that
+     * assumes otherwise writes to the wrong container.
+     */
+    static bool testPositionLinkPairing() {
+        printf("  testPositionLinkPairing... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto doc = Document::createNew("Position pairing");
+        doc->addPage();
+        DocumentViewport viewport;
+        viewport.resize(900, 700);
+        viewport.setDocument(doc.get());
+        viewport.setCurrentTool(ToolType::ObjectSelect);
+
+        Page* pageA = doc->page(0);
+        Page* pageB = doc->page(1);
+        if (!pageA || !pageB)
+            return fail("pairing fixture is missing a page");
+
+        auto makeLink = [](Page* page, const QPointF& pos, const QString& desc) {
+            auto ptr = std::make_unique<LinkObject>();
+            ptr->position = pos;
+            ptr->description = desc;
+            LinkObject* raw = ptr.get();
+            page->addObject(std::move(ptr));
+            return raw;
+        };
+
+        LinkObject* origin = makeLink(pageA, QPointF(100.0, 120.0),
+                                     QStringLiteral("chapter one"));
+        LinkObject* target = makeLink(pageB, QPointF(300.0, 400.0),
+                                      QStringLiteral("the footnote"));
+
+        // Nothing armed to begin with, so the menu would offer only "start".
+        if (viewport.isPairingPositionLink())
+            return fail("a pairing was armed before anything started one");
+
+        viewport.beginPositionLinkPairing(origin, 0);
+        if (!viewport.isPairingPositionLink())
+            return fail("arming the origin did not take");
+        int armedSlot = -1;
+        if (!viewport.isPairingOrigin(origin, &armedSlot) || armedSlot != 0)
+            return fail("armed slot was not reported back");
+        if (viewport.isPairingOrigin(target))
+            return fail("the target was mistaken for the origin");
+        if (viewport.pairingOriginDescription() != QStringLiteral("chapter one"))
+            return fail("origin description was not captured for the menu");
+
+        // Arming writes nothing: an unfinished link is not a fact about the
+        // document.
+        if (!origin->linkSlots[0].isEmpty())
+            return fail("arming wrote into the slot");
+
+        // The armed slot has to look different, or a half-made link is
+        // invisible. It is still Empty on disk, so the bar applies the state.
+        viewport.selectObject(origin, false);
+        const auto slotButtons =
+            viewport.m_linkObjectBar->findChildren<LinkSlotButton*>();
+        if (slotButtons.size() != LinkObject::SLOT_COUNT)
+            return fail("link bar was missing its slot buttons");
+        if (slotButtons[0]->state() != LinkSlotState::PendingOrigin)
+            return fail("armed slot did not show the pending state");
+        if (slotButtons[1]->state() != LinkSlotState::Empty)
+            return fail("pending state leaked onto another slot");
+
+        // Linking an object to itself would navigate nowhere.
+        viewport.completePositionLinkPairing(origin, 1);
+        if (!origin->linkSlots[1].isEmpty() || !viewport.isPairingPositionLink())
+            return fail("a self-link was allowed");
+
+        // Finding the other end means navigating there, so by the time the link
+        // is finished the current page is the target's, not the origin's. That
+        // is what the assertions below are really testing: anything that
+        // resolves the origin's container as "the current page" gets it wrong.
+        viewport.scrollToPage(1);
+        viewport.selectObject(target, false);
+        if (viewport.currentPageIndex() == 0)
+            return fail("pairing test never left the origin's page");
+        viewport.completePositionLinkPairing(target, 2);
+
+        if (viewport.isPairingPositionLink())
+            return fail("pairing stayed armed after finishing");
+
+        // Both ends spent a slot and point at each other.
+        const LinkSlot& originSlot = origin->linkSlots[0];
+        const LinkSlot& targetSlot = target->linkSlots[2];
+        if (originSlot.type != LinkSlot::Type::Position
+            || targetSlot.type != LinkSlot::Type::Position)
+            return fail("pairing did not make both slots position links");
+        if (originSlot.targetObjectId != target->id
+            || targetSlot.targetObjectId != origin->id)
+            return fail("the two ends do not point at each other");
+
+        // Each end records its partner's page, not its own.
+        if (originSlot.targetPageUuid != pageB->uuid
+            || targetSlot.targetPageUuid != pageA->uuid)
+            return fail("position links recorded the wrong page");
+
+        // The coordinate is the partner's centre, so a highlight lands on its
+        // mark rather than on the corner of its bounding box.
+        const QPointF targetCentre =
+            target->position + QPointF(target->size.width() / 2.0,
+                                       target->size.height() / 2.0);
+        if (QLineF(originSlot.targetPosition, targetCentre).length() > 0.01)
+            return fail("origin slot did not snapshot the target's centre");
+
+        // Each end names the far *slot*, not just the far object. Without that
+        // the pair could not be released from either end, because an object id
+        // alone is ambiguous once two annotations are paired twice.
+        if (originSlot.targetSlotIndex != 2 || targetSlot.targetSlotIndex != 0)
+            return fail("pairing did not record the partner slot index");
+
+        // Back where the origin lives: clearing a slot is something the user
+        // does to the annotation in front of them.
+        viewport.scrollToPage(0);
+
+        // A pairing is only a pairing when both ends agree, in both
+        // directions. Probing the resolver directly keeps the pair intact for
+        // the teardown below.
+        int probeSlot = -1;
+        if (!viewport.resolvePositionLinkPartner(origin, 0, &probeSlot,
+                                                nullptr, nullptr)
+            || probeSlot != 2)
+            return fail("a genuine pairing was not recognised as one");
+
+        target->linkSlots[2].targetSlotIndex = 1;  // names the wrong slot now
+        if (viewport.resolvePositionLinkPartner(origin, 0, nullptr, nullptr,
+                                               nullptr))
+            return fail("a back-reference to the wrong slot counted as a pair");
+        target->linkSlots[2].targetSlotIndex = 0;
+
+        target->linkSlots[2].targetObjectId = QStringLiteral("somebody-else");
+        if (viewport.resolvePositionLinkPartner(origin, 0, nullptr, nullptr,
+                                               nullptr))
+            return fail("a back-reference to another object counted as a pair");
+        target->linkSlots[2].targetObjectId = origin->id;
+
+        // Releasing one end releases the other. The far half is on another
+        // page, which is exactly why leaving it behind would strand a slot the
+        // user cannot see and would not remember.
+        viewport.selectObject(origin, false);
+        viewport.clearLinkSlot(0);
+        if (!origin->linkSlots[0].isEmpty())
+            return fail("clearing a paired slot left the near end filled");
+        if (!target->linkSlots[2].isEmpty())
+            return fail("clearing a paired slot stranded the far end");
+
+        // A one-way link has no far end to release, so clearing it must stay a
+        // purely local edit.
+        target->linkSlots[1].type = LinkSlot::Type::Position;
+        target->linkSlots[1].targetPageUuid = pageA->uuid;
+        target->linkSlots[1].targetPosition = QPointF(10.0, 20.0);
+        if (viewport.resolvePositionLinkPartner(target, 1, nullptr, nullptr,
+                                               nullptr))
+            return fail("a coordinate-only link claimed a partner");
+        target->linkSlots[1].clear();
+
+        // Cancelling puts everything back with nothing written.
+        viewport.beginPositionLinkPairing(origin, 1);
+        if (!viewport.isPairingPositionLink())
+            return fail("could not arm a second link");
+        viewport.cancelPositionLinkPairing();
+        if (viewport.isPairingPositionLink() || !origin->linkSlots[1].isEmpty())
+            return fail("cancelling a pairing did not clear it");
+
+        // Esc is the keyboard route to the same place, and it outranks
+        // deselection so the more specific state goes first.
+        viewport.beginPositionLinkPairing(origin, 1);
+        if (!viewport.handleEscapeKey())
+            return fail("Esc did not consume the armed pairing");
+        if (viewport.isPairingPositionLink())
+            return fail("Esc left the pairing armed");
+
+        // Deleting the armed origin leaves no other end to write, so the
+        // pairing must not outlive it.
+        viewport.beginPositionLinkPairing(origin, 1);
+        viewport.selectObject(origin, false);
+        viewport.deleteSelectedObjects();
+        if (viewport.isPairingPositionLink())
+            return fail("pairing survived deletion of its origin");
+
+        printf("PASSED\n");
+        return true;
+    }
+
     static bool testOcrTextBoxConversion() {
         printf("  testOcrTextBoxConversion... ");
 
@@ -4156,6 +4549,7 @@ public:
         runTest(testScrollFractions, "testScrollFractions");
         runTest(testPdfCache, "testPdfCache");
         runTest(testPointerEvents, "testPointerEvents");
+        runTest(testOffPagePanFromEmptySpace, "testOffPagePanFromEmptySpace");
         runTest(testObjectAlternateMouseMode, "testObjectAlternateMouseMode");
         runTest(testObjectGestureCancellation, "testObjectGestureCancellation");
         runTest(testObjectPageContainment, "testObjectPageContainment");
@@ -4180,6 +4574,8 @@ public:
                 "testHighlightAdjustMode");
         runTest(testHighlightAppearanceEdit,
                 "testHighlightAppearanceEdit");
+        runTest(testPositionLinkPairing,
+                "testPositionLinkPairing");
         runTest(testOcrTextBoxConversion,
                 "testOcrTextBoxConversion");
         
