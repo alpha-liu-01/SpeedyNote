@@ -2001,8 +2001,8 @@ Cela permet d&apos;éviter les contacts accidentels de la paume lors de l&apos;�
     </message>
     <message>
         <location filename="../../source/core/DocumentViewport.cpp" line="2613"/>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10090"/>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10403"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10141"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10454"/>
         <source>Text box cannot grow beyond the page</source>
         <translation>La zone de texte ne peut pas dépasser la page</translation>
     </message>
@@ -2012,117 +2012,124 @@ Cela permet d&apos;éviter les contacts accidentels de la paume lors de l&apos;�
         <translation>Aucun document chargé</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="3749"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3825"/>
         <source>Cut</source>
         <translation type="unfinished">Couper</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="3756"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3832"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3871"/>
         <source>Copy</source>
         <translation type="unfinished">Copier</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="3761"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3837"/>
         <source>Paste</source>
         <translation type="unfinished">Coller</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="3770"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3846"/>
         <source>Edit Text</source>
         <translation>Modifier le texte</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="3779"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3814"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3855"/>
         <source>Delete</source>
         <translation type="unfinished">Supprimer</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="8262"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3805"/>
+        <source>Copy Text</source>
+        <translation>Copier le texte</translation>
+    </message>
+    <message>
+        <location filename="../../source/core/DocumentViewport.cpp" line="8351"/>
         <source>Insert Image</source>
         <translation>Insérer une image</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="8264"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="8353"/>
         <source>Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)</source>
         <translation>Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;Tous les fichiers (*)</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="8759"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="8848"/>
         <source>Not enough room on this page to convert this text</source>
         <translation>Pas assez d&apos;espace sur cette page pour convertir ce texte</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10879"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10931"/>
         <source>Start position link</source>
-        <translation type="unfinished"></translation>
+        <translation>Commencer le lien de position</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10885"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10937"/>
         <source>Finish position link here</source>
-        <translation type="unfinished"></translation>
+        <translation>Terminer le lien de position ici</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10886"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10938"/>
         <source>Finish position link from &quot;%1&quot;</source>
-        <translation type="unfinished"></translation>
+        <translation>Terminer le lien de position depuis &quot;%1&quot;</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10889"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10941"/>
         <source>Cancel position link</source>
-        <translation type="unfinished"></translation>
+        <translation>Annuler le lien de position</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10892"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10944"/>
         <source>Add URL Link</source>
         <translation>Ajouter un lien URL</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10893"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10945"/>
         <source>Add Markdown Note</source>
         <translation>Ajouter une note Markdown</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10904"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10956"/>
         <source>Add URL</source>
         <translation>Ajouter une URL</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10904"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10956"/>
         <source>Enter URL:</source>
         <translation>Saisir l&apos;URL :</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11037"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11089"/>
         <source>Cannot start a position link from this annotation.</source>
-        <translation type="unfinished"></translation>
+        <translation>Impossible de commencer un lien de position à partir de cette annotation.</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11187"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11239"/>
         <source>The other end of this link no longer exists.</source>
-        <translation type="unfinished"></translation>
+        <translation>L&apos;autre extrémité de ce lien n&apos;existe plus.</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11196"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11248"/>
         <source>That link slot is no longer free.</source>
-        <translation type="unfinished"></translation>
+        <translation>Cet emplacement de lien n&apos;est plus libre.</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11206"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11258"/>
         <source>Cannot finish the position link here.</source>
-        <translation type="unfinished"></translation>
+        <translation>Impossible de terminer le lien de position ici.</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11362"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11414"/>
         <source>Cannot create note: please save the document first.</source>
         <translation>Impossible de créer la note : veuillez d&apos;abord enregistrer le document.</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11373"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11425"/>
         <source>Untitled Note</source>
         <translation>Note sans titre</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11381"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11433"/>
         <source>Failed to create note file. Check disk space and permissions.</source>
         <translation>Échec de la création du fichier de note. Vérifiez l&apos;espace disque et les autorisations.</translation>
     </message>
@@ -2388,12 +2395,12 @@ Cela permet d&apos;éviter les contacts accidentels de la paume lors de l&apos;�
     <message>
         <location filename="../../source/ui/subtoolbars/HighlighterSubToolbar.cpp" line="57"/>
         <source>Select text only (click to highlight on release)</source>
-        <translation type="unfinished"></translation>
+        <translation>Sélectionner le texte uniquement (cliquer pour surlignier au relâchement)</translation>
     </message>
     <message>
         <location filename="../../source/ui/subtoolbars/HighlighterSubToolbar.cpp" line="58"/>
         <source>Highlight on release (click to select text only)</source>
-        <translation type="unfinished"></translation>
+        <translation>Surligner au relâchement (cliquer pour sélectionner le texte uniquement)</translation>
     </message>
     <message>
         <location filename="../../source/ui/subtoolbars/HighlighterSubToolbar.cpp" line="66"/>
@@ -2934,7 +2941,7 @@ Cette action est irréversible.</translation>
     <message>
         <location filename="../../source/ui/panels/LinkObjectBar.cpp" line="137"/>
         <source>Highlight style</source>
-        <translation type="unfinished"></translation>
+        <translation>Style de surbrillance</translation>
     </message>
     <message>
         <location filename="../../source/ui/panels/LinkObjectBar.cpp" line="144"/>
@@ -2955,7 +2962,7 @@ Cette action est irréversible.</translation>
         <location filename="../../source/ui/panels/LinkObjectBar.cpp" line="165"/>
         <location filename="../../source/ui/panels/LinkObjectBar.cpp" line="316"/>
         <source>Adjust highlight range</source>
-        <translation type="unfinished"></translation>
+        <translation>Ajuster la plage de surbrillance</translation>
     </message>
     <message>
         <location filename="../../source/ui/panels/LinkObjectBar.cpp" line="174"/>
@@ -2985,12 +2992,12 @@ Cette action est irréversible.</translation>
     <message>
         <location filename="../../source/ui/panels/LinkObjectBar.cpp" line="294"/>
         <source>Highlight color (click to edit)</source>
-        <translation type="unfinished"></translation>
+        <translation>Couleur de surbrillance (cliquer pour modifier)</translation>
     </message>
     <message>
         <location filename="../../source/ui/panels/LinkObjectBar.cpp" line="315"/>
         <source>Done adjusting</source>
-        <translation type="unfinished"></translation>
+        <translation>Ajustement terminé</translation>
     </message>
     <message>
         <location filename="../../source/ui/panels/LinkObjectBar.cpp" line="368"/>
@@ -3015,7 +3022,7 @@ Cette action est irréversible.</translation>
     <message>
         <location filename="../../source/ui/panels/LinkObjectBar.cpp" line="387"/>
         <source>This also clears the matching slot on the linked annotation, freeing it at both ends.</source>
-        <translation type="unfinished"></translation>
+        <translation>Cela efface également l&apos;emplacement correspondant sur l&apos;annotation liée, la libérant aux deux extrémités.</translation>
     </message>
     <message>
         <location filename="../../source/ui/panels/LinkObjectBar.cpp" line="393"/>
@@ -3025,7 +3032,7 @@ Cette action est irréversible.</translation>
     <message>
         <location filename="../../source/ui/panels/LinkObjectBar.cpp" line="490"/>
         <source>Select Highlight Color</source>
-        <translation type="unfinished"></translation>
+        <translation>Sélectionner la couleur de surbrillance</translation>
     </message>
     <message>
         <location filename="../../source/ui/panels/LinkObjectBar.cpp" line="490"/>
@@ -3058,7 +3065,7 @@ Cette action est irréversible.</translation>
     <message>
         <location filename="../../source/ui/widgets/LinkSlotButton.cpp" line="316"/>
         <source>Position link started (open a slot on another annotation to finish, long-press to cancel)</source>
-        <translation type="unfinished"></translation>
+        <translation>Lien de position commencé (ouvrir un emplacement sur une autre annotation pour terminer, maintenir enfoncé pour annuler)</translation>
     </message>
 </context>
 <context>
@@ -3162,70 +3169,70 @@ Cette action est irréversible.</translation>
 <context>
     <name>MainWindow</name>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3421"/>
-        <location filename="../../source/MainWindow.cpp" line="3430"/>
-        <location filename="../../source/MainWindow.cpp" line="3529"/>
+        <location filename="../../source/MainWindow.cpp" line="3424"/>
+        <location filename="../../source/MainWindow.cpp" line="3433"/>
+        <location filename="../../source/MainWindow.cpp" line="3532"/>
         <source>Export Failed</source>
         <translation>Échec de l&apos;exportation</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3449"/>
-        <location filename="../../source/MainWindow.cpp" line="3521"/>
+        <location filename="../../source/MainWindow.cpp" line="3452"/>
+        <location filename="../../source/MainWindow.cpp" line="3524"/>
         <source>Export Complete</source>
         <translation>Exportation terminée</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4279"/>
-        <location filename="../../source/MainWindow.cpp" line="4315"/>
-        <location filename="../../source/MainWindow.cpp" line="4331"/>
-        <location filename="../../source/MainWindow.cpp" line="4339"/>
+        <location filename="../../source/MainWindow.cpp" line="4282"/>
+        <location filename="../../source/MainWindow.cpp" line="4318"/>
+        <location filename="../../source/MainWindow.cpp" line="4334"/>
+        <location filename="../../source/MainWindow.cpp" line="4342"/>
         <source>Page Import (Debug)</source>
         <translation>Importation de pages (Débogage)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4280"/>
+        <location filename="../../source/MainWindow.cpp" line="4283"/>
         <source>No document is open in the active pane.</source>
         <translation>Aucun document n&apos;est ouvert dans le volet actif.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4316"/>
+        <location filename="../../source/MainWindow.cpp" line="4319"/>
         <source>Open a second document in another tab or split pane to import from.</source>
         <translation>Ouvrez un second document dans un autre onglet ou un volet divisé pour effectuer l&apos;importation.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4332"/>
+        <location filename="../../source/MainWindow.cpp" line="4335"/>
         <source>Source document has no pages to import.</source>
         <translation>Le document source ne contient aucune page à importer.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4340"/>
+        <location filename="../../source/MainWindow.cpp" line="4343"/>
         <source>Import failed.</source>
         <translation>L&apos;importation a échoué.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4391"/>
-        <location filename="../../source/MainWindow.cpp" line="4423"/>
-        <location filename="../../source/MainWindow.cpp" line="4433"/>
+        <location filename="../../source/MainWindow.cpp" line="4394"/>
+        <location filename="../../source/MainWindow.cpp" line="4426"/>
+        <location filename="../../source/MainWindow.cpp" line="4436"/>
         <source>Copy Pages</source>
         <translation>Copier les pages</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4392"/>
+        <location filename="../../source/MainWindow.cpp" line="4395"/>
         <source>Open another document in a tab or split pane to copy pages into it.</source>
         <translation>Ouvrez un autre document dans un onglet ou un volet divisé pour y copier des pages.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4404"/>
+        <location filename="../../source/MainWindow.cpp" line="4407"/>
         <source>%1 (%2)</source>
         <translation type="unfinished">%1 (%2)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4424"/>
+        <location filename="../../source/MainWindow.cpp" line="4427"/>
         <source>Failed to copy the selected pages.</source>
         <translation>La copie des pages sélectionnées a échoué.</translation>
     </message>
     <message numerus="yes">
-        <location filename="../../source/MainWindow.cpp" line="4434"/>
+        <location filename="../../source/MainWindow.cpp" line="4437"/>
         <source>Copied %n page(s) to &quot;%1&quot;.</source>
         <translation>
             <numerusform>%n page copiée vers « %1 ».</numerusform>
@@ -3233,78 +3240,78 @@ Cette action est irréversible.</translation>
         </translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7400"/>
+        <location filename="../../source/MainWindow.cpp" line="7396"/>
         <source>Untitled</source>
         <translation>Sans titre</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="645"/>
-        <location filename="../../source/MainWindow.cpp" line="9305"/>
+        <location filename="../../source/MainWindow.cpp" line="644"/>
+        <location filename="../../source/MainWindow.cpp" line="9301"/>
         <source>canvas</source>
         <translation>canevas</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="645"/>
-        <location filename="../../source/MainWindow.cpp" line="9305"/>
+        <location filename="../../source/MainWindow.cpp" line="644"/>
+        <location filename="../../source/MainWindow.cpp" line="9301"/>
         <source>document</source>
         <translation>document</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="648"/>
-        <location filename="../../source/MainWindow.cpp" line="9308"/>
+        <location filename="../../source/MainWindow.cpp" line="647"/>
+        <location filename="../../source/MainWindow.cpp" line="9304"/>
         <source>Save Changes?</source>
         <translation>Enregistrer les modifications ?</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="649"/>
+        <location filename="../../source/MainWindow.cpp" line="648"/>
         <source>This %1 has unsaved changes. Do you want to save before closing?</source>
         <translation>Ce %1 contient des modifications non enregistrées. Voulez-vous enregistrer avant de fermer ?</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="664"/>
-        <location filename="../../source/MainWindow.cpp" line="681"/>
-        <location filename="../../source/MainWindow.cpp" line="705"/>
-        <location filename="../../source/MainWindow.cpp" line="3799"/>
-        <location filename="../../source/MainWindow.cpp" line="3887"/>
-        <location filename="../../source/MainWindow.cpp" line="9326"/>
-        <location filename="../../source/MainWindow.cpp" line="9340"/>
-        <location filename="../../source/MainWindow.cpp" line="9354"/>
-        <location filename="../../source/MainWindow.cpp" line="9649"/>
+        <location filename="../../source/MainWindow.cpp" line="663"/>
+        <location filename="../../source/MainWindow.cpp" line="680"/>
+        <location filename="../../source/MainWindow.cpp" line="704"/>
+        <location filename="../../source/MainWindow.cpp" line="3802"/>
+        <location filename="../../source/MainWindow.cpp" line="3890"/>
+        <location filename="../../source/MainWindow.cpp" line="9322"/>
+        <location filename="../../source/MainWindow.cpp" line="9336"/>
+        <location filename="../../source/MainWindow.cpp" line="9350"/>
+        <location filename="../../source/MainWindow.cpp" line="9645"/>
         <source>Save Error</source>
         <translation>Erreur d&apos;enregistrement</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="665"/>
-        <location filename="../../source/MainWindow.cpp" line="3800"/>
-        <location filename="../../source/MainWindow.cpp" line="3888"/>
+        <location filename="../../source/MainWindow.cpp" line="664"/>
+        <location filename="../../source/MainWindow.cpp" line="3803"/>
+        <location filename="../../source/MainWindow.cpp" line="3891"/>
         <source>Failed to save document to:
 %1</source>
         <translation>Impossible d&apos;enregistrer le document dans :
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="682"/>
-        <location filename="../../source/MainWindow.cpp" line="706"/>
+        <location filename="../../source/MainWindow.cpp" line="681"/>
+        <location filename="../../source/MainWindow.cpp" line="705"/>
         <source>PDF sources could not be finalized. Repair the unavailable sources before closing.</source>
         <translation>Impossible de finaliser les sources PDF. Réparez les sources indisponibles avant de fermer.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1049"/>
+        <location filename="../../source/MainWindow.cpp" line="1048"/>
         <source>Current Document Settings...</source>
         <translation>Paramètres du document actuel...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3345"/>
+        <location filename="../../source/MainWindow.cpp" line="3348"/>
         <source>Share Notebook</source>
         <translation>Partager le carnet</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3347"/>
+        <location filename="../../source/MainWindow.cpp" line="3350"/>
         <source>Export Notebook</source>
         <translation type="unfinished">Exporter le carnet de notes</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3374"/>
+        <location filename="../../source/MainWindow.cpp" line="3377"/>
         <source>The document has unsaved changes.
 Please save the document before exporting.
 
@@ -3315,95 +3322,95 @@ Veuillez l&apos;enregistrer avant de l&apos;exporter.
 Voulez-vous l&apos;enregistrer maintenant ?</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3407"/>
-        <location filename="../../source/MainWindow.cpp" line="3478"/>
+        <location filename="../../source/MainWindow.cpp" line="3410"/>
+        <location filename="../../source/MainWindow.cpp" line="3481"/>
         <source>Could not find a unique filename. Please choose a different location.</source>
         <translation>Impossible de trouver un nom de fichier unique. Veuillez choisir un emplacement différent.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3748"/>
-        <location filename="../../source/MainWindow.cpp" line="3776"/>
+        <location filename="../../source/MainWindow.cpp" line="3751"/>
+        <location filename="../../source/MainWindow.cpp" line="3779"/>
         <source>Save Canvas</source>
         <translation>Enregistrer le canevas</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3748"/>
-        <location filename="../../source/MainWindow.cpp" line="3776"/>
-        <location filename="../../source/MainWindow.cpp" line="3863"/>
-        <location filename="../../source/MainWindow.cpp" line="3870"/>
+        <location filename="../../source/MainWindow.cpp" line="3751"/>
+        <location filename="../../source/MainWindow.cpp" line="3779"/>
+        <location filename="../../source/MainWindow.cpp" line="3866"/>
+        <location filename="../../source/MainWindow.cpp" line="3873"/>
         <source>Save Document</source>
         <translation>Enregistrer le document</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3778"/>
+        <location filename="../../source/MainWindow.cpp" line="3781"/>
         <source>SpeedyNote Bundle (*.snb)</source>
         <translation>Paquet SpeedyNote (*.snb)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1070"/>
+        <location filename="../../source/MainWindow.cpp" line="1069"/>
         <source>Settings</source>
         <translation>Paramètres</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3864"/>
-        <location filename="../../source/MainWindow.cpp" line="3871"/>
+        <location filename="../../source/MainWindow.cpp" line="3867"/>
+        <location filename="../../source/MainWindow.cpp" line="3874"/>
         <source>No document is open.</source>
         <translation>Aucun document n&apos;est ouvert.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4040"/>
+        <location filename="../../source/MainWindow.cpp" line="4043"/>
         <source>SpeedyNote Files (*.snb *.pdf);;SpeedyNote Bundle (*.snb);;PDF Documents (*.pdf);;All Files (*)</source>
         <translation>Fichiers SpeedyNote (*.snb *.pdf);;Paquet SpeedyNote (*.snb);;Documents PDF (*.pdf);;Tous les fichiers (*)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4023"/>
-        <location filename="../../source/MainWindow.cpp" line="4043"/>
+        <location filename="../../source/MainWindow.cpp" line="4026"/>
+        <location filename="../../source/MainWindow.cpp" line="4046"/>
         <source>Open Document</source>
         <translation>Ouvrir un document</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1059"/>
+        <location filename="../../source/MainWindow.cpp" line="1058"/>
         <source>Lock All OCR Text</source>
         <translation>Verrouiller tout le texte OCR</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1066"/>
+        <location filename="../../source/MainWindow.cpp" line="1065"/>
         <source>Import Pages from Other Doc (Debug)...</source>
         <translation>Importer des pages depuis un autre document (Débogage)...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3353"/>
-        <location filename="../../source/MainWindow.cpp" line="3360"/>
+        <location filename="../../source/MainWindow.cpp" line="3356"/>
+        <location filename="../../source/MainWindow.cpp" line="3363"/>
         <source>No document is currently open.</source>
         <translation>Aucun document n&apos;est actuellement ouvert.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3368"/>
+        <location filename="../../source/MainWindow.cpp" line="3371"/>
         <source>Please save the document before exporting.</source>
         <translation>Veuillez enregistrer le document avant l&apos;exportation.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3444"/>
+        <location filename="../../source/MainWindow.cpp" line="3447"/>
         <source>Share Notebook Package</source>
         <translation>Partager le paquet de notes</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2982"/>
+        <location filename="../../source/MainWindow.cpp" line="2985"/>
         <source>Warning</source>
         <translation>Avertissement</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3379"/>
+        <location filename="../../source/MainWindow.cpp" line="3382"/>
         <source>Save Document First</source>
         <translation>Enregistrer le document d&apos;abord</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3422"/>
+        <location filename="../../source/MainWindow.cpp" line="3425"/>
         <source>PDF sources could not be finalized. Repair the unavailable sources and try again.</source>
         <translation>Impossible de finaliser les sources PDF. Réparez les sources indisponibles et réessayez.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3450"/>
+        <location filename="../../source/MainWindow.cpp" line="3453"/>
         <source>Notebook exported successfully.
 
 File: %1
@@ -3414,13 +3421,13 @@ Fichier : %1
 Taille : %2 Mo</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3515"/>
         <location filename="../../source/MainWindow.cpp" line="3518"/>
+        <location filename="../../source/MainWindow.cpp" line="3521"/>
         <source>Share PDF</source>
         <translation>Partager le PDF</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3522"/>
+        <location filename="../../source/MainWindow.cpp" line="3525"/>
         <source>PDF exported successfully!
 
 Pages exported: %1
@@ -3431,41 +3438,41 @@ Pages exportées : %1
 Taille du fichier : %2 Ko</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3530"/>
+        <location filename="../../source/MainWindow.cpp" line="3533"/>
         <source>Failed to export PDF:
 %1</source>
         <translation>Échec de l&apos;exportation PDF :
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3737"/>
+        <location filename="../../source/MainWindow.cpp" line="3740"/>
         <source>Untitled Canvas</source>
         <translation>Canevas sans titre</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3737"/>
+        <location filename="../../source/MainWindow.cpp" line="3740"/>
         <source>Untitled Document</source>
         <translation>Document sans titre</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3759"/>
+        <location filename="../../source/MainWindow.cpp" line="3762"/>
         <source>Overwrite?</source>
         <translation>Remplacer ?</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3760"/>
+        <location filename="../../source/MainWindow.cpp" line="3763"/>
         <source>A document named &apos;%1&apos; already exists.
 Do you want to replace it?</source>
         <translation>Un document nommé « %1 » existe déjà.
 Voulez-vous le remplacer ?</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4016"/>
+        <location filename="../../source/MainWindow.cpp" line="4019"/>
         <source>No Documents</source>
         <translation>Aucun document</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4017"/>
+        <location filename="../../source/MainWindow.cpp" line="4020"/>
         <source>No saved documents found.
 
 Documents are saved to:
@@ -3476,100 +3483,100 @@ Les documents sont enregistrés dans :
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4024"/>
+        <location filename="../../source/MainWindow.cpp" line="4027"/>
         <source>Select a document:</source>
         <translation>Sélectionnez un document :</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4059"/>
-        <location filename="../../source/MainWindow.cpp" line="4899"/>
+        <location filename="../../source/MainWindow.cpp" line="4062"/>
+        <location filename="../../source/MainWindow.cpp" line="4902"/>
         <source>Load Error</source>
         <translation>Erreur de chargement</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4060"/>
+        <location filename="../../source/MainWindow.cpp" line="4063"/>
         <source>Failed to load document from:
 %1</source>
         <translation>Échec du chargement du document depuis :
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4223"/>
+        <location filename="../../source/MainWindow.cpp" line="4226"/>
         <source>Cannot Delete</source>
         <translation>Impossible de supprimer</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4224"/>
+        <location filename="../../source/MainWindow.cpp" line="4227"/>
         <source>Cannot delete the last remaining page.</source>
         <translation>Impossible de supprimer la dernière page restante.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4570"/>
-        <location filename="../../source/MainWindow.cpp" line="4678"/>
+        <location filename="../../source/MainWindow.cpp" line="4573"/>
+        <location filename="../../source/MainWindow.cpp" line="4681"/>
         <source>PDF Files (*.pdf);;All Files (*)</source>
         <translation>Fichiers PDF (*.pdf);;Tous les fichiers (*)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4681"/>
+        <location filename="../../source/MainWindow.cpp" line="4684"/>
         <source>Open PDF</source>
         <translation>Ouvrir un PDF</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4584"/>
-        <location filename="../../source/MainWindow.cpp" line="4702"/>
+        <location filename="../../source/MainWindow.cpp" line="4587"/>
+        <location filename="../../source/MainWindow.cpp" line="4705"/>
         <source>PDF Error</source>
         <translation>Erreur PDF</translation>
     </message>
     <message>
         <location filename="../../source/macos/MacMenuBar.cpp" line="172"/>
-        <location filename="../../source/MainWindow.cpp" line="1038"/>
-        <location filename="../../source/MainWindow.cpp" line="3284"/>
+        <location filename="../../source/MainWindow.cpp" line="1037"/>
+        <location filename="../../source/MainWindow.cpp" line="3287"/>
         <source>PDF Sources...</source>
         <translation>Sources PDF...</translation>
     </message>
     <message>
         <location filename="../../source/macos/MacMenuBar.cpp" line="170"/>
-        <location filename="../../source/MainWindow.cpp" line="3283"/>
+        <location filename="../../source/MainWindow.cpp" line="3286"/>
         <source>Repair PDF Sources... (%1)</source>
         <translation>Réparer les sources PDF... (%1)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4569"/>
-        <location filename="../../source/MainWindow.cpp" line="4590"/>
+        <location filename="../../source/MainWindow.cpp" line="4572"/>
+        <location filename="../../source/MainWindow.cpp" line="4593"/>
         <source>Add Pages from PDF</source>
         <translation>Ajouter des pages depuis un PDF</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4585"/>
+        <location filename="../../source/MainWindow.cpp" line="4588"/>
         <source>The selected PDF could not be opened:
 %1</source>
         <translation>Impossible d&apos;ouvrir le PDF sélectionné :
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4612"/>
+        <location filename="../../source/MainWindow.cpp" line="4615"/>
         <source>PDF Import</source>
         <translation>Importation PDF</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4613"/>
+        <location filename="../../source/MainWindow.cpp" line="4616"/>
         <source>The selected PDF pages could not be added to this document.</source>
         <translation>Impossible d&apos;ajouter les pages PDF sélectionnées à ce document.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4703"/>
+        <location filename="../../source/MainWindow.cpp" line="4706"/>
         <source>Failed to open PDF file:
 %1</source>
         <translation>Échec de l&apos;ouverture du fichier PDF :
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4883"/>
+        <location filename="../../source/MainWindow.cpp" line="4886"/>
         <source>Open SpeedyNote Bundle (.snb folder)</source>
         <translation>Ouvrir un SpeedyNote Bundle (dossier .snb)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4900"/>
+        <location filename="../../source/MainWindow.cpp" line="4903"/>
         <source>Selected folder is not a valid SpeedyNote bundle.
 Missing document.json manifest.
 
@@ -3580,27 +3587,27 @@ Fichier manifest document.json manquant.
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5019"/>
+        <location filename="../../source/MainWindow.cpp" line="5022"/>
         <source>Jump to Page</source>
         <translation>Aller à la page</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5019"/>
+        <location filename="../../source/MainWindow.cpp" line="5022"/>
         <source>Enter Page Number:</source>
         <translation>Entrez le numéro de page :</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5952"/>
+        <location filename="../../source/MainWindow.cpp" line="5953"/>
         <source>Pick recolor target</source>
         <translation>Choisir la cible de recoloration</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6616"/>
+        <location filename="../../source/MainWindow.cpp" line="6612"/>
         <source>No results found</source>
         <translation>Aucun résultat trouvé</translation>
     </message>
     <message numerus="yes">
-        <location filename="../../source/MainWindow.cpp" line="6618"/>
+        <location filename="../../source/MainWindow.cpp" line="6614"/>
         <source>%n match(es)</source>
         <translation>
             <numerusform>%n correspondance</numerusform>
@@ -3608,84 +3615,84 @@ Fichier manifest document.json manquant.
         </translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6688"/>
+        <location filename="../../source/MainWindow.cpp" line="6684"/>
         <source>Scanning...</source>
         <translation>Analyse en cours...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6745"/>
+        <location filename="../../source/MainWindow.cpp" line="6741"/>
         <source>Scanning all pages...</source>
         <translation>Analyse de toutes les pages...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6823"/>
-        <location filename="../../source/MainWindow.cpp" line="6855"/>
+        <location filename="../../source/MainWindow.cpp" line="6819"/>
+        <location filename="../../source/MainWindow.cpp" line="6851"/>
         <source>Auto-scanning...</source>
         <translation>Analyse automatique en cours...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7001"/>
+        <location filename="../../source/MainWindow.cpp" line="6997"/>
         <source>Done: %1 words</source>
         <translation>Terminé : %1 mots</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7013"/>
+        <location filename="../../source/MainWindow.cpp" line="7009"/>
         <source>OCR complete: %1 pages scanned, %2 with text</source>
         <translation>OCR terminé : %1 pages analysées, %2 avec du texte</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7050"/>
+        <location filename="../../source/MainWindow.cpp" line="7046"/>
         <source>OCR error: %1</source>
         <translation>Erreur OCR : %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7387"/>
+        <location filename="../../source/MainWindow.cpp" line="7383"/>
         <source>%1[*]</source>
         <translation>%1[*]</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7389"/>
+        <location filename="../../source/MainWindow.cpp" line="7385"/>
         <source>%1[*] — SpeedyNote</source>
         <translation>%1[*] — SpeedyNote</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7452"/>
+        <location filename="../../source/MainWindow.cpp" line="7448"/>
         <source>OCR Language</source>
         <translation>Langue de l&apos;OCR</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7458"/>
+        <location filename="../../source/MainWindow.cpp" line="7454"/>
         <source>Document: %1</source>
         <translation>Document : %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7464"/>
+        <location filename="../../source/MainWindow.cpp" line="7460"/>
         <source>Handwriting recognition language for this document:</source>
         <translation>Langue de reconnaissance d&apos;écriture pour ce document :</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7469"/>
+        <location filename="../../source/MainWindow.cpp" line="7465"/>
         <source>Use global setting</source>
         <translation>Utiliser le paramètre global</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7470"/>
+        <location filename="../../source/MainWindow.cpp" line="7466"/>
         <source>Auto-detect (system default)</source>
         <translation>Détection automatique (par défaut)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7529"/>
+        <location filename="../../source/MainWindow.cpp" line="7525"/>
         <source>&quot;Use global setting&quot; inherits from Settings &gt; Language &gt; Handwriting Recognition Language.</source>
         <translation>« Utiliser le paramètre global » hérite de Paramètres &gt; Langue &gt; Langue de reconnaissance d&apos;écriture.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7576"/>
-        <location filename="../../source/MainWindow.cpp" line="7591"/>
+        <location filename="../../source/MainWindow.cpp" line="7572"/>
+        <location filename="../../source/MainWindow.cpp" line="7587"/>
         <source>Convert OCR Text</source>
         <translation>Convertir le texte OCR</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7577"/>
+        <location filename="../../source/MainWindow.cpp" line="7573"/>
         <source>Convert this recognized text into an editable text box?
 
 The recognized block is removed and its ink is excluded from future scans.</source>
@@ -3694,37 +3701,37 @@ The recognized block is removed and its ink is excluded from future scans.</sour
 Le bloc reconnu est supprimé et son encre est exclue des analyses futures.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7592"/>
+        <location filename="../../source/MainWindow.cpp" line="7588"/>
         <source>This recognized text is no longer available. A new scan may have replaced it.</source>
         <translation>Ce texte reconnu n&apos;est plus disponible. Une nouvelle analyse l&apos;a peut-être remplacé.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="8590"/>
+        <location filename="../../source/MainWindow.cpp" line="8586"/>
         <source>New Edgeless Canvas</source>
         <translation>Nouveau canevas sans bordure</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="8595"/>
+        <location filename="../../source/MainWindow.cpp" line="8591"/>
         <source>New Paged Notebook</source>
         <translation>Nouveau carnet paginé</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="8603"/>
+        <location filename="../../source/MainWindow.cpp" line="8599"/>
         <source>Open PDF...</source>
         <translation>Ouvrir un PDF...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="8608"/>
+        <location filename="../../source/MainWindow.cpp" line="8604"/>
         <source>Open Notebook...</source>
         <translation>Ouvrir un carnet...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9309"/>
+        <location filename="../../source/MainWindow.cpp" line="9305"/>
         <source>The %1 &quot;%2&quot; has unsaved changes. Do you want to save before quitting?</source>
         <translation>Le %1 « %2 » contient des modifications non enregistrées. Voulez-vous enregistrer avant de quitter ?</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9327"/>
+        <location filename="../../source/MainWindow.cpp" line="9323"/>
         <source>Failed to save document to:
 %1
 
@@ -3735,55 +3742,55 @@ Quit anyway?</source>
 Quitter quand même ?</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9341"/>
-        <location filename="../../source/MainWindow.cpp" line="9355"/>
+        <location filename="../../source/MainWindow.cpp" line="9337"/>
+        <location filename="../../source/MainWindow.cpp" line="9351"/>
         <source>PDF sources could not be finalized. Repair the unavailable sources before quitting.</source>
         <translation>Impossible de finaliser les sources PDF. Réparez les sources indisponibles avant de quitter.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9650"/>
+        <location filename="../../source/MainWindow.cpp" line="9646"/>
         <source>Failed to save document before closing.</source>
         <translation>Échec de l&apos;enregistrement du document avant la fermeture.</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9697"/>
+        <location filename="../../source/MainWindow.cpp" line="9693"/>
         <source>The file does not exist:
 %1</source>
         <translation>Le fichier n&apos;existe pas :
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9731"/>
-        <location filename="../../source/MainWindow.cpp" line="9749"/>
+        <location filename="../../source/MainWindow.cpp" line="9727"/>
+        <location filename="../../source/MainWindow.cpp" line="9745"/>
         <source>Open Error</source>
         <translation>Erreur d&apos;ouverture</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9732"/>
+        <location filename="../../source/MainWindow.cpp" line="9728"/>
         <source>Failed to open file:
 %1</source>
         <translation>Échec de l&apos;ouverture du fichier :
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9750"/>
+        <location filename="../../source/MainWindow.cpp" line="9746"/>
         <source>Failed to create tab for:
 %1</source>
         <translation>Échec de la création de l&apos;onglet pour :
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9696"/>
+        <location filename="../../source/MainWindow.cpp" line="9692"/>
         <source>File Not Found</source>
         <translation>Fichier introuvable</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="620"/>
+        <location filename="../../source/MainWindow.cpp" line="619"/>
         <source>Notice</source>
         <translation type="unfinished">Remarquer</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="621"/>
+        <location filename="../../source/MainWindow.cpp" line="620"/>
         <source>At least one tab must remain open.</source>
         <translation type="unfinished">Au moins un onglet doit rester ouvert.</translation>
     </message>
@@ -4137,12 +4144,12 @@ Veuillez supprimer le mot de passe et réessayer.</translation>
 <context>
     <name>ObjectSelectActionBar</name>
     <message>
-        <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="230"/>
+        <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="241"/>
         <source>Add mode (click to switch to Select) (Ctrl+6)</source>
         <translation>Mode Ajout (cliquer pour passer à Sélection) (Ctrl+6)</translation>
     </message>
     <message>
-        <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="231"/>
+        <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="242"/>
         <source>Select mode (click to switch to Add) (Ctrl+7)</source>
         <translation>Mode Sélection (cliquer pour passer à Ajout) (Ctrl+7)</translation>
     </message>
@@ -4163,6 +4170,7 @@ Veuillez supprimer le mot de passe et réessayer.</translation>
     </message>
     <message>
         <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="63"/>
+        <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="161"/>
         <source>Copy (Ctrl+C)</source>
         <translation>Copier (Ctrl+C)</translation>
     </message>
@@ -4200,6 +4208,11 @@ Veuillez supprimer le mot de passe et réessayer.</translation>
         <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="129"/>
         <source>Decrease Affinity (Alt+[)</source>
         <translation>Diminuer l&apos;affinité (Alt+[)</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="160"/>
+        <source>Copy Text (Ctrl+C)</source>
+        <translation>Copier le texte (Ctrl+C)</translation>
     </message>
 </context>
 <context>
@@ -4418,7 +4431,7 @@ Double-cliquer ou double-taper pour accéder à une page</translation>
     <message>
         <location filename="../../source/ui/widgets/PdfSearchBar.cpp" line="152"/>
         <source>Find</source>
-        <translation type="unfinished"></translation>
+        <translation>Rechercher</translation>
     </message>
     <message>
         <location filename="../../source/ui/widgets/PdfSearchBar.cpp" line="189"/>
@@ -5358,7 +5371,7 @@ Essayez un autre terme de recherche.</translation>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="208"/>
         <source>Toggle Performance HUD</source>
-        <translation type="unfinished"></translation>
+        <translation>Activer/Désactiver le HUD de performance</translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="209"/>
@@ -5441,7 +5454,7 @@ Essayez un autre terme de recherche.</translation>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="232"/>
         <source>Highlighter: Select Text Only</source>
-        <translation type="unfinished"></translation>
+        <translation>Surligneur : Sélectionner le texte uniquement</translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="233"/>
@@ -5704,14 +5717,6 @@ et sélectionnez « Ajouter aux favoris » pour l&apos;ajouter ici.</translation
     </message>
 </context>
 <context>
-    <name>TextSelectionActionBar</name>
-    <message>
-        <location filename="../../source/ui/actionbars/TextSelectionActionBar.cpp" line="15"/>
-        <source>Copy (Ctrl+C)</source>
-        <translation>Copier (Ctrl+C)</translation>
-    </message>
-</context>
-<context>
     <name>ThicknessEditDialog</name>
     <message>
         <location filename="../../source/ui/widgets/ThicknessPresetButton.cpp" line="37"/>
@@ -5790,7 +5795,7 @@ et sélectionnez « Ajouter aux favoris » pour l&apos;ajouter ici.</translation
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="40"/>
         <source>Back to drawing tools</source>
-        <translation type="unfinished"></translation>
+        <translation>Retour aux outils de dessin</translation>
     </message>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="66"/>
@@ -5841,7 +5846,7 @@ et sélectionnez « Ajouter aux favoris » pour l&apos;ajouter ici.</translation
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="182"/>
         <source>More tools</source>
-        <translation type="unfinished"></translation>
+        <translation>Plus d&apos;outils</translation>
     </message>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="721"/>
