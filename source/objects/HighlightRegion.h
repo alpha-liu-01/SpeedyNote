@@ -46,6 +46,26 @@ struct HighlightRegion {
     static constexpr int DEFAULT_OPACITY = 128;
 
     /**
+     * @brief Centre-to-centre dot spacing for DottedUnderline, in thicknesses.
+     *
+     * One dot plus a two-dot gap.
+     */
+    static constexpr qreal DOT_SPACING_FACTOR = 3.0;
+
+    /**
+     * @brief Thickness of an Underline bar / diameter of a DottedUnderline dot.
+     *
+     * In unzoomed document units, matching the baseThickness the retired
+     * highlight strokes used. Lives here rather than in the renderer because
+     * PDF export has to reproduce exactly the same geometry.
+     *
+     * @param lineRect One of the per-line rects, in any consistent unit.
+     */
+    static qreal underlineThickness(const QRectF& lineRect) {
+        return qMax(qreal(1.5), lineRect.height() * qreal(0.10));
+    }
+
+    /**
      * @brief Visual style of the highlight.
      *
      * Third mirror of the same 0..3 ordering as DocumentViewport::HighlightStyle

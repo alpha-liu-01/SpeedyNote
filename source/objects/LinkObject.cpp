@@ -123,12 +123,6 @@ void LinkObject::renderRegion(QPainter& painter, qreal zoom) const
         return;
     }
     
-    // Thicknesses are derived in unzoomed document units, matching the
-    // baseThickness the retired highlight strokes used, then scaled once.
-    auto underlineThickness = [](const QRectF& r) {
-        return qMax(qreal(1.5), r.height() * qreal(0.10));
-    };
-    
     painter.save();
     painter.setPen(Qt::NoPen);
     painter.setBrush(region.color);
@@ -148,16 +142,15 @@ void LinkObject::renderRegion(QPainter& painter, qreal zoom) const
                 break;
             
             case HighlightRegion::Style::Underline: {
-                const qreal t = underlineThickness(localRect) * zoom;
+                // Derived in unzoomed document units, then scaled once.
+                const qreal t = HighlightRegion::underlineThickness(localRect) * zoom;
                 painter.drawRect(QRectF(r.left(), r.bottom() - t, r.width(), t));
                 break;
             }
             
             case HighlightRegion::Style::DottedUnderline: {
-                // Dot diameter scales with text height; centre-to-centre spacing
-                // is 3x the diameter (dot plus a two-dot gap).
-                const qreal t = underlineThickness(localRect) * zoom;
-                const qreal step = t * qreal(3.0);
+                const qreal t = HighlightRegion::underlineThickness(localRect) * zoom;
+                const qreal step = t * HighlightRegion::DOT_SPACING_FACTOR;
                 if (step <= 0.0) break;
                 
                 const qreal y = r.bottom() - t * qreal(0.5);
