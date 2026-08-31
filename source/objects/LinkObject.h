@@ -38,7 +38,9 @@ struct LinkSlot {
      * Navigation runs off the coordinates above; this is the correction applied
      * on arrival, so a link keeps working after its target is dragged. Empty for
      * a link to a bare coordinate, which is every position link written before
-     * pairing existed and every back-link made by @ref LinkObject::cloneWithBackLink.
+     * pairing existed, including the back-links that copying an annotation used
+     * to produce. Such a link still loads and still navigates; it just lands
+     * where its destination was rather than where it is.
      */
     QString targetObjectId;
     
@@ -171,12 +173,6 @@ public:
      * the annotation in the file with no way to reach it.
      */
     bool shouldShowIcon() const;
-    
-    // Copy with back-link (paged mode)
-    std::unique_ptr<LinkObject> cloneWithBackLink(const QString& sourcePageUuid) const;
-    
-    // Copy with back-link (edgeless mode)
-    std::unique_ptr<LinkObject> cloneWithBackLinkEdgeless(int tileX, int tileY, const QPointF& docPosition) const;
     
 private:
     /// Paint the highlight rects for the current style.

@@ -70,7 +70,6 @@ struct OcrSnapParams;
 class ActionBarContainer;
 class LassoActionBar;
 class ObjectSelectActionBar;
-class TextSelectionActionBar;
 class PagePanelActionBar;
 
 // Phase 3.1.8: TouchGestureMode - extracted from InkCanvas.h for palm rejection
@@ -653,7 +652,6 @@ private:
     ActionBarContainer *m_actionBarContainer = nullptr;
     LassoActionBar *m_lassoActionBar = nullptr;
     ObjectSelectActionBar *m_objectSelectActionBar = nullptr;
-    TextSelectionActionBar *m_textSelectionActionBar = nullptr;
     PagePanelActionBar *m_pagePanelActionBar = nullptr;
     
     // PDF Search

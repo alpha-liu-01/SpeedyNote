@@ -20,7 +20,6 @@
 #include "ui/actionbars/ActionBarContainer.h"
 #include "ui/actionbars/LassoActionBar.h"
 #include "ui/actionbars/ObjectSelectActionBar.h"
-#include "ui/actionbars/TextSelectionActionBar.h"
 #include "ui/actionbars/PagePanelActionBar.h"
 #include "objects/LinkObject.h"  // For LinkSlot slot state access
 #include "core/MarkdownNote.h"   // Phase M.3: For loading markdown notes
@@ -2708,6 +2707,8 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
             } else {
                 m_objectSelectActionBar->updateOcrLockSelection(false, false);
             }
+            m_objectSelectActionBar->updateLinkSelection(
+                sel.size() == 1 && sel.first()->type() == QLatin1String("link"));
         }
         if (m_actionBarContainer) {
             bool hasSelection = !viewport->selectedObjects().isEmpty();
@@ -2715,7 +2716,7 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         }
     });
     
-    // Text selection changed (shows/hides TextSelectionActionBar)
+    // Text selection changed (brings up ObjectSelectActionBar with just Copy)
     m_textSelectionConn = connect(viewport, &DocumentViewport::textSelectionChanged,
                                   m_actionBarContainer, &ActionBarContainer::onTextSelectionChanged);
     
@@ -2782,6 +2783,8 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
             } else {
                 m_objectSelectActionBar->updateOcrLockSelection(false, false);
             }
+            m_objectSelectActionBar->updateLinkSelection(
+                sel.size() == 1 && sel.first()->type() == QLatin1String("link"));
         }
         m_actionBarContainer->onObjectSelectionChanged(viewport->hasSelectedObjects());
         m_actionBarContainer->onTextSelectionChanged(viewport->hasTextSelection());
@@ -5897,12 +5900,10 @@ void MainWindow::setupActionBars()
     // Create individual action bars
     m_lassoActionBar = new LassoActionBar();
     m_objectSelectActionBar = new ObjectSelectActionBar();
-    m_textSelectionActionBar = new TextSelectionActionBar();
     
     // Register action bars with container
     m_actionBarContainer->setActionBar("lasso", m_lassoActionBar);
     m_actionBarContainer->setActionBar("objectSelect", m_objectSelectActionBar);
-    m_actionBarContainer->setActionBar("textSelection", m_textSelectionActionBar);
     
     // Connect clipboard changes from system clipboard
     connect(QApplication::clipboard(), &QClipboard::dataChanged,
@@ -5967,9 +5968,11 @@ void MainWindow::setupActionBars()
             vp->setObjectActionMode(mode);
         }
     });
+    // Copy and Delete go through the same policy functions as Ctrl+C and Delete,
+    // so the button and the key can never disagree about what the selection means.
     connect(m_objectSelectActionBar, &ObjectSelectActionBar::copyRequested, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
-            vp->copySelectedObjects();
+            vp->handleCopyAction();
         }
     });
     connect(m_objectSelectActionBar, &ObjectSelectActionBar::pasteRequested, this, [this]() {
@@ -5981,7 +5984,7 @@ void MainWindow::setupActionBars()
     });
     connect(m_objectSelectActionBar, &ObjectSelectActionBar::deleteRequested, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
-            vp->deleteSelectedObjects();
+            vp->handleDeleteAction();
         }
     });
     connect(m_objectSelectActionBar, &ObjectSelectActionBar::bringForwardRequested, this, [this]() {
@@ -6042,13 +6045,6 @@ void MainWindow::setupActionBars()
         syncObjectModeCheckActions();
     }
 
-    // Connect TextSelectionActionBar signals to viewport
-    connect(m_textSelectionActionBar, &TextSelectionActionBar::copyRequested, this, [this]() {
-        if (DocumentViewport* vp = currentViewport()) {
-            vp->copyTextSelection();
-        }
-    });
-    
     // Initial position update
     QTimer::singleShot(0, this, &MainWindow::updateActionBarPosition);
     

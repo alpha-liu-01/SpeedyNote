@@ -30,8 +30,7 @@ class PagePanelActionBar;
  * Visibility logic:
  * - LassoActionBar: Lasso tool + lasso selection exists
  * - ObjectSelectActionBar: whenever ObjectSelect is active, and under the
- *   Highlighter once an annotation is selected
- * - TextSelectionActionBar: Highlighter tool + text selected, no annotation
+ *   Highlighter once either an annotation or some text is selected
  * 
  * Usage:
  * 1. Create container as child of MainWindow (or viewport parent)
@@ -206,8 +205,7 @@ private:
      * Logic:
      * - Lasso tool + lasso selection → LassoActionBar
      * - ObjectSelect tool → ObjectSelectActionBar
-     * - Highlighter tool + annotation selected → ObjectSelectActionBar
-     * - Highlighter tool + text selected → TextSelectionActionBar
+     * - Highlighter tool + annotation or text selected → ObjectSelectActionBar
      * - Otherwise → hide
      */
     void updateVisibility();

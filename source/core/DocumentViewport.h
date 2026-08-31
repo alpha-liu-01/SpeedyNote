@@ -39,6 +39,7 @@ enum class TouchGestureMode {
 #include <QSet>
 
 class QContextMenuEvent;
+class QMenu;
 class ImageObject;
 class InlineTextBoxEditor;
 class LinkObjectBar;
@@ -1338,15 +1339,26 @@ public:
      * 
      * Behavior depends on current tool:
      * - Lasso: Copy selected strokes
-     * - ObjectSelect: Copy selected objects
-     * - Highlighter: Copy selected text to system clipboard
+     * - ObjectSelect: Copy the selected annotation's text, else the objects
+     * - Highlighter: Copy the selected annotation's text, else the text selection
+     *
+     * This is the single home for what Copy means, shared by the keyboard
+     * shortcut, the action bar button, and the object context menu, so the
+     * three can never disagree about it.
      */
     void handleCopyAction();
     
     /**
      * @brief Handle Cut action based on current context.
      * 
-     * Currently only works for Lasso tool (cut selected strokes).
+     * Behavior depends on current tool:
+     * - Lasso: Cut selected strokes
+     * - ObjectSelect: Copy then delete the selected objects
+     *
+     * Gated on the same condition as the context menu's Cut entry, so the key
+     * and the menu are available on exactly the same selections. A selected
+     * link object is excluded from both: cutting is an object operation, and a
+     * link has none.
      */
     void handleCutAction();
     
@@ -1365,7 +1377,10 @@ public:
      * Deletes current selection based on tool:
      * - Lasso: Delete selected strokes
      * - ObjectSelect: Delete selected objects
-     * - Highlighter: Clear text selection
+     * - Highlighter: Delete the selected annotation, if any
+     *
+     * Dropping a text selection is Escape's job, not Delete's -- see
+     * @ref handleEscapeKey.
      */
     void handleDeleteAction();
     
@@ -1592,6 +1607,10 @@ public:
      * 
      * Phase O2.6: Serializes each selected object to JSON and stores
      * in s_objectClipboard. Does not modify selection.
+     *
+     * Recognized text and link objects are skipped: neither is meaningful at a
+     * second location. If that leaves nothing to copy, the previous clipboard
+     * contents are kept rather than replaced with an empty list.
      */
     void copySelectedObjects();
     
@@ -1768,12 +1787,50 @@ public:
     bool inlineEditTargetContains(const QPointF& viewportPos) const;
 
     /**
-     * @brief Clipboard and delete actions for the object under a right-click.
+     * @brief The menu for the object under a right-click.
      *
-     * Text boxes also offer Edit Text, which is the keyboard-free way back
-     * into an inline session.
+     * Raised under ObjectSelect for any object, and under the Highlighter for
+     * an annotation. See @ref populateObjectContextMenu for what it holds.
      */
     void showObjectContextMenu(const QPoint& globalPos);
+
+    /**
+     * @brief Build the object menu's entries for the current selection.
+     *
+     * A single selected LinkObject gets Copy Text plus Delete; everything else
+     * gets Cut, Copy, Paste, Delete, and Edit Text for a lone text box. Copy
+     * and Delete are wired to @ref handleCopyAction / @ref handleDeleteAction
+     * so this menu cannot disagree with the action bar or the keyboard.
+     *
+     * Split out from @ref showObjectContextMenu because exec() is modal and so
+     * cannot be driven from a test; this is the seam the tests use.
+     */
+    void populateObjectContextMenu(QMenu& menu);
+
+    /**
+     * @brief The one-entry Copy menu for a right-clicked text selection.
+     *
+     * Only the Highlighter raises this, since it is the only tool that selects
+     * PDF or OCR text.
+     */
+    void showTextSelectionContextMenu(const QPoint& globalPos);
+    void populateTextSelectionContextMenu(QMenu& menu);
+
+    /**
+     * @brief Resolve and select the annotation a right-click landed on.
+     * @return The annotation, already selected, or nullptr if there was none.
+     *
+     * The Highlighter has no press-time equivalent of
+     * @ref m_contextMenuObjectId because it drops the right button before the
+     * pointer pipeline, so the target is found here instead. Selecting it is
+     * what lets the menu's entries reach it through the policy functions,
+     * which act on the selection.
+     */
+    LinkObject* prepareAnnotationContextMenu(const QPoint& viewportPos);
+
+    /// Make @p annotation the selection, dropping any text selection first.
+    /// Shared by Highlighter tap-to-select and the right-click menu.
+    void selectAnnotation(LinkObject* annotation);
     QRectF inlineTextEditorRect(TextBoxObject* textBox) const;
     void updateInlineTextEditorGeometry();
     void handleInlineTextSourceChanged(const QString& source);
@@ -1872,9 +1929,10 @@ public:
      * Writes all three representations the design calls for: the object id,
      * which survives the target being dragged, the coordinate that navigation
      * actually runs off, and the far slot index that makes the pairing
-     * releasable from either end. The coordinate is the object's centre,
-     * matching MainWindow::navigateToLinkObject rather than
-     * cloneWithBackLink's top-left, so a highlight lands centred on its mark.
+     * releasable from either end. The coordinate is the object's centre rather
+     * than its top-left, matching MainWindow::navigateToLinkObject, so a
+     * highlight lands centred on its mark rather than on the corner of its
+     * bounding box.
      *
      * @param targetSlotIndex The partner slot on @p target, or -1 for a one-way
      *        link to an object that holds no return path.
@@ -1998,6 +2056,16 @@ public:
     void placeFloatingBar(QWidget* bar, const QRectF& anchorRect);
 
     LinkObject* selectedLinkForBar() const;
+
+    /// Put the selected annotation's text on the system clipboard.
+    ///
+    /// An annotation's text is its @ref LinkObject::description -- seeded from
+    /// the selection when the highlight was committed, edited by the user
+    /// afterwards, and already what PDF export writes as the annotation's
+    /// /Contents. Re-deriving it from the region would give a second, quietly
+    /// different answer.
+    void copyAnnotationText();
+
     void ensureLinkObjectBar();
     void syncLinkObjectBar();
     void updateLinkObjectBarGeometry();
@@ -2502,11 +2570,6 @@ public slots:
      */
     void recolorLassoSelection(const QColor& newColor);
     
-    /**
-     * @brief Copy selected PDF text to system clipboard.
-     * Action Bar: Called by TextSelectionActionBar::copyRequested.
-     */
-    void copyTextSelection();
     
 signals:
     // ===== View State Signals =====
@@ -2672,7 +2735,8 @@ signals:
      * @brief Emitted when PDF text selection state changes.
      * @param hasSelection True if text is selected.
      * 
-     * Action Bar: Used to show/hide TextSelectionActionBar.
+     * Action Bar: brings up ObjectSelectActionBar with Copy as its only
+     * applicable button.
      */
     void textSelectionChanged(bool hasSelection);
     

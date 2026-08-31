@@ -13,7 +13,7 @@
 #include "../layers/VectorLayer.h"
 #include "../pdf/PdfProvider.h"     // Use abstract interface, not concrete impl
 #include "../objects/ImageObject.h"
-#include "../objects/LinkObject.h"  // Phase C.2.3: For cloneWithBackLink
+#include "../objects/LinkObject.h"
 #include "../objects/OcrTextObject.h"  // Phase 1D: OCR text object deletion
 #include "../objects/TextBoxObject.h"
 #include "../ui/banners/MissingPdfBanner.h"  // Phase R.3: Missing PDF notification
@@ -3736,27 +3736,103 @@ void DocumentViewport::contextMenuEvent(QContextMenuEvent* event)
         event->accept();
         return;
     }
+    if (m_currentTool == ToolType::Highlighter) {
+        // No press-time arming here: the Highlighter drops the right button
+        // before handlePointerEvent() so a right-press cannot start a selection
+        // drag, which means the target has to be resolved now. Selecting it
+        // first is what makes the menu's entries act on it, exactly as the
+        // action bar's do.
+        if (prepareAnnotationContextMenu(event->pos())) {
+            showObjectContextMenu(event->globalPos());
+            event->accept();
+            return;
+        }
+        // The ignored right-press is also why a live text selection is still
+        // here to copy. A bare tap on text leaves a zero-length selection that
+        // is technically valid and must not offer Copy.
+        if (m_textSelection.isValid() && !m_textSelection.selectedText.isEmpty()) {
+            showTextSelectionContextMenu(event->globalPos());
+            event->accept();
+            return;
+        }
+    }
     QWidget::contextMenuEvent(event);
+}
+
+LinkObject* DocumentViewport::prepareAnnotationContextMenu(const QPoint& viewportPos)
+{
+    InsertedObject* under = objectAtPoint(viewportToDocument(QPointF(viewportPos)));
+    auto* annotation = dynamic_cast<LinkObject*>(under);
+    // An icon-only link is not selectable by a tap under this tool either, so
+    // offering it a menu would be the odd case out.
+    if (!annotation || annotation->region.isEmpty())
+        return nullptr;
+
+    selectAnnotation(annotation);
+    return annotation;
+}
+
+void DocumentViewport::selectAnnotation(LinkObject* annotation)
+{
+    if (!annotation)
+        return;
+
+    // Announce the drop: a select-only drag leaves a valid selection behind,
+    // and without this the action bar container would keep believing it is
+    // still there.
+    const bool hadTextSelection = m_textSelection.isValid();
+    m_textSelection.clear();
+    if (hadTextSelection) emit textSelectionChanged(false);
+
+    selectObject(annotation, false);
+    update();
 }
 
 void DocumentViewport::showObjectContextMenu(const QPoint& globalPos)
 {
     QMenu menu(this);
     ThemeColors::styleMenu(&menu, m_isDarkMode);
+    populateObjectContextMenu(menu);
+    menu.exec(globalPos);
+}
+
+void DocumentViewport::populateObjectContextMenu(QMenu& menu)
+{
+    // A link object's copyable content is its text, and its slots mean nothing
+    // at a second location, so it gets its own menu rather than the object
+    // clipboard one. Same reasoning as the action bar's Copy.
+    if (LinkObject* link = selectedLinkForBar()) {
+        QAction* copyTextAction = menu.addAction(tr("Copy Text"));
+        // copyAnnotationText() is a silent no-op with no description, which is
+        // worse to click than a greyed entry.
+        copyTextAction->setEnabled(!link->description.isEmpty());
+        connect(copyTextAction, &QAction::triggered,
+                this, &DocumentViewport::handleCopyAction);
+
+        menu.addSeparator();
+
+        QAction* deleteLinkAction = menu.addAction(tr("Delete"));
+        connect(deleteLinkAction, &QAction::triggered,
+                this, &DocumentViewport::handleDeleteAction);
+        return;
+    }
 
     const bool hasSelection = !m_selectedObjects.isEmpty();
 
+    // Copy and Delete go through the policy functions rather than straight to
+    // the object clipboard, so this menu, the action bar and Ctrl+C / Delete
+    // cannot disagree about what the selection means.
     QAction* cutAction = menu.addAction(tr("Cut"));
     cutAction->setEnabled(hasSelection);
     connect(cutAction, &QAction::triggered, this, [this]() {
-        copySelectedObjects();
-        deleteSelectedObjects();
+        handleCopyAction();
+        handleDeleteAction();
     });
 
     QAction* copyAction = menu.addAction(tr("Copy"));
     copyAction->setEnabled(hasSelection);
     connect(copyAction, &QAction::triggered,
-            this, &DocumentViewport::copySelectedObjects);
+            this, &DocumentViewport::handleCopyAction);
 
     QAction* pasteAction = menu.addAction(tr("Paste"));
     connect(pasteAction, &QAction::triggered,
@@ -3779,9 +3855,22 @@ void DocumentViewport::showObjectContextMenu(const QPoint& globalPos)
     QAction* deleteAction = menu.addAction(tr("Delete"));
     deleteAction->setEnabled(hasSelection);
     connect(deleteAction, &QAction::triggered,
-            this, &DocumentViewport::deleteSelectedObjects);
+            this, &DocumentViewport::handleDeleteAction);
+}
 
+void DocumentViewport::showTextSelectionContextMenu(const QPoint& globalPos)
+{
+    QMenu menu(this);
+    ThemeColors::styleMenu(&menu, m_isDarkMode);
+    populateTextSelectionContextMenu(menu);
     menu.exec(globalPos);
+}
+
+void DocumentViewport::populateTextSelectionContextMenu(QMenu& menu)
+{
+    QAction* copyAction = menu.addAction(tr("Copy"));
+    connect(copyAction, &QAction::triggered,
+            this, &DocumentViewport::handleCopyAction);
 }
 
 QPointF DocumentViewport::applyTrackpadAxisLock(const QWheelEvent* event,
@@ -8831,93 +8920,55 @@ void DocumentViewport::copySelectedObjects()
         return;
     }
     
-    // Clear previous clipboard contents
-    s_objectClipboard.clear();
-    s_objectClipboardAssets.clear();
+    // Built locally so a selection holding nothing copyable can leave the
+    // existing clipboard alone rather than silently emptying it.
+    QList<QJsonObject> copied;
+    QMap<QString, ClipboardImageAsset> copiedAssets;
     
     // Serialize each selected object to JSON
     for (InsertedObject* obj : m_selectedObjects) {
         if (!obj) continue;
         if (obj->type() == QStringLiteral("ocr_text")) continue;
+        // A link object is not meaningful at a second location: its slots point
+        // at places, and a duplicated markdown note would be one file under two
+        // annotations. Its copyable content is its text, which Copy reaches
+        // through copyAnnotationText() instead.
+        if (obj->type() == QStringLiteral("link")) continue;
         
-        // Phase C.2.3: For LinkObject, use cloneWithBackLink to auto-fill slot 0
-        // with a back-link to the original position
-        if (auto* link = dynamic_cast<LinkObject*>(obj)) {
-            if (m_document->isEdgeless()) {
-                // Edgeless mode: find the tile containing this object
-                // and create back-link with tile coordinates + document position
-                bool foundTile = false;
-                for (const auto& coord : m_document->allLoadedTileCoords()) {
-                    Page* tile = m_document->getTile(coord.first, coord.second);
-                    if (tile && tile->objectById(link->id)) {
-                        // Found the tile - calculate document coordinates
-                        QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
-                                           coord.second * Document::EDGELESS_TILE_SIZE);
-                        QPointF docPos = tileOrigin + link->position;
-                        
-#ifdef SPEEDYNOTE_DEBUG
-                        qDebug() << "copySelectedObjects (edgeless): link->id =" << link->id
-                                 << "tile coord =" << coord.first << "," << coord.second
-                                 << "tileOrigin =" << tileOrigin
-                                 << "link->position (tile-local) =" << link->position
-                                 << "docPos (calculated) =" << docPos;
-#endif
-                        
-                        // Create clone with back-link to this position
-                        auto clone = link->cloneWithBackLinkEdgeless(coord.first, coord.second, docPos);
-#ifdef SPEEDYNOTE_DEBUG
-                        qDebug() << "  Back-link slot will store: tileX =" << coord.first 
-                                 << "tileY =" << coord.second
-                                 << "targetPosition =" << clone->linkSlots[0].targetPosition;
-#endif
-                        s_objectClipboard.append(clone->toJson());
-                        foundTile = true;
-                        break;
+        copied.append(obj->toJson());
+        
+        // Cache image assets for cross-document paste
+        if (auto* img = dynamic_cast<ImageObject*>(obj)) {
+            if (img->isLoaded() && !img->imagePath.isEmpty()) {
+                ClipboardImageAsset asset;
+                asset.pixmap = img->pixmap();
+                asset.encodedData = img->encodedAssetData();
+                asset.format = img->assetFormat();
+                constexpr qint64 MAX_CLIPBOARD_SOURCE_BYTES =
+                    64LL * 1024 * 1024;
+                if (asset.encodedData.isEmpty() && m_document
+                    && !m_document->bundlePath().isEmpty()) {
+                    QFile source(img->fullPath(m_document->bundlePath()));
+                    if (source.size() <= MAX_CLIPBOARD_SOURCE_BYTES
+                        && source.open(QIODevice::ReadOnly)) {
+                        asset.encodedData = source.readAll();
                     }
                 }
-                if (!foundTile) {
-                    // Fallback: copy without back-link if tile not found
-#ifdef SPEEDYNOTE_DEBUG
-                    qDebug() << "copySelectedObjects (edgeless): tile not found for link->id =" << link->id;
-#endif
-                    s_objectClipboard.append(link->toJson());
-                }
-            } else {
-                // Paged mode: use page UUID
-                QString sourcePageUuid;
-                Page* currentPage = m_document->page(m_currentPageIndex);
-                if (currentPage) {
-                    sourcePageUuid = currentPage->uuid;
-                }
-                
-                auto clone = link->cloneWithBackLink(sourcePageUuid);
-                s_objectClipboard.append(clone->toJson());
-            }
-        } else {
-            s_objectClipboard.append(obj->toJson());
-            
-            // Cache image assets for cross-document paste
-            if (auto* img = dynamic_cast<ImageObject*>(obj)) {
-                if (img->isLoaded() && !img->imagePath.isEmpty()) {
-                    ClipboardImageAsset asset;
-                    asset.pixmap = img->pixmap();
-                    asset.encodedData = img->encodedAssetData();
-                    asset.format = img->assetFormat();
-                    constexpr qint64 MAX_CLIPBOARD_SOURCE_BYTES =
-                        64LL * 1024 * 1024;
-                    if (asset.encodedData.isEmpty() && m_document
-                        && !m_document->bundlePath().isEmpty()) {
-                        QFile source(img->fullPath(m_document->bundlePath()));
-                        if (source.size() <= MAX_CLIPBOARD_SOURCE_BYTES
-                            && source.open(QIODevice::ReadOnly)) {
-                            asset.encodedData = source.readAll();
-                        }
-                    }
-                    s_objectClipboardAssets[img->imagePath] = std::move(asset);
-                }
+                copiedAssets[img->imagePath] = std::move(asset);
             }
         }
     }
+    
+    if (copied.isEmpty()) {
+        // Nothing was copyable, so whatever was on the clipboard is still the
+        // most recent thing the user actually copied. A selection of only links
+        // or only recognized text lands here, and so does the plain-text step
+        // below, since a text box would have been copied above.
+        return;
+    }
+    
+    s_objectClipboard = std::move(copied);
+    s_objectClipboardAssets = std::move(copiedAssets);
     
     #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "copySelectedObjects: Copied" << s_objectClipboard.size() << "objects to internal clipboard";
@@ -10863,7 +10914,8 @@ void DocumentViewport::addLinkToSlot(int slotIndex)
     }
     
     // Simple context menu (TEMPORARY UI)
-    QMenu menu;
+    QMenu menu(this);
+    ThemeColors::styleMenu(&menu, m_isDarkMode);
 
     // The position entry depends on whether a link is already half-made, and on
     // whether this is the annotation it was started from. Only one of start /
@@ -13566,13 +13618,23 @@ void DocumentViewport::handleCopyAction()
             break;
             
         case ToolType::ObjectSelect:
-            if (hasSelectedObjects()) {
+            // An annotation's copyable content is its text, not the object. The
+            // object itself carries link slots that mean nothing at a second
+            // location, which is why it has no object-copy path at all.
+            if (selectedLinkForBar()) {
+                copyAnnotationText();
+            } else if (hasSelectedObjects()) {
                 copySelectedObjects();
             }
             break;
             
         case ToolType::Highlighter:
-            if (m_textSelection.isValid()) {
+            // Tap-to-select clears the text selection, so these two are
+            // normally exclusive; the annotation wins if an Adjust session has
+            // both live at once.
+            if (selectedLinkForBar()) {
+                copyAnnotationText();
+            } else if (m_textSelection.isValid()) {
                 copySelectedTextToClipboard();
             }
             break;
@@ -13585,9 +13647,26 @@ void DocumentViewport::handleCopyAction()
 
 void DocumentViewport::handleCutAction()
 {
-    // Cut currently only works for Lasso tool
-    if (m_currentTool == ToolType::Lasso && m_lassoSelection.isValid()) {
-        cutSelection();
+    switch (m_currentTool) {
+        case ToolType::Lasso:
+            if (m_lassoSelection.isValid()) {
+                cutSelection();
+            }
+            break;
+            
+        case ToolType::ObjectSelect:
+            // Gated the way the context menu's Cut is, so the key and the menu
+            // offer it on exactly the same selections. A link is excluded
+            // because cutting is an object operation and a link has none; its
+            // text is reachable through Copy.
+            if (!selectedLinkForBar() && hasSelectedObjects()) {
+                handleCopyAction();
+                handleDeleteAction();
+            }
+            break;
+            
+        default:
+            break;
     }
 }
 
@@ -13628,8 +13707,13 @@ void DocumentViewport::handleDeleteAction()
             break;
             
         case ToolType::Highlighter:
-            // For highlighter, Escape cancels selection, Delete doesn't do anything special
-            // (we can't delete PDF text)
+            // An annotation selected by tapping its highlight is deletable here,
+            // the same as it would be under ObjectSelect. With no annotation
+            // selected there is nothing to delete: PDF text is not ours to
+            // remove, and Escape is what drops a text selection.
+            if (hasSelectedObjects()) {
+                deleteSelectedObjects();
+            }
             break;
             
         default:
@@ -13954,9 +14038,14 @@ void DocumentViewport::recolorLassoSelection(const QColor& newColor)
     }
 }
 
-void DocumentViewport::copyTextSelection()
+void DocumentViewport::copyAnnotationText()
 {
-    copySelectedTextToClipboard();
+    LinkObject* link = selectedLinkForBar();
+    if (!link || link->description.isEmpty()) {
+        // An icon-only annotation with no note typed has nothing to copy.
+        return;
+    }
+    QGuiApplication::clipboard()->setText(link->description);
 }
 
 void DocumentViewport::clearLassoSelection()
@@ -14613,16 +14702,11 @@ void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
         InsertedObject* under = objectAtPoint(viewportToDocument(pe.viewportPos));
         if (auto* annotation = dynamic_cast<LinkObject*>(under)) {
             if (!annotation->region.isEmpty()) {
-                // Announce the drop: a select-only drag leaves a valid
-                // selection behind, and without this the action bar container
-                // would keep believing it is still there.
-                const bool hadTextSelection = m_textSelection.isValid();
-                m_textSelection.clear();
-                if (hadTextSelection) emit textSelectionChanged(false);
-                selectObject(annotation, false);
+                // Shared with the right-click path, so the two cannot drift
+                // over which state a selected annotation implies.
+                selectAnnotation(annotation);
                 m_pointerActive = false;
                 updateHighlighterCursor();
-                update();
                 return;
             }
         }

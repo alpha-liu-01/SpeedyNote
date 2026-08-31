@@ -11,7 +11,6 @@
 // - LinkObject serialization round-trip
 // - containsPoint() hit testing
 // - Slot management methods
-// - cloneWithBackLink() functionality
 // - Factory creates LinkObject from JSON
 // - HighlightRegion rebasing, badge rules, serialization and legacy loading
 // ============================================================================
@@ -349,72 +348,6 @@ inline bool testContainsPoint()
 }
 
 /**
- * @brief Test cloneWithBackLink() functionality.
- */
-inline bool testCloneWithBackLink()
-{
-    qDebug() << "=== Test: cloneWithBackLink() ===";
-    
-    bool success = true;
-    
-    // Create original LinkObject
-    LinkObject original;
-    original.position = QPointF(300, 400);
-    original.description = "Original description";
-    original.iconColor = QColor(255, 0, 0, 150);
-    
-    // Clone with back-link
-    QString sourcePageUuid = "source-page-uuid-abc";
-    auto clone = original.cloneWithBackLink(sourcePageUuid);
-    
-    // Verify description and color are copied
-    if (clone->description != "Original description") {
-        qDebug() << "FAIL: description not copied";
-        success = false;
-    }
-    
-    if (clone->iconColor != QColor(255, 0, 0, 150)) {
-        qDebug() << "FAIL: iconColor not copied";
-        success = false;
-    }
-    
-    // Verify slot 0 has back-link
-    if (clone->linkSlots[0].type != LinkSlot::Type::Position) {
-        qDebug() << "FAIL: slot 0 should be Position type";
-        success = false;
-    }
-    
-    if (clone->linkSlots[0].targetPageUuid != sourcePageUuid) {
-        qDebug() << "FAIL: slot 0 should have sourcePageUuid";
-        success = false;
-    }
-    
-    if (clone->linkSlots[0].targetPosition != QPointF(300, 400)) {
-        qDebug() << "FAIL: slot 0 should have original position";
-        qDebug() << "  Expected:" << QPointF(300, 400);
-        qDebug() << "  Got:" << clone->linkSlots[0].targetPosition;
-        success = false;
-    }
-    
-    // Verify other slots are empty
-    if (!clone->linkSlots[1].isEmpty()) {
-        qDebug() << "FAIL: slot 1 should be empty";
-        success = false;
-    }
-    
-    if (!clone->linkSlots[2].isEmpty()) {
-        qDebug() << "FAIL: slot 2 should be empty";
-        success = false;
-    }
-    
-    if (success) {
-        qDebug() << "PASS: cloneWithBackLink() successful!";
-    }
-    
-    return success;
-}
-
-/**
  * @brief Test factory creates LinkObject from JSON.
  */
 inline bool testFactoryCreation()
@@ -691,12 +624,12 @@ inline bool testHighlightRegion()
             success = false;
         }
         
-        // A clone carries the region and the flag.
-        auto clone = link.cloneWithBackLink(QStringLiteral("src-page"));
-        if (clone->region.rects != link.region.rects
-            || !clone->descriptionUserEdited
-            || clone->size != link.size) {
-            qDebug() << "FAIL: clone did not carry the region";
+        // Bounds grown to cover the rects must survive the round-trip too,
+        // otherwise a duplicated annotation would come back icon-sized. This is
+        // the path page import and paste both duplicate a link through.
+        if (restored.size != link.size) {
+            qDebug() << "FAIL: region-derived size not preserved, expected"
+                     << link.size << "got" << restored.size;
             success = false;
         }
     }
@@ -953,9 +886,6 @@ inline bool runAllTests()
     qDebug() << "";
     
     allPass &= testHighlightRegion();
-    qDebug() << "";
-    
-    allPass &= testCloneWithBackLink();
     qDebug() << "";
     
     allPass &= testFactoryCreation();
