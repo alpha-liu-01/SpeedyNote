@@ -4301,6 +4301,190 @@ public:
         return true;
     }
 
+    /**
+     * @brief The right-click menus: which entries, and where they lead.
+     *
+     * exec() is modal, so the menus are asserted through the populate seam
+     * rather than by popping them up. Two things are worth guarding: that a
+     * link object gets its own two-entry menu instead of the object clipboard
+     * one, and that the entries reach the policy functions rather than
+     * duplicating the clipboard logic a third time.
+     */
+    static bool testAnnotationContextMenu() {
+        printf("  testAnnotationContextMenu... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        QClipboard* clipboard = QGuiApplication::clipboard();
+        if (!clipboard)
+            return fail("no clipboard available");
+
+        // The menu builds its labels with tr(), and translations are installed
+        // before the tests run, so expectations go through the same call rather
+        // than through English literals.
+        auto label = [](const char* source) {
+            return DocumentViewport::tr(source);
+        };
+        // Entry labels, skipping the separators, so a test reads like the menu.
+        auto entries = [](const QMenu& menu) {
+            QStringList names;
+            for (QAction* action : menu.actions()) {
+                if (!action->isSeparator())
+                    names << action->text();
+            }
+            return names;
+        };
+        auto entryNamed = [](const QMenu& menu, const QString& name) -> QAction* {
+            for (QAction* action : menu.actions()) {
+                if (action->text() == name)
+                    return action;
+            }
+            return nullptr;
+        };
+
+        auto doc = Document::createNew("Annotation menu");
+        DocumentViewport viewport;
+        viewport.resize(1100, 820);
+        viewport.setDocument(doc.get());
+
+        Page* page = doc->page(0);
+        if (!page)
+            return fail("missing menu test page");
+
+        // A single-rect mark, so its centre is a genuine hit: containsPoint()
+        // tests the rects rather than their bounding box.
+        const QRectF markRect(60.0, 200.0, 200.0, 14.0);
+        auto markPtr = std::make_unique<LinkObject>();
+        markPtr->setRegionFromPageRects({markRect});
+        markPtr->region.style = HighlightRegion::Style::Cover;
+        markPtr->description = QStringLiteral("the annotated sentence");
+        LinkObject* mark = markPtr.get();
+        page->addObject(std::move(markPtr));
+
+        auto imagePtr = std::make_unique<ImageObject>();
+        QImage swatch(24, 24, QImage::Format_ARGB32);
+        swatch.fill(Qt::magenta);
+        imagePtr->setSourceImage(swatch);
+        imagePtr->position = QPointF(60.0, 400.0);
+        ImageObject* image = imagePtr.get();
+        page->addObject(std::move(imagePtr));
+
+        // ===== A selected link gets the link menu, not the object one =====
+        viewport.setCurrentTool(ToolType::ObjectSelect);
+        viewport.selectObject(mark, false);
+        {
+            QMenu menu;
+            viewport.populateObjectContextMenu(menu);
+            const QStringList names = entries(menu);
+            if (names != QStringList{label("Copy Text"), label("Delete")})
+                return fail("the link menu held the wrong entries");
+            // These are the object-clipboard entries the link menu replaces.
+            if (entryNamed(menu, label("Cut"))
+                || entryNamed(menu, label("Paste"))
+                || entryNamed(menu, label("Edit Text")))
+                return fail("the link menu still offered object actions");
+
+            clipboard->setText(QStringLiteral("sentinel"));
+            entryNamed(menu, label("Copy Text"))->trigger();
+            if (clipboard->text() != mark->description)
+                return fail("the menu's Copy Text did not copy the description");
+        }
+
+        // ===== A non-link selection keeps the object menu =====
+        viewport.clearObjectSelection();
+        viewport.selectObject(image, false);
+        {
+            QMenu menu;
+            viewport.populateObjectContextMenu(menu);
+            for (const char* wanted : {"Cut", "Copy", "Paste", "Delete"}) {
+                if (!entryNamed(menu, label(wanted)))
+                    return fail("the object menu lost one of its entries");
+            }
+            if (entryNamed(menu, label("Copy Text")))
+                return fail("an image was offered the annotation's Copy Text");
+        }
+
+        // ===== Nothing to copy reads as a greyed entry, not a dead one =====
+        viewport.clearObjectSelection();
+        const QString describedAgain = mark->description;
+        mark->description.clear();
+        viewport.selectObject(mark, false);
+        {
+            QMenu menu;
+            viewport.populateObjectContextMenu(menu);
+            QAction* copyText = entryNamed(menu, label("Copy Text"));
+            if (!copyText)
+                return fail("an undescribed link lost its Copy Text entry");
+            if (copyText->isEnabled())
+                return fail("Copy Text was live with nothing to copy");
+        }
+        mark->description = describedAgain;
+
+        // ===== The Highlighter resolves its own target =====
+        viewport.setCurrentTool(ToolType::Highlighter);
+        viewport.deselectAllObjects();
+
+        const QPointF pageOrigin = viewport.pagePosition(0);
+        const QPoint onMark =
+            viewport.documentToViewport(pageOrigin + markRect.center()).toPoint();
+        const QPoint offMark =
+            viewport.documentToViewport(pageOrigin + QPointF(60.0, 600.0)).toPoint();
+
+        if (viewport.prepareAnnotationContextMenu(onMark) != mark)
+            return fail("a right-click on the mark found no annotation");
+        if (viewport.m_selectedObjects.size() != 1
+            || viewport.m_selectedObjects.first() != mark)
+            return fail("the right-click did not select the annotation");
+
+        if (viewport.prepareAnnotationContextMenu(offMark))
+            return fail("a right-click on bare page found an annotation");
+        if (viewport.m_selectedObjects.size() != 1)
+            return fail("a miss disturbed the existing selection");
+
+        // ===== A text selection gets its own one-entry menu =====
+        viewport.deselectAllObjects();
+        viewport.m_textSelection.clear();
+        viewport.m_textSelection.source =
+            DocumentViewport::TextSelection::Source::Ocr;
+        viewport.m_textSelection.pageIndex = 0;
+        viewport.m_textSelection.startBoxIndex = 0;
+        viewport.m_textSelection.startCharIndex = 0;
+        viewport.m_textSelection.endBoxIndex = 0;
+        viewport.m_textSelection.endCharIndex = 11;
+        viewport.m_textSelection.selectedText = QStringLiteral("loose words");
+        viewport.m_textSelection.highlightRects = {QRectF(60.0, 300.0, 100.0, 14.0)};
+        {
+            QMenu menu;
+            viewport.populateTextSelectionContextMenu(menu);
+            if (entries(menu) != QStringList{label("Copy")})
+                return fail("the text menu was not a single Copy entry");
+            clipboard->setText(QStringLiteral("sentinel"));
+            menu.actions().first()->trigger();
+            if (clipboard->text() != QStringLiteral("loose words"))
+                return fail("the text menu's Copy did not copy the selection");
+        }
+
+        // A bare tap on text leaves a zero-length selection that isValid()
+        // accepts, and Copy must not be offered for it.
+        viewport.m_textSelection.selectedText.clear();
+        if (viewport.m_textSelection.isValid()
+            && !viewport.m_textSelection.selectedText.isEmpty())
+            return fail("a zero-length selection still looked copyable");
+
+        // Selecting an annotation drops the text selection, and the shared
+        // helper is what both the tap and the right-click rely on for that.
+        viewport.m_textSelection.selectedText = QStringLiteral("loose words");
+        viewport.selectAnnotation(mark);
+        if (viewport.m_textSelection.isValid())
+            return fail("selecting an annotation kept the text selection");
+
+        printf("PASSED\n");
+        return true;
+    }
+
     static bool testOcrTextBoxConversion() {
         printf("  testOcrTextBoxConversion... ");
 
@@ -4663,6 +4847,8 @@ public:
                 "testPositionLinkPairing");
         runTest(testAnnotationCopyDelete,
                 "testAnnotationCopyDelete");
+        runTest(testAnnotationContextMenu,
+                "testAnnotationContextMenu");
         runTest(testOcrTextBoxConversion,
                 "testOcrTextBoxConversion");
         

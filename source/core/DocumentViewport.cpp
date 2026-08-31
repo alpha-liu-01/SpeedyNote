@@ -3736,27 +3736,103 @@ void DocumentViewport::contextMenuEvent(QContextMenuEvent* event)
         event->accept();
         return;
     }
+    if (m_currentTool == ToolType::Highlighter) {
+        // No press-time arming here: the Highlighter drops the right button
+        // before handlePointerEvent() so a right-press cannot start a selection
+        // drag, which means the target has to be resolved now. Selecting it
+        // first is what makes the menu's entries act on it, exactly as the
+        // action bar's do.
+        if (prepareAnnotationContextMenu(event->pos())) {
+            showObjectContextMenu(event->globalPos());
+            event->accept();
+            return;
+        }
+        // The ignored right-press is also why a live text selection is still
+        // here to copy. A bare tap on text leaves a zero-length selection that
+        // is technically valid and must not offer Copy.
+        if (m_textSelection.isValid() && !m_textSelection.selectedText.isEmpty()) {
+            showTextSelectionContextMenu(event->globalPos());
+            event->accept();
+            return;
+        }
+    }
     QWidget::contextMenuEvent(event);
+}
+
+LinkObject* DocumentViewport::prepareAnnotationContextMenu(const QPoint& viewportPos)
+{
+    InsertedObject* under = objectAtPoint(viewportToDocument(QPointF(viewportPos)));
+    auto* annotation = dynamic_cast<LinkObject*>(under);
+    // An icon-only link is not selectable by a tap under this tool either, so
+    // offering it a menu would be the odd case out.
+    if (!annotation || annotation->region.isEmpty())
+        return nullptr;
+
+    selectAnnotation(annotation);
+    return annotation;
+}
+
+void DocumentViewport::selectAnnotation(LinkObject* annotation)
+{
+    if (!annotation)
+        return;
+
+    // Announce the drop: a select-only drag leaves a valid selection behind,
+    // and without this the action bar container would keep believing it is
+    // still there.
+    const bool hadTextSelection = m_textSelection.isValid();
+    m_textSelection.clear();
+    if (hadTextSelection) emit textSelectionChanged(false);
+
+    selectObject(annotation, false);
+    update();
 }
 
 void DocumentViewport::showObjectContextMenu(const QPoint& globalPos)
 {
     QMenu menu(this);
     ThemeColors::styleMenu(&menu, m_isDarkMode);
+    populateObjectContextMenu(menu);
+    menu.exec(globalPos);
+}
+
+void DocumentViewport::populateObjectContextMenu(QMenu& menu)
+{
+    // A link object's copyable content is its text, and its slots mean nothing
+    // at a second location, so it gets its own menu rather than the object
+    // clipboard one. Same reasoning as the action bar's Copy.
+    if (LinkObject* link = selectedLinkForBar()) {
+        QAction* copyTextAction = menu.addAction(tr("Copy Text"));
+        // copyAnnotationText() is a silent no-op with no description, which is
+        // worse to click than a greyed entry.
+        copyTextAction->setEnabled(!link->description.isEmpty());
+        connect(copyTextAction, &QAction::triggered,
+                this, &DocumentViewport::handleCopyAction);
+
+        menu.addSeparator();
+
+        QAction* deleteLinkAction = menu.addAction(tr("Delete"));
+        connect(deleteLinkAction, &QAction::triggered,
+                this, &DocumentViewport::handleDeleteAction);
+        return;
+    }
 
     const bool hasSelection = !m_selectedObjects.isEmpty();
 
+    // Copy and Delete go through the policy functions rather than straight to
+    // the object clipboard, so this menu, the action bar and Ctrl+C / Delete
+    // cannot disagree about what the selection means.
     QAction* cutAction = menu.addAction(tr("Cut"));
     cutAction->setEnabled(hasSelection);
     connect(cutAction, &QAction::triggered, this, [this]() {
-        copySelectedObjects();
-        deleteSelectedObjects();
+        handleCopyAction();
+        handleDeleteAction();
     });
 
     QAction* copyAction = menu.addAction(tr("Copy"));
     copyAction->setEnabled(hasSelection);
     connect(copyAction, &QAction::triggered,
-            this, &DocumentViewport::copySelectedObjects);
+            this, &DocumentViewport::handleCopyAction);
 
     QAction* pasteAction = menu.addAction(tr("Paste"));
     connect(pasteAction, &QAction::triggered,
@@ -3779,9 +3855,22 @@ void DocumentViewport::showObjectContextMenu(const QPoint& globalPos)
     QAction* deleteAction = menu.addAction(tr("Delete"));
     deleteAction->setEnabled(hasSelection);
     connect(deleteAction, &QAction::triggered,
-            this, &DocumentViewport::deleteSelectedObjects);
+            this, &DocumentViewport::handleDeleteAction);
+}
 
+void DocumentViewport::showTextSelectionContextMenu(const QPoint& globalPos)
+{
+    QMenu menu(this);
+    ThemeColors::styleMenu(&menu, m_isDarkMode);
+    populateTextSelectionContextMenu(menu);
     menu.exec(globalPos);
+}
+
+void DocumentViewport::populateTextSelectionContextMenu(QMenu& menu)
+{
+    QAction* copyAction = menu.addAction(tr("Copy"));
+    connect(copyAction, &QAction::triggered,
+            this, &DocumentViewport::handleCopyAction);
 }
 
 QPointF DocumentViewport::applyTrackpadAxisLock(const QWheelEvent* event,
@@ -14633,16 +14722,11 @@ void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
         InsertedObject* under = objectAtPoint(viewportToDocument(pe.viewportPos));
         if (auto* annotation = dynamic_cast<LinkObject*>(under)) {
             if (!annotation->region.isEmpty()) {
-                // Announce the drop: a select-only drag leaves a valid
-                // selection behind, and without this the action bar container
-                // would keep believing it is still there.
-                const bool hadTextSelection = m_textSelection.isValid();
-                m_textSelection.clear();
-                if (hadTextSelection) emit textSelectionChanged(false);
-                selectObject(annotation, false);
+                // Shared with the right-click path, so the two cannot drift
+                // over which state a selected annotation implies.
+                selectAnnotation(annotation);
                 m_pointerActive = false;
                 updateHighlighterCursor();
-                update();
                 return;
             }
         }

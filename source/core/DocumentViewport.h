@@ -39,6 +39,7 @@ enum class TouchGestureMode {
 #include <QSet>
 
 class QContextMenuEvent;
+class QMenu;
 class ImageObject;
 class InlineTextBoxEditor;
 class LinkObjectBar;
@@ -1775,12 +1776,50 @@ public:
     bool inlineEditTargetContains(const QPointF& viewportPos) const;
 
     /**
-     * @brief Clipboard and delete actions for the object under a right-click.
+     * @brief The menu for the object under a right-click.
      *
-     * Text boxes also offer Edit Text, which is the keyboard-free way back
-     * into an inline session.
+     * Raised under ObjectSelect for any object, and under the Highlighter for
+     * an annotation. See @ref populateObjectContextMenu for what it holds.
      */
     void showObjectContextMenu(const QPoint& globalPos);
+
+    /**
+     * @brief Build the object menu's entries for the current selection.
+     *
+     * A single selected LinkObject gets Copy Text plus Delete; everything else
+     * gets Cut, Copy, Paste, Delete, and Edit Text for a lone text box. Copy
+     * and Delete are wired to @ref handleCopyAction / @ref handleDeleteAction
+     * so this menu cannot disagree with the action bar or the keyboard.
+     *
+     * Split out from @ref showObjectContextMenu because exec() is modal and so
+     * cannot be driven from a test; this is the seam the tests use.
+     */
+    void populateObjectContextMenu(QMenu& menu);
+
+    /**
+     * @brief The one-entry Copy menu for a right-clicked text selection.
+     *
+     * Only the Highlighter raises this, since it is the only tool that selects
+     * PDF or OCR text.
+     */
+    void showTextSelectionContextMenu(const QPoint& globalPos);
+    void populateTextSelectionContextMenu(QMenu& menu);
+
+    /**
+     * @brief Resolve and select the annotation a right-click landed on.
+     * @return The annotation, already selected, or nullptr if there was none.
+     *
+     * The Highlighter has no press-time equivalent of
+     * @ref m_contextMenuObjectId because it drops the right button before the
+     * pointer pipeline, so the target is found here instead. Selecting it is
+     * what lets the menu's entries reach it through the policy functions,
+     * which act on the selection.
+     */
+    LinkObject* prepareAnnotationContextMenu(const QPoint& viewportPos);
+
+    /// Make @p annotation the selection, dropping any text selection first.
+    /// Shared by Highlighter tap-to-select and the right-click menu.
+    void selectAnnotation(LinkObject* annotation);
     QRectF inlineTextEditorRect(TextBoxObject* textBox) const;
     void updateInlineTextEditorGeometry();
     void handleInlineTextSourceChanged(const QString& source);
