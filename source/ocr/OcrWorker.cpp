@@ -292,6 +292,7 @@ void OcrWorker::initEngine()
     emit engineReady(ok);
     if (ok) {
         emit languagesAvailable(m_engine->availableLanguages());
+        emit autoLanguageSupported(m_engine->supportsAutoLanguageDetection());
         emitDownloadedLanguages();
     }
 }

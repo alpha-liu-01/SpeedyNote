@@ -6689,6 +6689,9 @@ void MainWindow::setupOcr()
     connect(m_ocrWorker, &OcrWorker::downloadedLanguagesAvailable, this, [this](const QStringList& langs) {
         m_ocrDownloadedLanguages = langs;
     }, Qt::QueuedConnection);
+    connect(m_ocrWorker, &OcrWorker::autoLanguageSupported, this, [this](bool supported) {
+        m_ocrAutoLanguageSupported = supported;
+    }, Qt::QueuedConnection);
     // Engine status (e.g. Linux on-demand model download) -> OCR subtoolbar label.
     connect(m_ocrWorker, &OcrWorker::statusMessage, this, [this](const QString& message) {
         if (m_toolbar && m_toolbar->ocrSubToolbar()) {
@@ -7276,6 +7279,26 @@ void MainWindow::setOcrConfidenceVisibility(bool enabled)
     vp->update();
 }
 
+QString MainWindow::ocrAutoLanguageLabel(bool autoDetectSupported)
+{
+    if (autoDetectSupported)
+        return tr("Auto-detect (system default)");
+
+    const QString name = QLocale::system().nativeLanguageName();
+    return name.isEmpty() ? tr("System default")
+                          : tr("System default (%1)").arg(name);
+}
+
+QString MainWindow::ocrAutoLanguageTooltip(bool autoDetectSupported)
+{
+    if (autoDetectSupported)
+        return QString();
+
+    return tr("This engine cannot detect the script it is reading. It uses the "
+              "handwriting recognizer Windows picked for your language, so "
+              "choose a language below when writing in another script.");
+}
+
 QString MainWindow::resolveOcrLanguage(Document* doc) const
 {
     if (doc && !doc->ocrLanguage.isEmpty())
@@ -7503,7 +7526,11 @@ void MainWindow::showOcrLanguageDialog()
 
     auto* combo = new QComboBox(&dlg);
     combo->addItem(tr("Use global setting"), QStringLiteral(""));
-    combo->addItem(tr("Auto-detect (system default)"), QStringLiteral("auto"));
+    combo->addItem(ocrAutoLanguageLabel(m_ocrAutoLanguageSupported),
+                   QStringLiteral("auto"));
+    combo->setItemData(combo->count() - 1,
+                       ocrAutoLanguageTooltip(m_ocrAutoLanguageSupported),
+                       Qt::ToolTipRole);
 
     // Partition languages: common first, then the rest sorted by display name
     static const QStringList commonTags = {

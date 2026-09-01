@@ -1986,7 +1986,12 @@ void ControlPanelDialog::createLanguageTab() {
     layout->addWidget(ocrDesc);
 
     ocrLanguageCombo = new QComboBox(languageTab);
-    ocrLanguageCombo->addItem(tr("Auto-detect (system default)"), QString());
+    {
+        const bool autoDetect = mainWindowRef ? mainWindowRef->ocrSupportsAutoLanguage() : true;
+        ocrLanguageCombo->addItem(MainWindow::ocrAutoLanguageLabel(autoDetect), QString());
+        ocrLanguageCombo->setItemData(0, MainWindow::ocrAutoLanguageTooltip(autoDetect),
+                                      Qt::ToolTipRole);
+    }
     if (mainWindowRef) {
         const QStringList langs = mainWindowRef->ocrAvailableLanguages();
         const QStringList downloaded = mainWindowRef->ocrDownloadedLanguages();

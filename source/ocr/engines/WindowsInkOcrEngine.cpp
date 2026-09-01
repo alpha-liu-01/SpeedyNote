@@ -8,6 +8,7 @@
 #include <QHash>
 #include <QStringList>
 #include <algorithm>
+#include <unordered_map>
 
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
@@ -18,13 +19,69 @@ namespace winrt_ink = winrt::Windows::UI::Input::Inking;
 namespace winrt_analysis = winrt::Windows::UI::Input::Inking::Analysis;
 
 // ============================================================================
-// Forward declaration of tree walker
+// Forward declaration of tree walkers
 // ============================================================================
 
 static void collectLines(
     const winrt_analysis::IInkAnalysisNode& node,
     const QHash<uint32_t, QString>& idMap,
     QVector<OcrEngine::Result>& out);
+
+// Layout-only twin of collectLines: yields one stroke-id set per analysis
+// line and ignores RecognizedText. Used by the manual-recognizer path, which
+// wants the analyzer's line segmentation but not its choice of language.
+static void collectLineStrokeIds(
+    const winrt_analysis::IInkAnalysisNode& node,
+    QVector<QVector<uint32_t>>& out);
+
+// ============================================================================
+// Vertical-overlap banding
+// ============================================================================
+
+// Groups rects into horizontal bands: a rect joins a band when it overlaps it
+// vertically by more than half its own height. Returns groups of indices into
+// the input, in top-to-bottom band order. Shared by the word-to-line grouping
+// in the recognizer path and the single-band test that decides whether the
+// caller already handed us one line.
+static QVector<QVector<int>> groupRectsIntoBands(const QVector<QRectF>& rects)
+{
+    QVector<int> order(rects.size());
+    for (int i = 0; i < rects.size(); ++i)
+        order[i] = i;
+    std::sort(order.begin(), order.end(), [&](int a, int b) {
+        return rects[a].center().y() < rects[b].center().y();
+    });
+
+    struct Band {
+        QVector<int> indices;
+        qreal top = 0, bottom = 0;
+    };
+    QVector<Band> bands;
+
+    for (int idx : order) {
+        const QRectF& r = rects[idx];
+        bool merged = false;
+        for (auto& band : bands) {
+            const qreal overlap = qMax(0.0, qMin(r.bottom(), band.bottom)
+                                              - qMax(r.top(), band.top));
+            if (overlap > r.height() * 0.5) {
+                band.indices.append(idx);
+                band.top = qMin(band.top, r.top());
+                band.bottom = qMax(band.bottom, r.bottom());
+                merged = true;
+                break;
+            }
+        }
+        if (!merged)
+            bands.append({{idx}, r.top(), r.bottom()});
+    }
+
+    QVector<QVector<int>> groups;
+    groups.reserve(bands.size());
+    for (const auto& band : bands)
+        groups.append(band.indices);
+    return groups;
+}
 
 // ============================================================================
 // PIMPL
@@ -95,6 +152,173 @@ struct WindowsInkOcrEngine::Impl {
 
         return available;
     }
+
+    /// The strokes the container still holds that are also live in the id map.
+    /// removeStrokes() cannot delete from an InkStrokeContainer, so the
+    /// container accumulates erased strokes; filtering by the map is what keeps
+    /// them out of recognition.
+    // std::unordered_map rather than QHash: InkStroke has no default
+    // constructor, which QHash's value access requires.
+    std::unordered_map<uint32_t, winrt_ink::InkStroke> liveStrokes() const {
+        std::unordered_map<uint32_t, winrt_ink::InkStroke> byId;
+        if (!strokeContainer)
+            return byId;
+        auto all = strokeContainer.GetStrokes();
+        if (!all)
+            return byId;
+        for (const auto& stroke : all) {
+            const uint32_t id = stroke.Id();
+            if (winrtIdToUuid.contains(id))
+                byId.emplace(id, stroke);
+        }
+        return byId;
+    }
+
+    /// Recognize one group of strokes with the user's chosen recognizer.
+    ///
+    /// The strokes are cloned into a throwaway container: an InkStroke cannot
+    /// live in two containers, and recognizing a subset in isolation is the
+    /// whole point - handing a recognizer a full page is what made CJK collapse
+    /// into a single result.
+    QVector<OcrEngine::Result> recognizeGroup(
+        const QVector<uint32_t>& groupIds,
+        const std::unordered_map<uint32_t, winrt_ink::InkStroke>& strokeById)
+    {
+        QVector<OcrEngine::Result> results;
+        if (groupIds.isEmpty())
+            return results;
+
+        winrt_ink::InkStrokeContainer temp{nullptr};
+        QHash<uint32_t, uint32_t> cloneToOriginal;
+        QVector<QString> groupUuids;
+
+        try {
+            temp = winrt_ink::InkStrokeContainer();
+            for (uint32_t id : groupIds) {
+                auto it = strokeById.find(id);
+                if (it == strokeById.end())
+                    continue;
+                auto clone = it->second.Clone();
+                temp.AddStroke(clone);
+                cloneToOriginal.insert(clone.Id(), id);
+
+                auto uuidIt = winrtIdToUuid.find(id);
+                if (uuidIt != winrtIdToUuid.end())
+                    groupUuids.append(uuidIt.value());
+            }
+        } catch (const winrt::hresult_error& e) {
+            qWarning() << "WindowsInkOcrEngine: group clone failed:"
+                       << QString::fromWCharArray(e.message().c_str());
+            return results;
+        }
+
+        if (groupUuids.isEmpty())
+            return results;
+
+        struct WordResult {
+            QString text;
+            QRectF rect;
+            QVector<QString> strokeIds;
+        };
+        QVector<WordResult> words;
+
+        try {
+            auto recogResults = recognizerContainer.RecognizeAsync(
+                temp, winrt_ink::InkRecognitionTarget::All).get();
+
+            if (!recogResults || recogResults.Size() == 0)
+                return results;
+
+            for (uint32_t i = 0, sz = recogResults.Size(); i < sz; ++i) {
+                auto recog = recogResults.GetAt(i);
+
+                auto candidates = recog.GetTextCandidates();
+                if (!candidates || candidates.Size() == 0) continue;
+                winrt::hstring ht = candidates.GetAt(0);
+                QString text = QString::fromWCharArray(ht.c_str(),
+                                                       static_cast<int>(ht.size()));
+                if (text.isEmpty()) continue;
+
+                auto wr = recog.BoundingRect();
+                QRectF rect(wr.X, wr.Y, wr.Width, wr.Height);
+
+                // Map the clone ids the recognizer reports back onto our own
+                // stroke uuids. If that mapping comes up empty the word still
+                // belongs to this group, so fall back to the whole group rather
+                // than dropping the attribution.
+                QVector<QString> sids;
+                auto strokes = recog.GetStrokes();
+                if (strokes) {
+                    for (const auto& stroke : strokes) {
+                        auto origIt = cloneToOriginal.find(stroke.Id());
+                        if (origIt == cloneToOriginal.end())
+                            continue;
+                        auto uuidIt = winrtIdToUuid.find(origIt.value());
+                        if (uuidIt != winrtIdToUuid.end() && !sids.contains(uuidIt.value()))
+                            sids.append(uuidIt.value());
+                    }
+                }
+                if (sids.isEmpty())
+                    sids = groupUuids;
+
+                words.append({text, rect, sids});
+            }
+        } catch (const winrt::hresult_error& e) {
+            qWarning() << "WindowsInkOcrEngine: recognizer analyze failed:"
+                       << QString::fromWCharArray(e.message().c_str());
+            return results;
+        }
+
+        if (words.isEmpty())
+            return results;
+
+        QVector<QRectF> wordRects;
+        wordRects.reserve(words.size());
+        for (const auto& w : words)
+            wordRects.append(w.rect);
+
+        for (const auto& band : groupRectsIntoBands(wordRects)) {
+            QVector<int> sorted = band;
+            std::sort(sorted.begin(), sorted.end(), [&](int a, int b) {
+                return words[a].rect.left() < words[b].rect.left();
+            });
+
+            OcrEngine::Result r;
+            r.confidence = 1.0f;
+            QRectF lineRect;
+
+            for (int idx : sorted) {
+                const auto& w = words[idx];
+
+                if (!r.text.isEmpty()) {
+                    bool needSpace = true;
+                    if (isCjkLikeChar(r.text.back()) || isCjkLikeChar(w.text.front()))
+                        needSpace = false;
+                    if (needSpace)
+                        r.text += QLatin1Char(' ');
+                }
+                r.text += w.text;
+
+                lineRect = lineRect.isNull() ? w.rect : lineRect.united(w.rect);
+
+                for (const auto& sid : w.strokeIds) {
+                    if (!r.sourceStrokeIds.contains(sid))
+                        r.sourceStrokeIds.append(sid);
+                }
+
+                OcrEngine::Result::WordSegment seg;
+                seg.text = w.text;
+                seg.boundingRect = w.rect;
+                r.wordSegments.append(seg);
+            }
+
+            r.boundingRect = lineRect;
+            if (!r.text.isEmpty())
+                results.append(r);
+        }
+
+        return results;
+    }
 };
 
 // ============================================================================
@@ -154,14 +378,6 @@ void WindowsInkOcrEngine::setLanguage(const QString& recognizerName)
 QString WindowsInkOcrEngine::language() const
 {
     return m_impl ? m_impl->selectedLanguage : QString();
-}
-
-bool WindowsInkOcrEngine::supportsIncrementalUpdates() const
-{
-    // InkRecognizerContainer reads directly from InkStrokeContainer which has
-    // no per-stroke removal API, so incremental remove+analyze still sees
-    // "deleted" strokes when a non-default recognizer is active.
-    return !m_impl || m_impl->selectedLanguage.isEmpty();
 }
 
 void WindowsInkOcrEngine::addStrokes(const QVector<VectorStroke>& strokes)
@@ -267,147 +483,68 @@ QVector<OcrEngine::Result> WindowsInkOcrEngine::analyzeWithRecognizer()
     if (!m_impl || !m_impl->recognizerContainer || m_impl->uuidToWinrtId.isEmpty())
         return results;
 
-    try {
-        #ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "WindowsInkOcrEngine: RecognizeAsync starting, strokes:"
-                 << m_impl->uuidToWinrtId.size()
-                 << "recognizer:" << m_impl->selectedLanguage;
-        #endif
+    const auto strokeById = m_impl->liveStrokes();
+    if (strokeById.empty())
+        return results;
 
-        auto recogResults = m_impl->recognizerContainer.RecognizeAsync(
-            m_impl->strokeContainer,
-            winrt_ink::InkRecognitionTarget::All).get();
-
-        #ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "WindowsInkOcrEngine: RecognizeAsync completed,"
-                 << (recogResults ? recogResults.Size() : 0) << "results";
-        #endif
-
-        if (!recogResults || recogResults.Size() == 0)
-            return results;
-
-        struct WordResult {
-            QString text;
-            QRectF rect;
-            QVector<QString> strokeIds;
-        };
-        QVector<WordResult> words;
-
-        for (uint32_t i = 0, sz = recogResults.Size(); i < sz; ++i) {
-            auto recog = recogResults.GetAt(i);
-
-            auto candidates = recog.GetTextCandidates();
-            if (!candidates || candidates.Size() == 0) continue;
-            winrt::hstring ht = candidates.GetAt(0);
-            QString text = QString::fromWCharArray(ht.c_str(), static_cast<int>(ht.size()));
-            if (text.isEmpty()) continue;
-
-            auto wr = recog.BoundingRect();
-            QRectF rect(wr.X, wr.Y, wr.Width, wr.Height);
-
-            QVector<QString> sids;
-            auto strokes = recog.GetStrokes();
-            if (strokes) {
-                for (const auto& stroke : strokes) {
-                    uint32_t wid = stroke.Id();
-                    auto it = m_impl->winrtIdToUuid.find(wid);
-                    if (it != m_impl->winrtIdToUuid.end())
-                        sids.append(it.value());
-                }
-            }
-
-            words.append({text, rect, sids});
-        }
-
-        if (words.isEmpty())
-            return results;
-
-        // Group word results into lines by vertical overlap.
-        // Sort by Y midpoint first.
-        std::sort(words.begin(), words.end(), [](const WordResult& a, const WordResult& b) {
-            return a.rect.center().y() < b.rect.center().y();
-        });
-
-        struct LineGroup {
-            QVector<int> indices;
-            qreal top = 0, bottom = 0;
-        };
-        QVector<LineGroup> lines;
-
-        for (int i = 0; i < words.size(); ++i) {
-            const auto& w = words[i];
-            qreal wTop = w.rect.top();
-            qreal wBottom = w.rect.bottom();
-            qreal wH = w.rect.height();
-
-            bool merged = false;
-            for (auto& line : lines) {
-                qreal overlapTop = qMax(wTop, line.top);
-                qreal overlapBottom = qMin(wBottom, line.bottom);
-                qreal overlap = qMax(0.0, overlapBottom - overlapTop);
-                if (overlap > wH * 0.5) {
-                    line.indices.append(i);
-                    line.top = qMin(line.top, wTop);
-                    line.bottom = qMax(line.bottom, wBottom);
-                    merged = true;
-                    break;
-                }
-            }
-            if (!merged) {
-                LineGroup g;
-                g.indices.append(i);
-                g.top = wTop;
-                g.bottom = wBottom;
-                lines.append(g);
-            }
-        }
-
-        // Build OcrEngine::Result for each line
-        for (const auto& line : lines) {
-            // Sort words within this line by X
-            QVector<int> sorted = line.indices;
-            std::sort(sorted.begin(), sorted.end(), [&](int a, int b) {
-                return words[a].rect.left() < words[b].rect.left();
-            });
-
-            Result r;
-            r.confidence = 1.0f;
-            QRectF lineRect;
-
-            for (int idx : sorted) {
-                const auto& w = words[idx];
-
-                if (!r.text.isEmpty()) {
-                    bool needSpace = true;
-                    if (isCjkLikeChar(r.text.back()) || isCjkLikeChar(w.text.front()))
-                        needSpace = false;
-                    if (needSpace)
-                        r.text += QLatin1Char(' ');
-                }
-                r.text += w.text;
-
-                lineRect = lineRect.isNull() ? w.rect : lineRect.united(w.rect);
-
-                for (const auto& sid : w.strokeIds) {
-                    if (!r.sourceStrokeIds.contains(sid))
-                        r.sourceStrokeIds.append(sid);
-                }
-
-                Result::WordSegment seg;
-                seg.text = w.text;
-                seg.boundingRect = w.rect;
-                r.wordSegments.append(seg);
-            }
-
-            r.boundingRect = lineRect;
-            if (!r.text.isEmpty())
-                results.append(r);
-        }
-
-    } catch (const winrt::hresult_error& e) {
-        qWarning() << "WindowsInkOcrEngine: recognizer analyze failed:"
-                   << QString::fromWCharArray(e.message().c_str());
+    QVector<uint32_t> liveIds;
+    QVector<QRectF> strokeRects;
+    liveIds.reserve(static_cast<int>(strokeById.size()));
+    strokeRects.reserve(static_cast<int>(strokeById.size()));
+    for (const auto& entry : strokeById) {
+        liveIds.append(entry.first);
+        const auto rect = entry.second.BoundingRect();
+        strokeRects.append(QRectF(rect.X, rect.Y, rect.Width, rect.Height));
     }
+
+    // A recognizer segments a page far worse than the analyzer does - the CJK
+    // one returns the whole page as a single result - so ask the analyzer where
+    // the lines are and recognize each one on its own.
+    QVector<QVector<uint32_t>> groups;
+
+    if (liveIds.size() < 2 || groupRectsIntoBands(strokeRects).size() <= 1) {
+        // The caller already handed us a single line (OcrWorker's snap-group
+        // mode does exactly this). Running the analyzer would only add a
+        // round-trip and risk splitting a group the caller deliberately formed.
+        groups.append(liveIds);
+    } else {
+        try {
+            m_impl->analyzer.AnalyzeAsync().get();
+            auto root = m_impl->analyzer.AnalysisRoot();
+            if (root) {
+                QVector<QVector<uint32_t>> lineGroups;
+                for (const auto& child : root.Children())
+                    collectLineStrokeIds(child, lineGroups);
+
+                for (auto& line : lineGroups) {
+                    QVector<uint32_t> live;
+                    for (uint32_t id : line) {
+                        if (strokeById.count(id))
+                            live.append(id);
+                    }
+                    if (!live.isEmpty())
+                        groups.append(live);
+                }
+            }
+        } catch (const winrt::hresult_error& e) {
+            qWarning() << "WindowsInkOcrEngine: line analysis failed:"
+                       << QString::fromWCharArray(e.message().c_str());
+        }
+
+        // Analyzer found no writing (everything classified as drawing, or the
+        // analysis failed). Recognize the page as one group rather than
+        // returning nothing.
+        if (groups.isEmpty())
+            groups.append(liveIds);
+    }
+
+    #ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "WindowsInkOcrEngine: recognizing" << groups.size() << "group(s),"
+             << liveIds.size() << "strokes, recognizer:" << m_impl->selectedLanguage;
+    #endif
+
+    for (const auto& group : groups)
+        results += m_impl->recognizeGroup(group, strokeById);
 
     return results;
 }
@@ -565,6 +702,43 @@ static void collectLines(
                    << QString::fromWCharArray(e.message().c_str());
     } catch (...) {
         qWarning() << "collectLines: unknown exception";
+    }
+}
+
+static void collectLineStrokeIds(
+    const winrt_analysis::IInkAnalysisNode& node,
+    QVector<QVector<uint32_t>>& out)
+{
+    if (!node)
+        return;
+
+    try {
+        if (node.Kind() == winrt_analysis::InkAnalysisNodeKind::Line) {
+            QVector<uint32_t> ids;
+            auto strokeIds = node.GetStrokeIds();
+            if (strokeIds) {
+                for (const auto& winrtId : strokeIds)
+                    ids.append(winrtId);
+            }
+            if (!ids.isEmpty())
+                out.append(ids);
+            return;
+        }
+
+        auto children = node.Children();
+        if (!children)
+            return;
+
+        for (uint32_t i = 0, sz = children.Size(); i < sz; ++i) {
+            auto child = children.GetAt(i);
+            if (child)
+                collectLineStrokeIds(child, out);
+        }
+    } catch (const winrt::hresult_error& e) {
+        qWarning() << "collectLineStrokeIds: WinRT error:"
+                   << QString::fromWCharArray(e.message().c_str());
+    } catch (...) {
+        qWarning() << "collectLineStrokeIds: unknown exception";
     }
 }
 

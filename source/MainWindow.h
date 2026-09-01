@@ -146,6 +146,13 @@ public:
     QStringList ocrAvailableLanguages() const { return m_ocrAvailableLanguages; }
     // Subset already present locally; the rest need an on-demand download.
     QStringList ocrDownloadedLanguages() const { return m_ocrDownloadedLanguages; }
+    // False when the engine's "auto" option is really "whatever recognizer the
+    // system picked" (Windows Ink), so the language combos can say so.
+    bool ocrSupportsAutoLanguage() const { return m_ocrAutoLanguageSupported; }
+    // Wording for the first entry of every OCR language combo. Shared so the
+    // three of them cannot drift apart.
+    static QString ocrAutoLanguageLabel(bool autoDetectSupported);
+    static QString ocrAutoLanguageTooltip(bool autoDetectSupported);
 
     // Apply a per-document OCR recognizer language override (empty = global
     // fallback). Marks the document modified and refreshes the OCR worker.
@@ -686,6 +693,7 @@ private:
     bool m_autoOcrEnabled = false;
     QStringList m_ocrAvailableLanguages;
     QStringList m_ocrDownloadedLanguages;
+    bool m_ocrAutoLanguageSupported = true;
     std::set<std::pair<int,int>> m_ocrTempLoadedTiles;
     Document* m_ocrTempLoadedDoc = nullptr;
     

@@ -308,7 +308,13 @@ void DocumentSettingsDialog::createLanguageTab()
 
     ocrLanguageCombo = new QComboBox(languageTab);
     ocrLanguageCombo->addItem(tr("Use global setting"), QStringLiteral(""));
-    ocrLanguageCombo->addItem(tr("Auto-detect (system default)"), QStringLiteral("auto"));
+    {
+        const bool autoDetect = mainWindowRef ? mainWindowRef->ocrSupportsAutoLanguage() : true;
+        ocrLanguageCombo->addItem(MainWindow::ocrAutoLanguageLabel(autoDetect),
+                                  QStringLiteral("auto"));
+        ocrLanguageCombo->setItemData(1, MainWindow::ocrAutoLanguageTooltip(autoDetect),
+                                      Qt::ToolTipRole);
+    }
 
     // Partition languages: common first, then the rest sorted by display name
     // (same behavior as the former MainWindow::showOcrLanguageDialog()).

@@ -68,6 +68,9 @@ signals:
     /// Re-emitted after scans so the UI can refresh "needs download" hints
     /// without an app restart.
     void downloadedLanguagesAvailable(const QStringList& languages);
+    /// Whether the engine's "auto" option really detects the script. False on
+    /// Windows Ink, where it just means the recognizer Windows chose.
+    void autoLanguageSupported(bool supported);
     void resultsReady(const QString& pageId,
                       const QVector<OcrTextBlock>& blocks);
     void batchProgress(int completed, int total);
