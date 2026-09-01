@@ -232,6 +232,10 @@ public:
     // ===== OCR Settings =====
     QString ocrLanguage;                ///< Per-document OCR recognizer name (empty = global fallback)
     bool ocrSnapToBackground = false;   ///< Snap OCR grouping to grid/line spacing
+    bool ocrAutoRecognize = false;      ///< Re-run OCR automatically after strokes settle
+    /// CJK grid-cell mode. Tri-state: -1 = inherit the global setting, 0 = off,
+    /// 1 = on. Resolved (and gated on a CJK recognizer) by resolveOcrCjkGridMode().
+    int ocrCjkGridModeOverride = -1;
 
     // ===== PDF Display Overrides (PDF-backed documents only) =====
     // Tri-state: -1 = inherit global setting, 0 = off, 1 = on.
@@ -676,6 +680,33 @@ public:
      * @return Parsed text blocks, or empty vector on error.
      */
     static QVector<OcrTextBlock> loadOcrBlocksFromFile(const QString& ocrJsonPath);
+
+    /**
+     * @brief Resolve the OCR recognizer this document should use.
+     * @return ocrLanguage when set, otherwise the global "ocrLanguage" setting.
+     */
+    QString resolveOcrLanguage() const;
+
+    /**
+     * @brief Resolve whether CJK grid-cell mode applies to this document.
+     *
+     * Takes ocrCjkGridModeOverride when set, otherwise the global
+     * "ocrCjkGridMode" setting, and then gates the result on the resolved
+     * recognizer actually being a CJK one. Callers still have to check that
+     * snapping is on and the background is a grid.
+     */
+    bool resolveOcrCjkGridMode() const;
+
+    /**
+     * @brief Whether an OCR language tag names a CJK recognizer.
+     *
+     * Backends report languages in different shapes: ML Kit uses BCP-47 tags
+     * ("zh-Hani-CN", "ja"), while Windows Ink reports the localized display
+     * name of the recognizer ("Microsoft 中文（简体）手写识别器"). Both are
+     * matched. An empty or "auto" tag counts as CJK so the caller's own
+     * enable flag stays authoritative for system-default languages.
+     */
+    static bool isCjkOcrLanguage(const QString& lang);
 
     void setOcrTextVisible(bool visible) { m_ocrTextVisible = visible; }
     bool ocrTextVisible() const { return m_ocrTextVisible; }
@@ -1984,7 +2015,7 @@ private:
     std::unique_ptr<QThreadPool> m_imageWritePool;  ///< Bounded pool isolated from PDF/render jobs
     QVector<PendingImageWrite> m_pendingImageWrites;
 
-    bool m_ocrTextVisible = false;
+    bool m_ocrTextVisible = false;  ///< Persisted as "ocr_show_text"
     bool m_ocrDarkMode = false;
     bool m_ocrShowConfidence = false;
 

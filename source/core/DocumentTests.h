@@ -493,6 +493,13 @@ inline bool testSerializationRoundTrip()
     doc->defaultBackgroundType = Page::BackgroundType::Grid;
     doc->defaultGridSpacing = 25;
     doc->defaultBackgroundColor = QColor(240, 240, 255);
+
+    // Per-document OCR settings. CJK is tri-state, so pick the non-default
+    // "off" (0) rather than "on" to prove 0 is distinguished from -1 inherit.
+    doc->ocrSnapToBackground = true;
+    doc->ocrAutoRecognize = true;
+    doc->setOcrTextVisible(true);
+    doc->ocrCjkGridModeOverride = 0;
     
     // Add pages
     doc->addPage();
@@ -581,7 +588,46 @@ inline bool testSerializationRoundTrip()
     }
     
     qDebug() << "  - Default background preserved: OK";
-    
+
+    // OCR settings
+    if (!restored->ocrSnapToBackground) {
+        qDebug() << "FAIL: ocrSnapToBackground not restored";
+        success = false;
+    }
+    if (!restored->ocrAutoRecognize) {
+        qDebug() << "FAIL: ocrAutoRecognize not restored";
+        success = false;
+    }
+    if (!restored->ocrTextVisible()) {
+        qDebug() << "FAIL: ocrTextVisible not restored";
+        success = false;
+    }
+    if (restored->ocrCjkGridModeOverride != 0) {
+        qDebug() << "FAIL: ocrCjkGridModeOverride mismatch:"
+                 << restored->ocrCjkGridModeOverride << "!= 0";
+        success = false;
+    }
+
+    // Absent keys must keep the defaults rather than reading as "off"/"on".
+    // A default-constructed document writes none of the four.
+    {
+        auto plain = Document::createNew("No OCR Settings", Document::Mode::Paged);
+        auto plainRestored = Document::fromJson(plain->toJson());
+        if (!plainRestored) {
+            qDebug() << "FAIL: fromJson() returned nullptr for the plain document";
+            success = false;
+        } else if (plainRestored->ocrSnapToBackground ||
+                   plainRestored->ocrAutoRecognize ||
+                   plainRestored->ocrTextVisible() ||
+                   plainRestored->ocrCjkGridModeOverride != -1) {
+            qDebug() << "FAIL: absent OCR keys did not fall back to defaults;"
+                     << "cjk =" << plainRestored->ocrCjkGridModeOverride;
+            success = false;
+        }
+    }
+
+    qDebug() << "  - OCR settings preserved: OK";
+
     // Pages
     if (restored->pageCount() != 3) {
         qDebug() << "FAIL: pageCount mismatch:" << restored->pageCount() << "!= 3";
@@ -763,9 +809,25 @@ inline bool testMetadataOnlySerialization()
     doc->addPage();
     doc->addPage();
     doc->setBookmark(1, "Test Bookmark");
-    
+    doc->ocrCjkGridModeOverride = 1;
+
     // Serialize metadata only
     QJsonObject metadataJson = doc->toJson();
+
+    // The manifest is what a reopened notebook reads, so the OCR settings have
+    // to survive this path specifically. The three booleans are written only
+    // when true; CJK is written whenever it is not inheriting.
+    if (metadataJson.contains("ocr_auto_recognize") ||
+        metadataJson.contains("ocr_show_text") ||
+        metadataJson.contains("ocr_snap_to_background")) {
+        qDebug() << "FAIL: toJson() should omit OCR booleans left at their defaults";
+        success = false;
+    }
+    if (!metadataJson.contains("ocr_cjk_grid_mode") ||
+        metadataJson["ocr_cjk_grid_mode"].toBool() != true) {
+        qDebug() << "FAIL: toJson() should write ocr_cjk_grid_mode = true";
+        success = false;
+    }
     
     // Should have page_count but not pages array
     if (!metadataJson.contains("page_count")) {
@@ -797,7 +859,13 @@ inline bool testMetadataOnlySerialization()
         qDebug() << "FAIL: author not restored";
         success = false;
     }
-    
+
+    if (restored->ocrCjkGridModeOverride != 1) {
+        qDebug() << "FAIL: ocrCjkGridModeOverride not restored from the manifest:"
+                 << restored->ocrCjkGridModeOverride;
+        success = false;
+    }
+
     // Should have 0 pages (not loaded from JSON)
     if (restored->pageCount() != 0) {
         qDebug() << "FAIL: fromJson() should not create pages";

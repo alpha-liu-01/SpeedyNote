@@ -31,6 +31,10 @@ public:
     bool isShowTextEnabled() const;
     bool isConfidenceEnabled() const;
     bool isSnapToGridEnabled() const;
+    // Seeded from the document on every viewport switch; see the TabState note
+    // below for why these three are not cached per tab.
+    void setAutoOcrChecked(bool checked);
+    void setShowTextChecked(bool checked);
     void setSnapToGridChecked(bool checked);
 
     // Keyboard-shortcut entry points. Each forwards to the corresponding
@@ -73,16 +77,18 @@ private:
 
     // Per-tab UI state cache.
     //
-    // NOTE: The "snap to grid/lines" toggle is intentionally NOT cached here.
-    // It is authoritative on Document::ocrSnapToBackground (persisted to the
-    // notebook JSON), and MainWindow::connectViewportScrollSignals() syncs the
-    // toggle to that value on every viewport switch. Caching it per-tab would
+    // NOTE: Auto-OCR, show-text and snap-to-grid are intentionally NOT cached
+    // here. All three are authoritative on the Document (ocrAutoRecognize,
+    // ocrTextVisible(), ocrSnapToBackground - all persisted to the notebook
+    // JSON), and MainWindow::connectViewportScrollSignals() syncs the buttons
+    // to those values on every viewport switch. Caching them per-tab would
     // create two competing sources of truth and race with that sync (the
     // save-old/restore-new pass runs after the doc-based sync, so it would
     // capture the already-overwritten button state for the outgoing tab).
+    //
+    // Confidence stays here because it is a session-only view preference with
+    // no document field behind it.
     struct TabState {
-        bool autoOcrEnabled = false;
-        bool showTextEnabled = false;
         bool confidenceEnabled = false;
         bool initialized = false;
     };

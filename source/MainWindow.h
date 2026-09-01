@@ -159,6 +159,12 @@ public:
     // Shared by showOcrLanguageDialog() and DocumentSettingsDialog.
     void applyDocumentOcrLanguage(Document* doc, const QString& lang);
 
+    // Re-apply a document's four OCR settings after DocumentSettingsDialog
+    // edits them: re-seeds the subtoolbar buttons and re-derives the render
+    // fields on every loaded OCR object. No-op unless the document is the one
+    // in the active viewport, which is the only pane those two act on.
+    void refreshOcrSettingsForDocument(Document* doc);
+
     // Theme settings
     QColor customAccentColor;
     bool useCustomAccentColor = false;
