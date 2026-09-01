@@ -115,16 +115,8 @@ Download the latest release from **[GitHub Releases](https://github.com/alpha-li
 | ------------- | --------------------------------- |
 | Windows       | `.exe` installer                  |
 | macOS         | `.dmg` disk image |
-| Debian/Ubuntu | `.deb` package                    |
-| Fedora/RHEL   | `.rpm` package                    |
 | Arch Linux    | `yay -S speedynote`               |
-
-#### Android
-
-**Option 1: Google Play Store** (coming soon), supports development  
-**Option 2: Build from source** - Free, see [Android Build Guide](./docs/build_docs/ANDROID_BUILD_GUIDE.md)
-
-> The Play Store version is a convenience fee. The source code is always free under GPL v3.
+| Android       | `.apk` package                    |
 
 #### iPadOS
 
