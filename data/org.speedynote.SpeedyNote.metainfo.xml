@@ -79,6 +79,21 @@
 
 
   <releases type="embedded">
+    <release version="1.6.2" date="2026-09-02">
+      <description>
+        <p>New Features:</p>
+        <ul>
+          <li>Added OCR options into the current document settings override panel.</li>
+          <li>Added a confidence marker option to the OCR text overlay.</li>
+        </ul>
+        <p>Bug Fixes and Improvements:</p>
+        <ul>
+          <li>Fixed the problem that the number of matches did not display correctly in edgeless mode.</li>
+          <li>Fixed the problem that the colored markers on the scroll bar was not updated when a URL link or a markdown note was added to one of the slots.</li>
+          <li>Fixed the problem that the scroll bars still hide themselves when the cursor is floating over them.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.6.1" date="2026-09-01">
       <description>
         <p>New Features:</p>
