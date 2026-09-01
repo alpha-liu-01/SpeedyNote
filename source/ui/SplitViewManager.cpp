@@ -1227,11 +1227,20 @@ void SplitViewManager::hideScrollBar(Pane pane, BarAxis axis)
     QTimer* timer = (axis == BarAxis::Vertical) ? b.vFadeTimer : b.hFadeTimer;
 
     // Never hide while the user is actively driving this axis's handle (or, for
-    // the vertical axis, the page-wheel). Re-arm the fade timer instead of just
-    // bailing: the wheel path navigates via scrollToPage, which emits no scroll
-    // signal to re-arm it, so without this the bar + wheel could linger visible.
-    const bool busy = (bar && bar->isDragging())
-                   || (axis == BarAxis::Vertical && b.wheel && b.wheel->isInteracting());
+    // the vertical axis, the page-wheel), nor while the pointer is simply
+    // resting on any of them: proximity only re-arms the timer on movement, so
+    // a motionless pointer would otherwise be indistinguishable from one that
+    // left, and the bar would vanish out from under the cursor reaching for it.
+    // The wheel and search button count for the vertical axis because
+    // syncPageWheelVisibility ties them to the bar, and they sit mostly outside
+    // the proximity band, so nothing else would keep them alive.
+    // Re-arm the fade timer instead of just bailing: the wheel path navigates
+    // via scrollToPage, which emits no scroll signal to re-arm it, so without
+    // this the bar + wheel could linger visible.
+    const bool busy = (bar && (bar->isDragging() || bar->underMouse()))
+                   || (axis == BarAxis::Vertical && b.wheel
+                       && (b.wheel->isInteracting() || b.wheel->underMouse()))
+                   || (axis == BarAxis::Vertical && b.searchBtn && b.searchBtn->underMouse());
     if (busy) {
         if (timer) timer->start();
         return;
