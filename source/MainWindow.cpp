@@ -2379,6 +2379,13 @@ void MainWindow::switchPage(int pageIndex) {
     vp->scrollToPage(pageIndex);
 }
 
+void MainWindow::updateActiveScrollBarMap()
+{
+    if (m_splitViewManager) {
+        m_splitViewManager->updateScrollBarDocumentMap(currentViewport());
+    }
+}
+
 void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     // Connects the current viewport's tool/mode/event signals. Scroll-fraction
     // <-> scroll-bar plumbing now lives per-pane in SplitViewManager (SB1);
@@ -2505,6 +2512,10 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     if (m_linkAppearanceConn) {
         disconnect(m_linkAppearanceConn);
         m_linkAppearanceConn = {};
+    }
+    if (m_linkSlotsConn) {
+        disconnect(m_linkSlotsConn);
+        m_linkSlotsConn = {};
     }
     if (m_pdfSourcesConn) {
         disconnect(m_pdfSourcesConn);
@@ -2992,9 +3003,7 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
                 refreshNotesOutline();
             }
             // SB2: link add/remove/move/undo/redo changes the scroll-bar markers.
-            if (m_splitViewManager) {
-                m_splitViewManager->updateScrollBarDocumentMap(currentViewport());
-            }
+            updateActiveScrollBarMap();
         });
 
         // Only one LinkObject's description/color changed, so patch that row in
@@ -3007,10 +3016,16 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
                 markdownNotesSidebar->updateLinkObject(linkObjectId, description, color);
             }
             // SB2: the marker's colour and tooltip come from the LinkObject.
-            if (m_splitViewManager) {
-                m_splitViewManager->updateScrollBarDocumentMap(currentViewport());
-            }
+            updateActiveScrollBarMap();
         });
+
+        // SB2: filling or clearing a slot can cross the "has content" threshold
+        // the marker filter uses, so the bar has to be repainted here too. The
+        // notes sidebar is deliberately not touched: a slot edit does not change
+        // the set of annotations, and rebuilding that tree would collapse its
+        // expanded subtrees.
+        m_linkSlotsConn = connect(viewport, &DocumentViewport::linkSlotsChanged,
+                this, [this]() { updateActiveScrollBarMap(); });
 
         // OCR: Restart debounce timer when strokes change
         m_strokesChangedConn = connect(viewport, &DocumentViewport::strokesChanged, this, [this]() {

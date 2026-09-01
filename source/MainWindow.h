@@ -378,6 +378,11 @@ private slots:
 
     // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
     void connectViewportScrollSignals(DocumentViewport* viewport);  // Phase 3.3
+    /// Rebuild the active pane's scroll-bar overlay data (link markers, PDF
+    /// source accents, page-wheel range). The markers depend on which
+    /// LinkObjects exist, how many slots each has filled, and their colour and
+    /// description, so all three link signals have to land here.
+    void updateActiveScrollBarMap();
     void centerViewportContent(int tabIndex);  // Phase 3.3: One-time horizontal centering
     void updateLayerPanelForViewport(DocumentViewport* viewport);  // Phase 5.1: Update LayerPanel
     void updateOutlinePanelForDocument(Document* doc);  // Phase E.2: Update OutlinePanel for document
@@ -818,6 +823,7 @@ private:
     QMetaObject::Connection m_userWarningConn;        // For viewport userWarning → QMessageBox
     QMetaObject::Connection m_linkObjectListConn;     // M.7.3: For linkObjectListMayHaveChanged
     QMetaObject::Connection m_linkAppearanceConn;     // For linkObjectAppearanceChanged
+    QMetaObject::Connection m_linkSlotsConn;          // SB2: For linkSlotsChanged
     QMetaObject::Connection m_pdfSourcesConn;
     QMetaObject::Connection m_pdfBannerReserveConn;  // Banner height → search bar Y
     QMetaObject::Connection m_strokesChangedConn;      // OCR: For strokesChanged → debounce
