@@ -3,6 +3,7 @@
 
 #include <QDialog>
 #include <QTabWidget>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QLabel>
 #include <QPushButton>
@@ -21,14 +22,14 @@ class Document;
  * Document - a "live" apply. It replaces the standalone OCR Language item in
  * the navigation-bar overflow menu.
  *
- * This first iteration implements:
- * - Page tab: page-size override (sets Document::defaultPageSize; new pages
- *   added via Ctrl+Shift+A use it - existing pages are NOT resized).
- * - Language tab: per-document OCR recognizer language override.
- *
- * Tools (CJK grid-cell mode) and Theme (PDF dark inversion) tabs are planned as
- * a follow-up; createToolsTab()/createThemeTab() hooks are intentionally left
- * for that work.
+ * Tabs:
+ * - Page: page-size override (sets Document::defaultPageSize; new pages added
+ *   via Ctrl+Shift+A use it - existing pages are NOT resized) plus the
+ *   document-wide background.
+ * - OCR: recognizer language override, the three toggles that are also on the
+ *   OCR subtoolbar (auto-recognize, show text, snap to grid), and the
+ *   CJK grid-cell mode override.
+ * - Theme: PDF dark inversion overrides (PDF-backed documents only).
  */
 class DocumentSettingsDialog : public QDialog {
     Q_OBJECT
@@ -85,19 +86,21 @@ private:
     bool bgTypeInCombo = true;
     void createPageTab();
 
-    // === Language tab ===
-    QWidget* languageTab = nullptr;
+    // === OCR tab ===
+    QWidget* ocrTab = nullptr;
     QComboBox* ocrLanguageCombo = nullptr;
-    void createLanguageTab();
+    QCheckBox* autoOcrCheck = nullptr;
+    QCheckBox* showTextCheck = nullptr;
+    QCheckBox* snapToGridCheck = nullptr;
+    // Tri-state override of the global CJK setting: -1 inherit / 0 off / 1 on.
+    QComboBox* cjkGridModeCombo = nullptr;
+    void createOcrTab();
 
     // === Theme tab (PDF-backed documents only) ===
     QWidget* themeTab = nullptr;
     QComboBox* pdfInvertDarkCombo = nullptr;
     QComboBox* pdfInvertImagesCombo = nullptr;
     void createThemeTab();
-
-    // === Future override tabs (follow-up plan) ===
-    // void createToolsTab();   // CJK grid-cell mode
 
     void loadSettings();
 };

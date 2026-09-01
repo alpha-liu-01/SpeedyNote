@@ -30,10 +30,13 @@ public:
     void setLanguage(const QString& recognizerName) override;
     QString language() const override;
 
+    // Windows Ink has no automatic script detection: with no recognizer chosen,
+    // InkAnalyzer uses the one Windows picked for the user's language list.
+    bool supportsAutoLanguageDetection() const override { return false; }
+
     void addStrokes(const QVector<VectorStroke>& strokes) override;
     void removeStrokes(const QVector<QString>& strokeIds) override;
     void clearStrokes() override;
-    bool supportsIncrementalUpdates() const override;
     QVector<Result> analyze() override;
 
 private:

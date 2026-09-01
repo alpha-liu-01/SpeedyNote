@@ -98,7 +98,7 @@
 | 平台          | 最低要求                     | 推荐配置             |
 | ----------- | ------------------------ | ---------------- |
 | **Windows** | Windows 7 SP1         | Windows 11       |
-| **macOS**   | macOS 13                | macOS 15+        |
+| **macOS**   | macOS 14                | macOS 15+        |
 | **Linux**   | Ubuntu 22.04 / Fedora 38 | 任何支持 Qt 6.4+ 的系统 |
 | **Android** | Android 9 (API 28)       | Android 13+      |
 | **iPadOS**  | iPadOS 16.0              | iPadOS 17+       |
@@ -107,7 +107,7 @@
 
 ### 安装
 
-#### Windows / macOS / Linux
+#### Windows / macOS / Linux / Android
 
 从 **[GitHub Releases](https://github.com/alpha-liu-01/SpeedyNote/releases)** 或官方网站下载最新版本。
 
@@ -115,16 +115,8 @@
 | ------------- | ----------------- |
 | Windows       | `.exe` 安装程序       |
 | macOS         | `.dmg` 磁盘映像       |
-| Debian/Ubuntu | `.deb` 包          |
-| Fedora/RHEL   | `.rpm` 包          |
 | Arch Linux    |  AUR `yay -S speedynote`  |
-
-#### Android
-
-**选项 1：Google Play Store**（即将推出）  
-**选项 2：从源码构建** - 免费，详见 [Android 构建指南](../build_docs/ANDROID_BUILD_GUIDE.md)
-
-> Play Store 版本为便利性收费。源码始终在 GPL v3 下免费。
+| Android       | `.apk` 包          |
 
 #### iPadOS
 
@@ -144,7 +136,7 @@
 | 全部      | CMake 3.16+、C++17 编译器                                           |
 | Windows | MSYS2 及 clang64/clangarm64 工具链                                  |
 | macOS   | Xcode 命令行工具、Homebrew                                            |
-| Linux   | Qt 6.4+ 开发包、Poppler-Qt6                                         |
+| Linux   | Qt 6.4+ 开发包、MuPDF                                        |
 | Android | Docker（详见 [Android 构建指南](../build_docs/ANDROID_BUILD_GUIDE.md)） |
 | iPadOS  | macOS、Xcode 15+、Qt 6.9.3 for iOS（详见 [iPadOS 构建指南](../build_docs/IOS_BUILD_GUIDE.md)） |
 

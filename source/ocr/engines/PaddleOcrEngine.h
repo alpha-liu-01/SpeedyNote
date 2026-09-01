@@ -43,6 +43,10 @@ public:
     bool isAvailable() const override;
     QStringList availableLanguages() const override;
     QStringList downloadedLanguages() const override;
+
+    // The CTC decode yields a real per-line softmax score.
+    bool providesConfidence() const override { return true; }
+
     /// Clears the per-session failed-download cache on a real language change,
     /// then defers to the base (cache invalidation + tag normalization).
     void setLanguage(const QString& recognizerName) override;

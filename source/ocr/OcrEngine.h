@@ -42,6 +42,15 @@ public:
     virtual QStringList downloadedLanguages() const { return availableLanguages(); }
     virtual void setLanguage(const QString& recognizerName) = 0;
     virtual QString language() const = 0;
+    /// Whether the "auto" language sentinel really detects the script, as
+    /// Apple Vision does. Engines that instead fall back to a system-chosen
+    /// recognizer (Windows Ink) return false so the UI can say so rather than
+    /// promising detection that will not happen.
+    virtual bool supportsAutoLanguageDetection() const { return true; }
+    /// Whether Result::confidence carries a real recognition score. Default
+    /// false: an engine has to opt in, because the confidence UI is worse than
+    /// useless when every result reports the same number.
+    virtual bool providesConfidence() const { return false; }
 
     virtual void addStrokes(const QVector<VectorStroke>& strokes) = 0;
     virtual void removeStrokes(const QVector<QString>& strokeIds) = 0;

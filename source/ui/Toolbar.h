@@ -57,6 +57,9 @@ public:
     OcrSubToolbar* ocrSubToolbar() const { return m_ocrSubToolbar; }
 
     void setOcrAvailable(bool available);
+    // Separate from setOcrAvailable: cached text stays viewable without an
+    // engine, but a confidence score depends on what produced the data.
+    void setOcrConfidenceSupported(bool supported);
 
     /**
      * @brief The wider single page plus one pager, not the whole row.

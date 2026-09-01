@@ -271,7 +271,7 @@ OcrEngine::Result RasterOcrEngine::buildResult(const StrokeLineGroup& group,
     Result r;
     r.text = rec.text;
     r.boundingRect = group.boundingRect;
-    r.confidence = 1.0f;
+    r.confidence = rec.confidence;
     r.sourceStrokeIds.reserve(group.strokeIndices.size());
     for (int idx : group.strokeIndices) {
         if (idx >= 0 && idx < m_strokes.size())

@@ -723,3 +723,8 @@ void Toolbar::setOcrAvailable(bool available)
         m_ocrExpandable->toolButton()->setToolTip(tr("OCR - Text Recognition"));
     }
 }
+
+void Toolbar::setOcrConfidenceSupported(bool supported)
+{
+    m_ocrSubToolbar->setConfidenceSupported(supported);
+}

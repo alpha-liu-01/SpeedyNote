@@ -1157,10 +1157,11 @@ void ControlPanelDialog::createToolsTab()
     ocrLayout->addWidget(ocrCjkGridModeCheck);
 
     QLabel *ocrHint = new QLabel(
-        tr("When \"Snap OCR to Grid/Lines\" is enabled on the OCR toolbar and the "
-           "background is a grid, this option makes each grid cell detect one CJK "
-           "character. Adjacent characters are merged into sentences. "
-           "Leave unchecked for line-based detection (suitable for most languages)."),
+        tr("When \"Snap OCR to Grid/Lines\" is enabled and the background is a grid, "
+           "this option makes each grid cell detect one CJK character. Adjacent "
+           "characters are merged into sentences. Leave unchecked for line-based "
+           "detection (suitable for most languages). This is the default for "
+           "documents that have not overridden it in Current Document Settings > OCR."),
         ocrGroup);
     ocrHint->setWordWrap(true);
     ocrHint->setStyleSheet("color: gray; font-size: 11px;");
@@ -1986,7 +1987,12 @@ void ControlPanelDialog::createLanguageTab() {
     layout->addWidget(ocrDesc);
 
     ocrLanguageCombo = new QComboBox(languageTab);
-    ocrLanguageCombo->addItem(tr("Auto-detect (system default)"), QString());
+    {
+        const bool autoDetect = mainWindowRef ? mainWindowRef->ocrSupportsAutoLanguage() : true;
+        ocrLanguageCombo->addItem(MainWindow::ocrAutoLanguageLabel(autoDetect), QString());
+        ocrLanguageCombo->setItemData(0, MainWindow::ocrAutoLanguageTooltip(autoDetect),
+                                      Qt::ToolTipRole);
+    }
     if (mainWindowRef) {
         const QStringList langs = mainWindowRef->ocrAvailableLanguages();
         const QStringList downloaded = mainWindowRef->ocrDownloadedLanguages();

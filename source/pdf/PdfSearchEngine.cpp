@@ -90,10 +90,17 @@ void PdfSearchEngine::setLegacyLayoutZoom(qreal zoom)
 
 void PdfSearchEngine::clearCache()
 {
-    QMutexLocker lock(&m_cacheMutex);
-    m_cache.clear();
-    m_edgelessTileOrder.clear();
-    m_edgelessTileOrderBuilt = false;
+    {
+        QMutexLocker lock(&m_cacheMutex);
+        m_cache.clear();
+    }
+    // Separate scope, separate lock: cancelScan() only raises a flag, so a scan
+    // worker can still be inside ensureEdgelessTileOrder() when this runs.
+    {
+        QMutexLocker lock(&m_tileOrderMutex);
+        m_edgelessTileOrder.clear();
+        m_edgelessTileOrderBuilt = false;
+    }
 }
 
 int PdfSearchEngine::cacheSize() const
@@ -778,6 +785,65 @@ void PdfSearchEngine::buildEdgelessTileOrder()
     m_edgelessTileOrderBuilt = true;
 }
 
+QVector<std::pair<int,int>> PdfSearchEngine::ensureEdgelessTileOrder()
+{
+    QMutexLocker lock(&m_tileOrderMutex);
+    if (!m_edgelessTileOrderBuilt) {
+        buildEdgelessTileOrder();
+    }
+    // Returned by value: QVector is copy-on-write, so this costs nothing until
+    // someone writes, and it leaves the caller holding a stable view even if a
+    // later rebuild reallocates the shared vector.
+    return m_edgelessTileOrder;
+}
+
+QVector<PdfSearchMatch> PdfSearchEngine::getCachedOrSearchTile(
+    int virtualIndex, const QVector<std::pair<int,int>>& order)
+{
+    {
+        QMutexLocker lock(&m_cacheMutex);
+        if (m_cache.contains(virtualIndex) && m_cache[virtualIndex].searched) {
+            return m_cache[virtualIndex].matches;
+        }
+    }
+
+    // The document may have been dropped while this background walk ran.
+    if (!m_document || virtualIndex < 0 || virtualIndex >= order.size()) {
+        return QVector<PdfSearchMatch>();
+    }
+
+    const int tx = order[virtualIndex].first;
+    const int ty = order[virtualIndex].second;
+
+    QVector<OcrTextBlock> blocks;
+
+    // Try loaded tile first
+    Page* tile = m_document->getTile(tx, ty);
+    if (tile && !tile->ocrTextBlocks.isEmpty()) {
+        blocks = tile->ocrBlocksForSearch();
+    } else {
+        // Read from disk
+        QString ocrPath = m_document->bundlePath()
+            + QStringLiteral("/tiles/%1,%2.ocr.json").arg(tx).arg(ty);
+        blocks = Document::loadOcrBlocksFromFile(ocrPath);
+    }
+
+    QVector<PdfSearchMatch> tileMatches = searchOcrBlocks(
+        virtualIndex, blocks, m_searchText, m_caseSensitive, m_wholeWord,
+        PdfSearchMatch::OcrTextTile, tx, ty, 0);
+
+    if (tile) {
+        QVector<PdfSearchMatch> objMatches = searchTextBoxObjects(
+            virtualIndex, tile, m_searchText, m_caseSensitive, m_wholeWord,
+            PdfSearchMatch::TextBoxObjTile, tx, ty, tileMatches.size());
+        tileMatches.append(objMatches);
+    }
+
+    addToCache(virtualIndex, tileMatches);
+
+    return tileMatches;
+}
+
 void PdfSearchEngine::doSearchEdgeless(int startVirtualPage, int startMatchIndex, int direction)
 {
     if (!m_document || !m_document->isEdgeless()) {
@@ -787,11 +853,9 @@ void PdfSearchEngine::doSearchEdgeless(int startVirtualPage, int startMatchIndex
         return;
     }
 
-    if (!m_edgelessTileOrderBuilt) {
-        buildEdgelessTileOrder();
-    }
+    const QVector<std::pair<int,int>> tileOrder = ensureEdgelessTileOrder();
 
-    int totalTiles = m_edgelessTileOrder.size();
+    int totalTiles = tileOrder.size();
     if (totalTiles == 0) {
         QMutexLocker lock(&m_resultMutex);
         m_searchNotFound = true;
@@ -810,48 +874,8 @@ void PdfSearchEngine::doSearchEdgeless(int startVirtualPage, int startMatchIndex
     while (tilesSearched < totalTiles) {
         if (m_searchCancelled.load()) return;
 
-        // Check cache first
-        QVector<PdfSearchMatch> tileMatches;
-        bool cacheHit = false;
-        {
-            QMutexLocker lock(&m_cacheMutex);
-            if (m_cache.contains(currentTile) && m_cache[currentTile].searched) {
-                tileMatches = m_cache[currentTile].matches;
-                cacheHit = true;
-            }
-        }
-
-        if (!cacheHit) {
-            const Document::TileCoord& coord = m_edgelessTileOrder[currentTile];
-            int tx = coord.first;
-            int ty = coord.second;
-
-            QVector<OcrTextBlock> blocks;
-
-            // Try loaded tile first
-            Page* tile = m_document->getTile(tx, ty);
-            if (tile && !tile->ocrTextBlocks.isEmpty()) {
-                blocks = tile->ocrBlocksForSearch();
-            } else {
-                // Read from disk
-                QString ocrPath = m_document->bundlePath()
-                    + QStringLiteral("/tiles/%1,%2.ocr.json").arg(tx).arg(ty);
-                blocks = Document::loadOcrBlocksFromFile(ocrPath);
-            }
-
-            tileMatches = searchOcrBlocks(
-                currentTile, blocks, m_searchText, m_caseSensitive, m_wholeWord,
-                PdfSearchMatch::OcrTextTile, tx, ty, 0);
-
-            if (tile) {
-                QVector<PdfSearchMatch> objMatches = searchTextBoxObjects(
-                    currentTile, tile, m_searchText, m_caseSensitive, m_wholeWord,
-                    PdfSearchMatch::TextBoxObjTile, tx, ty, tileMatches.size());
-                tileMatches.append(objMatches);
-            }
-
-            addToCache(currentTile, tileMatches);
-        }
+        const QVector<PdfSearchMatch> tileMatches =
+            getCachedOrSearchTile(currentTile, tileOrder);
 
         if (!tileMatches.isEmpty()) {
             int foundIdx = -1;
@@ -1070,9 +1094,20 @@ void PdfSearchEngine::scanAllPages(const QString& text, bool caseSensitive, bool
         m_wholeWord = wholeWord;
     }
 
-    // Edgeless documents are out of scope for page-axis markers (Q13.30).
-    if (!m_document || text.isEmpty() || m_document->isEdgeless()) {
+    if (!m_document || text.isEmpty()) {
         emit scanComplete(0);
+        return;
+    }
+
+    if (m_document->isEdgeless()) {
+        // Tiles have no page axis, so this feeds the match count only. The
+        // scroll-bar ticks stay absent either way (Q13.30): SplitViewManager
+        // drops search markers for edgeless, and edgeless panes hide the bars
+        // outright. No provider pre-open either -- tiles are read as OCR JSON.
+        QFuture<void> future = QtConcurrent::run([this]() {
+            doScanAllEdgeless();
+        });
+        m_scanWatcher.setFuture(future);
         return;
     }
 
@@ -1104,6 +1139,35 @@ void PdfSearchEngine::doScanAll()
         total += matches.size();
         if (!matches.isEmpty()) {
             emit pageScanned(page, matches);  // queued to the main thread
+        }
+    }
+
+    if (!m_scanCancelled.load()) {
+        emit scanComplete(total);
+    }
+}
+
+void PdfSearchEngine::doScanAllEdgeless()
+{
+    if (!m_document) {
+        emit scanComplete(0);
+        return;
+    }
+
+    const QVector<std::pair<int,int>> tileOrder = ensureEdgelessTileOrder();
+    int total = 0;
+
+    for (int i = 0; i < tileOrder.size(); ++i) {
+        if (m_scanCancelled.load()) {
+            return;  // superseded/cancelled: do not emit scanComplete
+        }
+
+        const QVector<PdfSearchMatch> matches = getCachedOrSearchTile(i, tileOrder);
+        total += matches.size();
+        if (!matches.isEmpty()) {
+            // The index is the match's own pageIndex, which for an edgeless
+            // document means the virtual tile ID rather than a notebook page.
+            emit pageScanned(i, matches);  // queued to the main thread
         }
     }
 

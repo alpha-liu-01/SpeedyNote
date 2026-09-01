@@ -171,72 +171,6 @@ void setupLinuxSignalHandlers() {
 }
 #endif
 
-// ----------------------------------------------------------------------------
-// CJK detection for the OCR language tag stored on the document / global setting
-//
-// Why this is non-trivial: different OCR backends report languages in different
-// string shapes.
-//
-//   * ML Kit (Android, macOS) reports BCP-47 tags: "zh-Hani-CN", "ja", "ko-KR", ...
-//   * Windows Ink reports the localized display name of each InkRecognizer, e.g.
-//       "Microsoft Chinese (Simplified) Handwriting Recognizer"   (EN Windows)
-//       "Microsoft 中文（简体）手写识别器"                         (ZH Windows)
-//       "Microsoft Japanese Handwriting Recognizer"
-//       "Microsoft 日本語手書き認識エンジン"                       (JP Windows)
-//       "Microsoft 日语手写识别器"                                 (JP on ZH Windows)
-//       "Microsoft 한국어 필기 인식기"                             (KO Windows)
-//
-// The original check only looked for BCP-47 prefixes ("zh"/"ja"/"ko"), which
-// meant the CJK grid-mode override never fired on Windows: a tag like
-// "Microsoft 中文（简体）手写识别器" starts with "Microsoft", not "zh".
-//
-// This helper handles both formats by combining:
-//   1. A BCP-47 pattern "^(zh|ja|ko)([-_].*)?$" (word-boundary on the subtag).
-//   2. A set of CJK marker substrings that appear in localized recognizer names
-//      across the common Windows UI languages (EN / ZH / JA / KO).
-// ----------------------------------------------------------------------------
-static bool isCjkOcrLanguage(const QString& lang)
-{
-    // Empty or explicit "auto" = unknown. Preserve the user's global toggle
-    // (the caller has already verified ocrCjkGridMode is enabled), so return
-    // true here to keep the previous behaviour for system-default languages.
-    if (lang.isEmpty() || lang.compare(QLatin1String("auto"), Qt::CaseInsensitive) == 0)
-        return true;
-
-    // BCP-47: "zh", "ja", "ko", optionally followed by script/region subtags.
-    static const QRegularExpression kBcp47Cjk(
-        QStringLiteral("^(zh|ja|ko)(?:[-_].*)?$"),
-        QRegularExpression::CaseInsensitiveOption);
-    if (kBcp47Cjk.match(lang).hasMatch())
-        return true;
-
-    // Localized InkRecognizer display names. Covers the common display-language
-    // permutations; the English tokens cover EN Windows, the CJK tokens cover
-    // ZH / JA / KO Windows regardless of which recognizer's name we're reading.
-    static const QString kCjkMarkers[] = {
-        // English tokens (EN Windows UI)
-        QStringLiteral("Chinese"),
-        QStringLiteral("Japanese"),
-        QStringLiteral("Korean"),
-        // Chinese tokens
-        QStringLiteral("中文"),    // Chinese (ZH name)
-        QStringLiteral("中国"),    // China / Chinese
-        QStringLiteral("日语"),    // Japanese (ZH name)
-        QStringLiteral("韩国"),    // Korea (ZH name, simplified)
-        QStringLiteral("韓国"),    // Korea (JP / traditional)
-        // Japanese / Korean tokens
-        QStringLiteral("日本"),    // Japan / Japanese (JP & ZH)
-        QStringLiteral("한국"),    // Korea / Korean (KO)
-        QStringLiteral("한글"),    // Hangul script (KO)
-        QStringLiteral("조선"),    // Korean (alt.)
-    };
-    for (const auto& marker : kCjkMarkers) {
-        if (lang.contains(marker, Qt::CaseInsensitive))
-            return true;
-    }
-    return false;
-}
-
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
@@ -2379,6 +2313,13 @@ void MainWindow::switchPage(int pageIndex) {
     vp->scrollToPage(pageIndex);
 }
 
+void MainWindow::updateActiveScrollBarMap()
+{
+    if (m_splitViewManager) {
+        m_splitViewManager->updateScrollBarDocumentMap(currentViewport());
+    }
+}
+
 void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     // Connects the current viewport's tool/mode/event signals. Scroll-fraction
     // <-> scroll-bar plumbing now lives per-pane in SplitViewManager (SB1);
@@ -2505,6 +2446,10 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     if (m_linkAppearanceConn) {
         disconnect(m_linkAppearanceConn);
         m_linkAppearanceConn = {};
+    }
+    if (m_linkSlotsConn) {
+        disconnect(m_linkSlotsConn);
+        m_linkSlotsConn = {};
     }
     if (m_pdfSourcesConn) {
         disconnect(m_pdfSourcesConn);
@@ -2992,9 +2937,7 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
                 refreshNotesOutline();
             }
             // SB2: link add/remove/move/undo/redo changes the scroll-bar markers.
-            if (m_splitViewManager) {
-                m_splitViewManager->updateScrollBarDocumentMap(currentViewport());
-            }
+            updateActiveScrollBarMap();
         });
 
         // Only one LinkObject's description/color changed, so patch that row in
@@ -3007,10 +2950,16 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
                 markdownNotesSidebar->updateLinkObject(linkObjectId, description, color);
             }
             // SB2: the marker's colour and tooltip come from the LinkObject.
-            if (m_splitViewManager) {
-                m_splitViewManager->updateScrollBarDocumentMap(currentViewport());
-            }
+            updateActiveScrollBarMap();
         });
+
+        // SB2: filling or clearing a slot can cross the "has content" threshold
+        // the marker filter uses, so the bar has to be repainted here too. The
+        // notes sidebar is deliberately not touched: a slot edit does not change
+        // the set of annotations, and rebuilding that tree would collapse its
+        // expanded subtrees.
+        m_linkSlotsConn = connect(viewport, &DocumentViewport::linkSlotsChanged,
+                this, [this]() { updateActiveScrollBarMap(); });
 
         // OCR: Restart debounce timer when strokes change
         m_strokesChangedConn = connect(viewport, &DocumentViewport::strokesChanged, this, [this]() {
@@ -3018,17 +2967,29 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
                 m_ocrDebounceTimer->start();
         });
 
-        // OCR: Sync text visibility with the Show Text toggle for the new viewport
-        setOcrTextVisibility(m_toolbar->ocrSubToolbar()->isShowTextEnabled());
-        setOcrConfidenceVisibility(m_toolbar->ocrSubToolbar()->isConfidenceEnabled());
-
-        // OCR: Restore snap toggle from document's persisted state
+        // OCR: Seed the three document-backed toggles from the new document.
+        // The document is authoritative for all three (they round-trip through
+        // the notebook JSON), so this pushes doc -> toolbar, never the reverse.
         if (Document* doc = viewport->document()) {
             OcrSubToolbar* ocrST = m_toolbar->ocrSubToolbar();
             ocrST->blockSignals(true);
+            ocrST->setAutoOcrChecked(doc->ocrAutoRecognize);
+            ocrST->setShowTextChecked(doc->ocrTextVisible());
             ocrST->setSnapToGridChecked(doc->ocrSnapToBackground);
             ocrST->blockSignals(false);
+
+            // The debounce flag is otherwise only written when the user clicks
+            // the button, so without this it would keep the previous document's
+            // value while the button shows this one's.
+            m_autoOcrEnabled = doc->ocrAutoRecognize;
+            if (!m_autoOcrEnabled && m_ocrDebounceTimer)
+                m_ocrDebounceTimer->stop();
+
+            setOcrTextVisibility(doc->ocrTextVisible());
         }
+
+        // Confidence stays a session preference with no document field.
+        setOcrConfidenceVisibility(m_toolbar->ocrSubToolbar()->isConfidenceEnabled());
 
         // MAC.6: Re-sync the 3 checkable OCR menu QActions from the toolbar.
         // Both the restoreTabState path (Toolbar::onTabChanged ->
@@ -5820,23 +5781,37 @@ void MainWindow::connectSubToolbarSignals()
     auto* ocrST = m_toolbar->ocrSubToolbar();
     connect(ocrST, &OcrSubToolbar::scanPageClicked, this, &MainWindow::triggerOcrForCurrentPage);
     connect(ocrST, &OcrSubToolbar::scanAllClicked, this, &MainWindow::triggerOcrForAllPages);
-    connect(ocrST, &OcrSubToolbar::autoOcrToggled, this, [this](bool enabled) {
+    // The three document-backed toggles write through to the current document,
+    // which is what connectViewportScrollSignals reads back on a viewport switch.
+    auto activeDocument = [this]() -> Document* {
+        DocumentViewport* vp = currentViewport();
+        return vp ? vp->document() : nullptr;
+    };
+    connect(ocrST, &OcrSubToolbar::autoOcrToggled, this, [this, activeDocument](bool enabled) {
         m_autoOcrEnabled = enabled;
         if (!enabled && m_ocrDebounceTimer)
             m_ocrDebounceTimer->stop();
+        if (Document* doc = activeDocument()) {
+            doc->ocrAutoRecognize = enabled;
+            doc->markModified();
+        }
     });
-    connect(ocrST, &OcrSubToolbar::showTextToggled, this, [this](bool enabled) {
+    connect(ocrST, &OcrSubToolbar::showTextToggled, this, [this, activeDocument](bool enabled) {
+        // setOcrTextVisibility already stores the flag on the document.
         setOcrTextVisibility(enabled);
+        if (Document* doc = activeDocument())
+            doc->markModified();
     });
     connect(ocrST, &OcrSubToolbar::confidenceToggled, this, [this](bool enabled) {
         setOcrConfidenceVisibility(enabled);
     });
-    connect(ocrST, &OcrSubToolbar::snapToGridToggled, this, [this](bool enabled) {
-        DocumentViewport* vp = currentViewport();
-        Document* doc = vp ? vp->document() : nullptr;
-        if (doc) {
+    connect(ocrST, &OcrSubToolbar::snapToGridToggled, this, [this, activeDocument](bool enabled) {
+        if (Document* doc = activeDocument()) {
             doc->ocrSnapToBackground = enabled;
-            doc->modified = true;
+            doc->markModified();
+            // Snapping feeds the render fields on every OCR object, so re-derive
+            // them instead of waiting for the next scan.
+            setOcrTextVisibility(doc->ocrTextVisible());
         }
     });
 
@@ -6674,6 +6649,12 @@ void MainWindow::setupOcr()
     connect(m_ocrWorker, &OcrWorker::downloadedLanguagesAvailable, this, [this](const QStringList& langs) {
         m_ocrDownloadedLanguages = langs;
     }, Qt::QueuedConnection);
+    connect(m_ocrWorker, &OcrWorker::autoLanguageSupported, this, [this](bool supported) {
+        m_ocrAutoLanguageSupported = supported;
+    }, Qt::QueuedConnection);
+    connect(m_ocrWorker, &OcrWorker::confidenceSupported, this, [this](bool supported) {
+        m_toolbar->setOcrConfidenceSupported(supported);
+    }, Qt::QueuedConnection);
     // Engine status (e.g. Linux on-demand model download) -> OCR subtoolbar label.
     connect(m_ocrWorker, &OcrWorker::statusMessage, this, [this](const QString& message) {
         if (m_toolbar && m_toolbar->ocrSubToolbar()) {
@@ -7126,23 +7107,18 @@ void MainWindow::syncOcrTextObjects(Document* owner, Page* page,
     for (const auto& oid : toRemove)
         page->removeObject(oid);
 
-    bool showText = m_toolbar->ocrSubToolbar()->isShowTextEnabled();
+    // Read visibility and snapping from the document that owns the page, not
+    // from the active viewport: a scan can finish while a different tab is in
+    // front, and all three settings are per-document.
+    bool showText = owner && owner->ocrTextVisible();
     bool showConf = m_toolbar->ocrSubToolbar()->isConfidenceEnabled();
     bool dark = isDarkMode();
 
     // Pre-compute snap rendering state once for all blocks
-    DocumentViewport* vp = currentViewport();
-    Document* doc = vp ? vp->document() : nullptr;
     bool isGrid = (page->backgroundType == Page::BackgroundType::Grid);
     bool isLines = (page->backgroundType == Page::BackgroundType::Lines);
-    bool pageSnap = doc && doc->ocrSnapToBackground && (isGrid || isLines);
-    bool pageCjk = false;
-    if (pageSnap && isGrid) {
-        QSettings settings("SpeedyNote", "App");
-        if (settings.value("ocrCjkGridMode", false).toBool()) {
-            pageCjk = isCjkOcrLanguage(resolveOcrLanguage(doc));
-        }
-    }
+    bool pageSnap = owner && owner->ocrSnapToBackground && (isGrid || isLines);
+    bool pageCjk = pageSnap && isGrid && owner->resolveOcrCjkGridMode();
     // Grid spacing only drives the CJK grid-cell overlay; line snapping (every
     // non-CJK case) uses line spacing regardless of background.
     int snapSpacing = pageCjk ? page->gridSpacing : page->lineSpacing;
@@ -7186,22 +7162,15 @@ void MainWindow::setOcrTextVisibility(bool visible)
     QColor bg = TextBoxObject::defaultBackgroundColor(dark);
 
     bool snapEnabled = doc->ocrSnapToBackground;
-    bool cjkGlobal = false;
-    if (snapEnabled) {
-        QSettings snapSettings("SpeedyNote", "App");
-        cjkGlobal = snapSettings.value("ocrCjkGridMode", false).toBool();
-    }
+    bool cjkEnabled = snapEnabled && doc->resolveOcrCjkGridMode();
 
-    auto setOnPage = [this, visible, bg, doc, snapEnabled, cjkGlobal](Page* page) {
+    auto setOnPage = [visible, bg, snapEnabled, cjkEnabled](Page* page) {
         if (!page) return;
 
         bool isGrid = (page->backgroundType == Page::BackgroundType::Grid);
         bool isLines = (page->backgroundType == Page::BackgroundType::Lines);
         bool pageSnap = snapEnabled && (isGrid || isLines);
-        bool pageCjk = false;
-        if (pageSnap && cjkGlobal && isGrid) {
-            pageCjk = isCjkOcrLanguage(resolveOcrLanguage(doc));
-        }
+        bool pageCjk = pageSnap && cjkEnabled && isGrid;
         int spacing = pageCjk ? page->gridSpacing : page->lineSpacing;
 
         for (const auto& obj : page->objects) {
@@ -7261,10 +7230,57 @@ void MainWindow::setOcrConfidenceVisibility(bool enabled)
     vp->update();
 }
 
+QString MainWindow::ocrAutoLanguageLabel(bool autoDetectSupported)
+{
+    if (autoDetectSupported)
+        return tr("Auto-detect (system default)");
+
+    const QString name = QLocale::system().nativeLanguageName();
+    return name.isEmpty() ? tr("System default")
+                          : tr("System default (%1)").arg(name);
+}
+
+QString MainWindow::ocrAutoLanguageTooltip(bool autoDetectSupported)
+{
+    if (autoDetectSupported)
+        return QString();
+
+    return tr("This engine cannot detect the script it is reading. It uses the "
+              "handwriting recognizer Windows picked for your language, so "
+              "choose a language below when writing in another script.");
+}
+
+void MainWindow::refreshOcrSettingsForDocument(Document* doc)
+{
+    if (!doc) return;
+
+    DocumentViewport* vp = currentViewport();
+    if (!vp || vp->document() != doc)
+        return;  // setOcrTextVisibility and the toolbar both act on the active pane
+
+    OcrSubToolbar* ocrST = m_toolbar->ocrSubToolbar();
+    ocrST->blockSignals(true);
+    ocrST->setAutoOcrChecked(doc->ocrAutoRecognize);
+    ocrST->setShowTextChecked(doc->ocrTextVisible());
+    ocrST->setSnapToGridChecked(doc->ocrSnapToBackground);
+    ocrST->blockSignals(false);
+
+    m_autoOcrEnabled = doc->ocrAutoRecognize;
+    if (!m_autoOcrEnabled && m_ocrDebounceTimer)
+        m_ocrDebounceTimer->stop();
+
+    // Re-derives visibility, snapping and CJK mode on every loaded OCR object
+    // and repaints, so a change here shows up without waiting for a new scan.
+    setOcrTextVisibility(doc->ocrTextVisible());
+
+    if (isActiveWindow())
+        syncOcrCheckActions();
+}
+
 QString MainWindow::resolveOcrLanguage(Document* doc) const
 {
-    if (doc && !doc->ocrLanguage.isEmpty())
-        return doc->ocrLanguage;
+    if (doc)
+        return doc->resolveOcrLanguage();
     QSettings settings("SpeedyNote", "App");
     return settings.value("ocrLanguage").toString();
 }
@@ -7275,12 +7291,7 @@ OcrSnapParams MainWindow::buildOcrSnapParams(Document* doc, Page* page) const
     if (!doc || !page) return snap;
 
     snap.enabled = doc->ocrSnapToBackground;
-    QSettings settings("SpeedyNote", "App");
-    // Grid-cell snapping exists only for CJK: it requires both the toggle AND a
-    // CJK OCR language. For every non-CJK language we fall back to line snapping
-    // regardless of background (see OcrWorker grouping).
-    snap.cjkGridMode = settings.value("ocrCjkGridMode", false).toBool()
-                       && isCjkOcrLanguage(resolveOcrLanguage(doc));
+    snap.cjkGridMode = doc->resolveOcrCjkGridMode();
     snap.gridSpacing = page->gridSpacing;
     snap.lineSpacing = page->lineSpacing;
     snap.backgroundIsGrid = (page->backgroundType == Page::BackgroundType::Grid);
@@ -7488,7 +7499,11 @@ void MainWindow::showOcrLanguageDialog()
 
     auto* combo = new QComboBox(&dlg);
     combo->addItem(tr("Use global setting"), QStringLiteral(""));
-    combo->addItem(tr("Auto-detect (system default)"), QStringLiteral("auto"));
+    combo->addItem(ocrAutoLanguageLabel(m_ocrAutoLanguageSupported),
+                   QStringLiteral("auto"));
+    combo->setItemData(combo->count() - 1,
+                       ocrAutoLanguageTooltip(m_ocrAutoLanguageSupported),
+                       Qt::ToolTipRole);
 
     // Partition languages: common first, then the rest sorted by display name
     static const QStringList commonTags = {

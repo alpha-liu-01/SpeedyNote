@@ -135,7 +135,9 @@ struct OcrTextBlock {
                 rect[0].toDouble(), rect[1].toDouble(),
                 rect[2].toDouble(), rect[3].toDouble());
         }
-        block.confidence = static_cast<float>(obj["confidence"].toDouble(0.0));
+        // Missing score means "unknown", not "worst possible"; see
+        // OcrTextObject::drawConfidenceUnderline.
+        block.confidence = static_cast<float>(obj["confidence"].toDouble(1.0));
         for (const auto& val : obj["sourceStrokeIds"].toArray())
             block.sourceStrokeIds.append(val.toString());
         block.engineId = obj["engineId"].toString();

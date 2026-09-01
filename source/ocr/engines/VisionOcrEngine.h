@@ -31,6 +31,9 @@ public:
     bool isAvailable() const override;
     QStringList availableLanguages() const override;
 
+    // VNRecognizedText reports a real per-observation score.
+    bool providesConfidence() const override { return true; }
+
 protected:
     ImageRecognition recognizeImage(const QImage& strip,
                                     const QString& languageTag) override;

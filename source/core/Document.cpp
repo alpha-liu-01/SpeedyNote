@@ -12,6 +12,7 @@
 #include <QBuffer>
 #include <QCryptographicHash>
 #include <QImageReader>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QSettings>
 #include <QtConcurrent>
@@ -2982,6 +2983,12 @@ QJsonObject Document::toJson() const
         obj["ocr_language"] = ocrLanguage;
     if (ocrSnapToBackground)
         obj["ocr_snap_to_background"] = true;
+    if (ocrAutoRecognize)
+        obj["ocr_auto_recognize"] = true;
+    if (m_ocrTextVisible)
+        obj["ocr_show_text"] = true;
+    if (ocrCjkGridModeOverride >= 0)
+        obj["ocr_cjk_grid_mode"] = (ocrCjkGridModeOverride == 1);
 
     // PDF display overrides (written only when overridden; absent = inherit global)
     if (pdfInvertDarkOverride >= 0)
@@ -3111,6 +3118,10 @@ std::unique_ptr<Document> Document::fromJson(const QJsonObject& obj)
     // OCR settings
     doc->ocrLanguage = obj["ocr_language"].toString();
     doc->ocrSnapToBackground = obj["ocr_snap_to_background"].toBool(false);
+    doc->ocrAutoRecognize = obj["ocr_auto_recognize"].toBool(false);
+    doc->m_ocrTextVisible = obj["ocr_show_text"].toBool(false);
+    doc->ocrCjkGridModeOverride = obj.contains("ocr_cjk_grid_mode")
+        ? (obj["ocr_cjk_grid_mode"].toBool() ? 1 : 0) : -1;
 
     // PDF display overrides (absent key = inherit global, stored as -1)
     doc->pdfInvertDarkOverride = obj.contains("pdf_invert_dark")
@@ -5753,6 +5764,70 @@ bool Document::loadTileOcr(Page* tile, TileCoord coord) const
     return true;
 }
 
+bool Document::isCjkOcrLanguage(const QString& lang)
+{
+    // Empty or explicit "auto" = unknown. Preserve the caller's enable flag
+    // (it has already decided grid mode should apply), so return true here to
+    // keep the previous behaviour for system-default languages.
+    if (lang.isEmpty() || lang.compare(QLatin1String("auto"), Qt::CaseInsensitive) == 0)
+        return true;
+
+    // BCP-47: "zh", "ja", "ko", optionally followed by script/region subtags.
+    static const QRegularExpression kBcp47Cjk(
+        QStringLiteral("^(zh|ja|ko)(?:[-_].*)?$"),
+        QRegularExpression::CaseInsensitiveOption);
+    if (kBcp47Cjk.match(lang).hasMatch())
+        return true;
+
+    // Localized InkRecognizer display names. Covers the common display-language
+    // permutations; the English tokens cover EN Windows, the CJK tokens cover
+    // ZH / JA / KO Windows regardless of which recognizer's name we're reading.
+    static const QString kCjkMarkers[] = {
+        // English tokens (EN Windows UI)
+        QStringLiteral("Chinese"),
+        QStringLiteral("Japanese"),
+        QStringLiteral("Korean"),
+        // Chinese tokens
+        QStringLiteral("中文"),    // Chinese (ZH name)
+        QStringLiteral("中国"),    // China / Chinese
+        QStringLiteral("日语"),    // Japanese (ZH name)
+        QStringLiteral("韩国"),    // Korea (ZH name, simplified)
+        QStringLiteral("韓国"),    // Korea (JP / traditional)
+        // Japanese / Korean tokens
+        QStringLiteral("日本"),    // Japan / Japanese (JP & ZH)
+        QStringLiteral("한국"),    // Korea / Korean (KO)
+        QStringLiteral("한글"),    // Hangul script (KO)
+        QStringLiteral("조선"),    // Korean (alt.)
+    };
+    for (const auto& marker : kCjkMarkers) {
+        if (lang.contains(marker, Qt::CaseInsensitive))
+            return true;
+    }
+    return false;
+}
+
+QString Document::resolveOcrLanguage() const
+{
+    if (!ocrLanguage.isEmpty())
+        return ocrLanguage;
+    QSettings settings("SpeedyNote", "App");
+    return settings.value("ocrLanguage").toString();
+}
+
+bool Document::resolveOcrCjkGridMode() const
+{
+    bool enabled;
+    if (ocrCjkGridModeOverride >= 0) {
+        enabled = (ocrCjkGridModeOverride == 1);
+    } else {
+        QSettings settings("SpeedyNote", "App");
+        enabled = settings.value("ocrCjkGridMode", false).toBool();
+    }
+    // Grid-cell snapping exists only for CJK: for every other language we fall
+    // back to line snapping regardless of background (see OcrWorker grouping).
+    return enabled && isCjkOcrLanguage(resolveOcrLanguage());
+}
+
 void Document::materializeOcrTextObjects(Page* page) const
 {
     if (!page || page->ocrTextBlocks.isEmpty())
@@ -5774,20 +5849,7 @@ void Document::materializeOcrTextObjects(Page* page) const
     bool isGrid = (page->backgroundType == Page::BackgroundType::Grid);
     bool isLines = (page->backgroundType == Page::BackgroundType::Lines);
     bool pageSnap = ocrSnapToBackground && (isGrid || isLines);
-    bool pageCjk = false;
-    if (pageSnap && isGrid) {
-        QSettings settings("SpeedyNote", "App");
-        if (settings.value("ocrCjkGridMode", false).toBool()) {
-            QString lang = ocrLanguage.isEmpty()
-                ? settings.value("ocrLanguage").toString()
-                : ocrLanguage;
-            pageCjk = lang.isEmpty()
-                || lang == QLatin1String("auto")
-                || lang.startsWith(QLatin1String("zh"), Qt::CaseInsensitive)
-                || lang.startsWith(QLatin1String("ja"), Qt::CaseInsensitive)
-                || lang.startsWith(QLatin1String("ko"), Qt::CaseInsensitive);
-        }
-    }
+    bool pageCjk = pageSnap && isGrid && resolveOcrCjkGridMode();
     // Grid spacing only drives the CJK grid-cell overlay; non-CJK uses line
     // spacing regardless of background (matches OcrWorker line snapping).
     int snapSpacing = pageCjk ? page->gridSpacing : page->lineSpacing;

@@ -4,6 +4,7 @@
 
 #include <QHash>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPixmap>
 #include <QFontMetricsF>
 #include <algorithm>
@@ -11,6 +12,15 @@
 
 // CJK detection shared with PdfSearchEngine / WindowsInkOcrEngine / DocumentViewport:
 // see isCjkLikeChar in OcrTextBlock.h (reached transitively via OcrTextObject.h).
+
+namespace {
+// Engines do not share a confidence scale - PP-OCR clusters high on clean text
+// while Apple Vision reports much lower numbers for correct handwriting - so
+// these two live in one place and are expected to need a tuning pass per
+// platform. Marking starts at "warn" and turns red at "bad".
+constexpr float kConfidenceWarnThreshold = 0.8f;
+constexpr float kConfidenceBadThreshold = 0.5f;
+} // namespace
 
 void OcrTextObject::drawLockBadge(QPainter& painter, const QRectF& rect) const
 {
@@ -38,6 +48,40 @@ void OcrTextObject::drawLockBadge(QPainter& painter, const QRectF& rect) const
         painter.drawPixmap(QRectF(x + off, y + off, iconSize, iconSize), icon, QRectF(icon.rect()));
     }
 
+    painter.restore();
+}
+
+void OcrTextObject::drawConfidenceUnderline(QPainter& painter, const QRectF& rect, qreal zoom) const
+{
+    if (confidence >= kConfidenceWarnThreshold)
+        return;
+
+    // Confidence is one number for the whole line, so the wave spans the line
+    // rect rather than individual words: per-word marking would imply a
+    // precision the data does not have.
+    const qreal amplitude = qBound(0.8, 1.5 * zoom, 3.0);
+    const qreal halfPeriod = amplitude * 2.0;
+    if (rect.width() < halfPeriod * 2.0 || rect.height() < amplitude * 2.0)
+        return;
+
+    const qreal baseY = rect.bottom() - amplitude;
+
+    QPainterPath wave;
+    wave.moveTo(rect.left(), baseY);
+    bool up = true;
+    for (qreal x = rect.left() + halfPeriod; x <= rect.right(); x += halfPeriod) {
+        wave.lineTo(x, baseY + (up ? -amplitude : amplitude));
+        up = !up;
+    }
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setBrush(Qt::NoBrush);
+    QPen pen(confidence < kConfidenceBadThreshold ? QColor(220, 60, 60)
+                                                  : QColor(220, 160, 40));
+    pen.setWidthF(qBound(0.8, zoom, 2.0));
+    painter.setPen(pen);
+    painter.drawPath(wave);
     painter.restore();
 }
 
@@ -94,14 +138,7 @@ void OcrTextObject::render(QPainter& painter, qreal zoom) const
             painter.drawRect(lineRect);
         }
 
-        QColor penColor = fontColor;
-        if (showConfidence && !ocrLocked) {
-            if (confidence < 0.5f)
-                penColor = QColor(220, 60, 60);
-            else if (confidence < 0.8f)
-                penColor = QColor(220, 160, 40);
-        }
-        painter.setPen(penColor);
+        painter.setPen(fontColor);
 
         qreal baseFontSize = ocrGridSpacing * zoom * 0.72;
         if (baseFontSize < 1.0)
@@ -184,6 +221,8 @@ void OcrTextObject::render(QPainter& painter, qreal zoom) const
 
         if (ocrLocked)
             drawLockBadge(painter, lineRect);
+        else if (showConfidence)
+            drawConfidenceUnderline(painter, lineRect, zoom);
 
         painter.restore();
     } else {
@@ -202,14 +241,7 @@ void OcrTextObject::render(QPainter& painter, qreal zoom) const
                 painter.drawRect(lineRect);
             }
 
-            QColor penColor = fontColor;
-            if (showConfidence && !ocrLocked) {
-                if (confidence < 0.5f)
-                    penColor = QColor(220, 60, 60);
-                else if (confidence < 0.8f)
-                    penColor = QColor(220, 160, 40);
-            }
-            painter.setPen(penColor);
+            painter.setPen(fontColor);
 
             QFont font;
             if (!fontFamily.isEmpty())
@@ -253,6 +285,8 @@ void OcrTextObject::render(QPainter& painter, qreal zoom) const
 
             if (ocrLocked)
                 drawLockBadge(painter, lineRect);
+            else if (showConfidence)
+                drawConfidenceUnderline(painter, lineRect, zoom);
 
             painter.restore();
             return;
@@ -307,14 +341,7 @@ void OcrTextObject::render(QPainter& painter, qreal zoom) const
         }
 
         // --- Step 5: render each run with TextBoxObject-style font sizing ---
-        QColor penColor = fontColor;
-        if (showConfidence && !ocrLocked) {
-            if (confidence < 0.5f)
-                penColor = QColor(220, 60, 60);
-            else if (confidence < 0.8f)
-                penColor = QColor(220, 160, 40);
-        }
-        painter.setPen(penColor);
+        painter.setPen(fontColor);
 
         QFont font;
         if (!fontFamily.isEmpty())
@@ -354,6 +381,8 @@ void OcrTextObject::render(QPainter& painter, qreal zoom) const
 
         if (ocrLocked)
             drawLockBadge(painter, lineRect);
+        else if (showConfidence)
+            drawConfidenceUnderline(painter, lineRect, zoom);
 
         painter.restore();
     }
@@ -410,7 +439,9 @@ void OcrTextObject::loadFromJson(const QJsonObject& obj)
     sourceStrokeIds.clear();
     for (const auto& val : obj["sourceStrokeIds"].toArray())
         sourceStrokeIds.append(val.toString());
-    confidence = static_cast<float>(obj["confidence"].toDouble(0.0));
+    // Missing score means "unknown", which must not read as "worst possible"
+    // now that low confidence is drawn.
+    confidence = static_cast<float>(obj["confidence"].toDouble(1.0));
     engineId = obj["engineId"].toString();
     ocrDirty = obj["ocrDirty"].toBool(false);
     ocrLocked = obj["ocrLocked"].toBool(false);

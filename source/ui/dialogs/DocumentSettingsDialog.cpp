@@ -42,9 +42,8 @@ DocumentSettingsDialog::DocumentSettingsDialog(MainWindow* mainWindow, Document*
     tabWidget = new QTabWidget(this);
 
     createPageTab();
-    createLanguageTab();
+    createOcrTab();
     createThemeTab();
-    // Follow-up plan: createToolsTab() (CJK grid-cell mode).
 
     mainLayout->addWidget(tabWidget);
 
@@ -291,24 +290,30 @@ void DocumentSettingsDialog::onPageSizePresetChanged(int index)
 }
 
 // ============================================================================
-// Language tab - per-document OCR recognizer override
+// OCR tab - per-document recognizer override plus the four OCR toggles
 // ============================================================================
 
-void DocumentSettingsDialog::createLanguageTab()
+void DocumentSettingsDialog::createOcrTab()
 {
-    languageTab = new QWidget(this);
-    QVBoxLayout* layout = new QVBoxLayout(languageTab);
+    ocrTab = new QWidget(this);
+    QVBoxLayout* layout = new QVBoxLayout(ocrTab);
 
     layout->addSpacing(6);
 
     QLabel* label = new QLabel(
-        tr("Handwriting recognition language for this document:"), languageTab);
+        tr("Handwriting recognition language for this document:"), ocrTab);
     label->setWordWrap(true);
     layout->addWidget(label);
 
-    ocrLanguageCombo = new QComboBox(languageTab);
+    ocrLanguageCombo = new QComboBox(ocrTab);
     ocrLanguageCombo->addItem(tr("Use global setting"), QStringLiteral(""));
-    ocrLanguageCombo->addItem(tr("Auto-detect (system default)"), QStringLiteral("auto"));
+    {
+        const bool autoDetect = mainWindowRef ? mainWindowRef->ocrSupportsAutoLanguage() : true;
+        ocrLanguageCombo->addItem(MainWindow::ocrAutoLanguageLabel(autoDetect),
+                                  QStringLiteral("auto"));
+        ocrLanguageCombo->setItemData(1, MainWindow::ocrAutoLanguageTooltip(autoDetect),
+                                      Qt::ToolTipRole);
+    }
 
     // Partition languages: common first, then the rest sorted by display name
     // (same behavior as the former MainWindow::showOcrLanguageDialog()).
@@ -365,18 +370,62 @@ void DocumentSettingsDialog::createLanguageTab()
     QLabel* globalNote = new QLabel(
         tr("\"Use global setting\" inherits from Settings > Language > "
            "Handwriting Recognition Language."),
-        languageTab);
+        ocrTab);
     globalNote->setWordWrap(true);
     globalNote->setStyleSheet("color: gray; font-size: 11px;");
     layout->addWidget(globalNote);
+
+    // ========== RECOGNITION BEHAVIOUR SECTION ==========
+    layout->addSpacing(12);
+
+    QLabel* behaviourLabel = new QLabel(tr("Recognition (this document)"), ocrTab);
+    behaviourLabel->setStyleSheet("font-weight: bold; margin-top: 5px;");
+    layout->addWidget(behaviourLabel);
+
+    autoOcrCheck = new QCheckBox(tr("Recognize handwriting automatically"), ocrTab);
+    autoOcrCheck->setToolTip(tr("Re-run recognition shortly after you stop writing."));
+    layout->addWidget(autoOcrCheck);
+
+    showTextCheck = new QCheckBox(tr("Show recognized text"), ocrTab);
+    layout->addWidget(showTextCheck);
+
+    snapToGridCheck = new QCheckBox(tr("Snap OCR to grid/lines"), ocrTab);
+    snapToGridCheck->setToolTip(
+        tr("Align recognized text to the page's grid or line spacing. "
+           "Requires a grid or lined background."));
+    layout->addWidget(snapToGridCheck);
+
+    layout->addSpacing(8);
+
+    QLabel* cjkLabel = new QLabel(tr("CJK grid-cell mode:"), ocrTab);
+    layout->addWidget(cjkLabel);
+
+    cjkGridModeCombo = new QComboBox(ocrTab);
+    cjkGridModeCombo->addItem(tr("Use global setting"), -1);
+    cjkGridModeCombo->addItem(tr("On"), 1);
+    cjkGridModeCombo->addItem(tr("Off"), 0);
+    layout->addWidget(cjkGridModeCombo);
+
+    QLabel* cjkNote = new QLabel(
+        tr("With snapping on and a grid background, each grid cell detects one "
+           "CJK character. Only applies when the recognition language is Chinese, "
+           "Japanese or Korean. Inherits from Settings > Tools > OCR."),
+        ocrTab);
+    cjkNote->setWordWrap(true);
+    cjkNote->setStyleSheet("color: gray; font-size: 11px;");
+    layout->addWidget(cjkNote);
 
     layout->addStretch();
 
     if (!m_doc) {
         ocrLanguageCombo->setEnabled(false);
+        autoOcrCheck->setEnabled(false);
+        showTextCheck->setEnabled(false);
+        snapToGridCheck->setEnabled(false);
+        cjkGridModeCombo->setEnabled(false);
     }
 
-    tabWidget->addTab(languageTab, tr("Language"));
+    tabWidget->addTab(ocrTab, tr("OCR"));
 }
 
 // ============================================================================
@@ -538,6 +587,15 @@ void DocumentSettingsDialog::loadSettings()
         if (idx >= 0) ocrLanguageCombo->setCurrentIndex(idx);
     }
 
+    // OCR toggles: all three are stored on the document.
+    if (autoOcrCheck) autoOcrCheck->setChecked(m_doc->ocrAutoRecognize);
+    if (showTextCheck) showTextCheck->setChecked(m_doc->ocrTextVisible());
+    if (snapToGridCheck) snapToGridCheck->setChecked(m_doc->ocrSnapToBackground);
+    if (cjkGridModeCombo) {
+        int idx = cjkGridModeCombo->findData(m_doc->ocrCjkGridModeOverride);
+        if (idx >= 0) cjkGridModeCombo->setCurrentIndex(idx);
+    }
+
     // PDF display overrides: pre-select the tri-state values.
     if (pdfInvertDarkCombo) {
         int idx = pdfInvertDarkCombo->findData(m_doc->pdfInvertDarkOverride);
@@ -604,6 +662,33 @@ void DocumentSettingsDialog::applyChanges()
         const QString selectedLang = ocrLanguageCombo->currentData().toString();
         if (selectedLang != m_doc->ocrLanguage) {
             mainWindowRef->applyDocumentOcrLanguage(m_doc, selectedLang);
+        }
+    }
+
+    // OCR toggles. All four feed either the toolbar buttons or the render
+    // fields on every OCR object, so one refresh at the end covers them.
+    if (autoOcrCheck && showTextCheck && snapToGridCheck && cjkGridModeCombo && mainWindowRef) {
+        const int cjkVal = cjkGridModeCombo->currentData().toInt();
+        bool changed = false;
+        if (autoOcrCheck->isChecked() != m_doc->ocrAutoRecognize) {
+            m_doc->ocrAutoRecognize = autoOcrCheck->isChecked();
+            changed = true;
+        }
+        if (showTextCheck->isChecked() != m_doc->ocrTextVisible()) {
+            m_doc->setOcrTextVisible(showTextCheck->isChecked());
+            changed = true;
+        }
+        if (snapToGridCheck->isChecked() != m_doc->ocrSnapToBackground) {
+            m_doc->ocrSnapToBackground = snapToGridCheck->isChecked();
+            changed = true;
+        }
+        if (cjkVal != m_doc->ocrCjkGridModeOverride) {
+            m_doc->ocrCjkGridModeOverride = cjkVal;
+            changed = true;
+        }
+        if (changed) {
+            m_doc->markModified();
+            mainWindowRef->refreshOcrSettingsForDocument(m_doc);
         }
     }
 

@@ -146,11 +146,24 @@ public:
     QStringList ocrAvailableLanguages() const { return m_ocrAvailableLanguages; }
     // Subset already present locally; the rest need an on-demand download.
     QStringList ocrDownloadedLanguages() const { return m_ocrDownloadedLanguages; }
+    // False when the engine's "auto" option is really "whatever recognizer the
+    // system picked" (Windows Ink), so the language combos can say so.
+    bool ocrSupportsAutoLanguage() const { return m_ocrAutoLanguageSupported; }
+    // Wording for the first entry of every OCR language combo. Shared so the
+    // three of them cannot drift apart.
+    static QString ocrAutoLanguageLabel(bool autoDetectSupported);
+    static QString ocrAutoLanguageTooltip(bool autoDetectSupported);
 
     // Apply a per-document OCR recognizer language override (empty = global
     // fallback). Marks the document modified and refreshes the OCR worker.
     // Shared by showOcrLanguageDialog() and DocumentSettingsDialog.
     void applyDocumentOcrLanguage(Document* doc, const QString& lang);
+
+    // Re-apply a document's four OCR settings after DocumentSettingsDialog
+    // edits them: re-seeds the subtoolbar buttons and re-derives the render
+    // fields on every loaded OCR object. No-op unless the document is the one
+    // in the active viewport, which is the only pane those two act on.
+    void refreshOcrSettingsForDocument(Document* doc);
 
     // Theme settings
     QColor customAccentColor;
@@ -378,6 +391,11 @@ private slots:
 
     // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
     void connectViewportScrollSignals(DocumentViewport* viewport);  // Phase 3.3
+    /// Rebuild the active pane's scroll-bar overlay data (link markers, PDF
+    /// source accents, page-wheel range). The markers depend on which
+    /// LinkObjects exist, how many slots each has filled, and their colour and
+    /// description, so all three link signals have to land here.
+    void updateActiveScrollBarMap();
     void centerViewportContent(int tabIndex);  // Phase 3.3: One-time horizontal centering
     void updateLayerPanelForViewport(DocumentViewport* viewport);  // Phase 5.1: Update LayerPanel
     void updateOutlinePanelForDocument(Document* doc);  // Phase E.2: Update OutlinePanel for document
@@ -681,6 +699,7 @@ private:
     bool m_autoOcrEnabled = false;
     QStringList m_ocrAvailableLanguages;
     QStringList m_ocrDownloadedLanguages;
+    bool m_ocrAutoLanguageSupported = true;
     std::set<std::pair<int,int>> m_ocrTempLoadedTiles;
     Document* m_ocrTempLoadedDoc = nullptr;
     
@@ -818,6 +837,7 @@ private:
     QMetaObject::Connection m_userWarningConn;        // For viewport userWarning → QMessageBox
     QMetaObject::Connection m_linkObjectListConn;     // M.7.3: For linkObjectListMayHaveChanged
     QMetaObject::Connection m_linkAppearanceConn;     // For linkObjectAppearanceChanged
+    QMetaObject::Connection m_linkSlotsConn;          // SB2: For linkSlotsChanged
     QMetaObject::Connection m_pdfSourcesConn;
     QMetaObject::Connection m_pdfBannerReserveConn;  // Banner height → search bar Y
     QMetaObject::Connection m_strokesChangedConn;      // OCR: For strokesChanged → debounce
