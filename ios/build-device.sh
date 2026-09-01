@@ -202,8 +202,17 @@ if [ ! -d "${APP_PATH}" ]; then
     exit 1
 fi
 
-# Ad-hoc mode: fake-sign with ldid and strip debug symbols
+# Ad-hoc mode: strip debug symbols, then fake-sign with ldid.
+# Order matters: strip rewrites the Mach-O, which leaves any pre-existing
+# signature covering bytes that no longer exist. TrollStore re-signs on install
+# so it never notices, but a .deb install relies on this signature being valid
+# and AMFI kills the process at exec if it is not.
 if [ -z "${TEAM_ID}" ]; then
+    echo ""
+    echo "--- Stripping debug symbols ---"
+    strip -x "${APP_PATH}/speedynote"
+    echo "Stripped: ${APP_PATH}/speedynote"
+
     echo ""
     echo "--- Fake-signing with ldid (with entitlements) ---"
     ENTITLEMENTS="${PROJECT_ROOT}/ios/entitlements.plist"
@@ -217,9 +226,8 @@ if [ -z "${TEAM_ID}" ]; then
     echo "Signed: ${APP_PATH}/speedynote"
 
     echo ""
-    echo "--- Stripping debug symbols ---"
-    strip -x "${APP_PATH}/speedynote"
-    echo "Stripped: ${APP_PATH}/speedynote"
+    echo "--- Verifying ad-hoc signature ---"
+    "${SCRIPT_DIR}/verify-signature.sh" "${APP_PATH}/speedynote"
 fi
 
 echo ""

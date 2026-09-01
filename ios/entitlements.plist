@@ -2,9 +2,68 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- Required for an app installed to /var/jb/Applications: the system
+         treats it as a built-in app rather than a sideloaded one. -->
     <key>platform-application</key>
     <true/>
     <key>application-identifier</key>
     <string>org.speedynote.speedynote</string>
+
+    <!-- IOKit user clients the app is allowed to open.
+         =====================================================================
+         A platform-application does NOT get the permissive sandbox profile
+         that ordinary third-party apps receive; it is evaluated against the
+         system policy, which denies IOKit user clients unless they are listed
+         here. TrollStore installs the .ipa into a normal app bundle location
+         where the standard app profile applies, so it never needs this — but a
+         .deb install does, and without it the kernel logs
+
+             System Policy: speedynote(NNN) deny(1) iokit-open-user-client \
+                 AGXDeviceUserClient
+             System Policy: speedynote(NNN) deny(1) iokit-open-user-client \
+                 IOSurfaceRootUserClient
+
+         and the app runs normally while being unable to draw anything at all,
+         which presents as a black screen with no crash.
+
+         Kodi/XBMC hit and fixed the identical problem on jailbroken iPads:
+         https://github.com/Memphiz/xbmc/commit/d5dc244c7e34dd89b9f79a228f68b31137feed7d
+         ===================================================================== -->
+    <key>com.apple.security.iokit-user-client-class</key>
+    <array>
+        <!-- GPU device access. Without AGXDeviceUserClient, Metal device
+             creation returns nil and OpenGL ES context creation fails. -->
+        <string>AGXDeviceUserClient</string>
+        <string>AGXCommandQueue</string>
+        <string>AGXDevice</string>
+        <string>AGXSharedUserClient</string>
+        <string>AGXGLContext</string>
+        <!-- Newer name for the GPU device client on recent iOS releases. -->
+        <string>IOGPUDeviceUserClient</string>
+
+        <!-- Shared graphics surfaces: how UIKit/Qt hand rendered content to
+             the render server for compositing. -->
+        <string>IOSurfaceRootUserClient</string>
+        <string>IOSurfaceAcceleratorClient</string>
+
+        <!-- IOAccel family, used by the OpenGL ES and older Metal paths. -->
+        <string>IOAccelDevice</string>
+        <string>IOAccelDevice2</string>
+        <string>IOAccelContext</string>
+        <string>IOAccelContext2</string>
+        <string>IOAccelSharedUserClient</string>
+        <string>IOAccelSharedUserClient2</string>
+        <string>IOAccelSubmitter2</string>
+
+        <!-- Framebuffer / display. -->
+        <string>IOMobileFramebufferUserClient</string>
+
+        <!-- HID. Relevant for Apple Pencil and external keyboard input. -->
+        <string>IOHIDLibUserClient</string>
+        <string>IOHIDEventServiceFastPathUserClient</string>
+
+        <!-- Hardware JPEG decode, used when loading imported images. -->
+        <string>AppleJPEGDriverUserClient</string>
+    </array>
 </dict>
 </plist>

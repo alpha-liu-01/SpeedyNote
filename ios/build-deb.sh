@@ -65,16 +65,33 @@ if [[ "${ARCH_CHECK}" != *"arm64"* ]]; then
     exit 1
 fi
 
+# Verify the ad-hoc signature. Unlike TrollStore, which re-signs .ipa payloads
+# on install, a .deb install has nothing that fixes up the signature — AMFI
+# validates it as-is and SIGKILLs the app at launch if it is stale.
+echo "--- Verifying ad-hoc signature ---"
+if ! "${SCRIPT_DIR}/verify-signature.sh" "${APP_PATH}/speedynote"; then
+    echo ""
+    echo "ERROR: refusing to package a binary with a bad signature."
+    echo "It would install fine but crash instantly on launch."
+    echo "Re-sign it with:"
+    echo "  ldid -S${PROJECT_ROOT}/ios/entitlements.plist ${APP_PATH}/speedynote"
+    exit 1
+fi
+echo ""
+
 # ---------- Build staging directory ----------
 STAGING=$(mktemp -d)
 trap 'rm -rf "${STAGING}"' EXIT
 
 echo "--- Creating .deb structure ---"
 
-# App payload (rootless path)
+# App payload (rootless path). -p keeps the executable bit on the binary.
 APP_DEST="${STAGING}/var/jb/Applications/SpeedyNote.app"
 mkdir -p "${APP_DEST}"
-cp -R "${APP_PATH}/" "${APP_DEST}/"
+cp -Rp "${APP_PATH}/" "${APP_DEST}/"
+chmod 755 "${APP_DEST}/speedynote"
+
+INSTALLED_SIZE=$(du -sk "${APP_DEST}" | awk '{print $1}')
 
 # DEBIAN metadata
 mkdir -p "${STAGING}/DEBIAN"
@@ -86,20 +103,33 @@ Version: ${VERSION}
 Architecture: iphoneos-arm64
 Description: Stylus-focused note-taking app for iPad with Apple Pencil support.
 Maintainer: SpeedyNote <info@speedynote.org>
+Author: SpeedyNote <info@speedynote.org>
 Section: Productivity
 Depends: firmware (>= 16.0)
+Installed-Size: ${INSTALLED_SIZE}
 EOF
 
+# Maintainer scripts use /bin/sh: iOS 16 has no /bin/bash, and the jailbreak's
+# bash lives under the rootless prefix, so a #!/bin/bash shebang can fail.
+# uicache is likewise resolved rather than assumed to be on PATH.
 cat > "${STAGING}/DEBIAN/postinst" << 'EOF'
-#!/bin/bash
-uicache -p /var/jb/Applications/SpeedyNote.app
+#!/bin/sh
+UICACHE=$(command -v uicache || echo /var/jb/usr/bin/uicache)
+[ -x "${UICACHE}" ] && "${UICACHE}" -p /var/jb/Applications/SpeedyNote.app
 exit 0
 EOF
 chmod 755 "${STAGING}/DEBIAN/postinst"
 
+# Only unregister on real removal — on upgrade, postrm runs after the new
+# version is already unpacked, so unregistering there would hide the new app.
 cat > "${STAGING}/DEBIAN/postrm" << 'EOF'
-#!/bin/bash
-uicache -p /var/jb/Applications/SpeedyNote.app
+#!/bin/sh
+case "$1" in
+    remove|purge)
+        UICACHE=$(command -v uicache || echo /var/jb/usr/bin/uicache)
+        [ -x "${UICACHE}" ] && "${UICACHE}" -p /var/jb/Applications/SpeedyNote.app
+        ;;
+esac
 exit 0
 EOF
 chmod 755 "${STAGING}/DEBIAN/postrm"
@@ -113,10 +143,48 @@ dpkg-deb --root-owner-group -Zxz -b "${STAGING}" "${DIST_DIR}/${DEB_NAME}"
 
 DEB_SIZE=$(du -sh "${DIST_DIR}/${DEB_NAME}" | awk '{print $1}')
 
+# ---------- Post-build self-check ----------
+# Unpack the finished .deb the same way dpkg will on-device and re-verify, so a
+# packaging step that corrupts the payload is caught here rather than on the iPad.
+echo ""
+echo "--- Verifying packaged .deb ---"
+CHECK=$(mktemp -d)
+dpkg-deb -x "${DIST_DIR}/${DEB_NAME}" "${CHECK}"
+UNPACKED="${CHECK}/var/jb/Applications/SpeedyNote.app/speedynote"
+
+if [ ! -f "${UNPACKED}" ]; then
+    echo "ERROR: speedynote binary missing from the packaged .deb."
+    rm -rf "${CHECK}"
+    exit 1
+fi
+
+if [ ! -x "${UNPACKED}" ]; then
+    echo "ERROR: speedynote in the .deb is not executable."
+    rm -rf "${CHECK}"
+    exit 1
+fi
+
+if ! "${SCRIPT_DIR}/verify-signature.sh" "${UNPACKED}"; then
+    echo "ERROR: packaged binary failed signature verification."
+    rm -rf "${CHECK}"
+    exit 1
+fi
+
+if ! cmp -s "${APP_PATH}/speedynote" "${UNPACKED}"; then
+    echo "ERROR: packaged binary differs from the built binary."
+    rm -rf "${CHECK}"
+    exit 1
+fi
+echo "OK: payload matches the built app bundle byte-for-byte."
+rm -rf "${CHECK}"
+
 echo ""
 echo "=== Done ==="
 echo "Output: ${DIST_DIR}/${DEB_NAME} (${DEB_SIZE})"
 echo ""
-echo "To install on a jailbroken iPad:"
-echo "  scp ${DIST_DIR}/${DEB_NAME} root@<ipad-ip>:/tmp/"
-echo "  ssh root@<ipad-ip> 'dpkg -i /tmp/${DEB_NAME}'"
+echo "To install on a jailbroken iPad without an apt server:"
+echo "  scp ${DIST_DIR}/${DEB_NAME} mobile@<ipad-ip>:/tmp/"
+echo "  ssh mobile@<ipad-ip> 'sudo dpkg -i /tmp/${DEB_NAME}'"
+echo ""
+echo "Or serve this directory as a throwaway local repo and add it in Sileo:"
+echo "  ./ios/serve-repo.sh"
