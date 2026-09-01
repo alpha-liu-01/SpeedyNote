@@ -353,9 +353,39 @@ private:
     void doSearchEdgeless(int startVirtualPage, int startMatchIndex, int direction);
 
     /**
+     * @brief SBS2: background thread function for the whole-document scan of an
+     *        edgeless notebook. Tile-based twin of @ref doScanAll.
+     */
+    void doScanAllEdgeless();
+
+    /**
      * @brief Build sorted tile order for edgeless search.
+     *
+     * Call through @ref ensureEdgelessTileOrder rather than directly: this
+     * writes the shared vector without taking the lock.
      */
     void buildEdgelessTileOrder();
+
+    /**
+     * @brief Build the tile order if needed and hand back a snapshot.
+     *
+     * A whole-document scan and a Find Next can be in flight at the same time
+     * (findNext only stops a running scan when the query changed), so the
+     * shared vector needs a lock and the workers need their own copies rather
+     * than a reference that a rebuild could reallocate underneath them.
+     */
+    QVector<std::pair<int,int>> ensureEdgelessTileOrder();
+
+    /**
+     * @brief Get cached results for an edgeless tile, or search it if not cached.
+     * @param virtualIndex Index into @p order, which is also the match's pageIndex.
+     * @param order Snapshot from @ref ensureEdgelessTileOrder.
+     *
+     * Tile twin of @ref getCachedOrSearch, shared by the Find Next walk and the
+     * whole-document scan so the two cannot disagree on what counts as a match.
+     */
+    QVector<PdfSearchMatch> getCachedOrSearchTile(
+        int virtualIndex, const QVector<std::pair<int,int>>& order);
 
     Document *m_document = nullptr;
     /// Set on the GUI thread before a search starts, read by the workers it
@@ -391,7 +421,9 @@ private:
     // Precache state
     std::atomic<bool> m_precaching{false};
 
-    // Edgeless search state
+    // Edgeless search state. Guarded because two workers can reach it at once;
+    // see ensureEdgelessTileOrder().
+    mutable QMutex m_tileOrderMutex;
     QVector<std::pair<int,int>> m_edgelessTileOrder;
     bool m_edgelessTileOrderBuilt = false;
 };
