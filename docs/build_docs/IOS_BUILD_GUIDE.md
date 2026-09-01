@@ -239,10 +239,17 @@ For distribution on jailbroken iPads or via TrollStore. No Apple ID needed.
 When no `TEAM_ID` is given, the script:
 1. Builds in Release mode (always)
 2. Passes `CODE_SIGN_IDENTITY=-` and `CODE_SIGNING_ALLOWED=NO` to Xcode
-3. Fake-signs the binary with `ldid -S`
-4. Strips debug symbols with `strip -x`
+3. Strips debug symbols with `strip -x`
+4. Fake-signs the binary with `ldid -S`
+5. Verifies the signature with `ios/verify-signature.sh`
 
 Requires `ldid` (`brew install ldid`).
+
+> **Order matters.** `strip` rewrites the Mach-O, so stripping *after* signing leaves a
+> CodeDirectory that hashes bytes which no longer exist. TrollStore re-signs `.ipa`
+> payloads on install and so never notices, but a `.deb` install has nothing that fixes
+> the signature up — AMFI validates it as-is and kills the app at launch. See
+> [`.deb` installs crash immediately](#deb-installs-crash-immediately-but-the-ipa-works).
 
 Output: `ios/build-device/Release-iphoneos/speedynote.app`
 
@@ -300,16 +307,24 @@ Requires `dpkg-deb` (`brew install dpkg`).
 
 Creates a rootless `.deb` package that installs to `/var/jb/Applications/SpeedyNote.app/`. The package includes `postinst` and `postrm` scripts that run `uicache` to register/unregister the app icon.
 
+Before packaging, the script verifies the ad-hoc signature and refuses to build a `.deb` that would install cleanly but crash on launch. After packaging it unpacks the finished `.deb` and re-checks the payload, so corruption is caught on the Mac rather than on the iPad.
+
 Output: `ios/dist/SpeedyNote_<version>_iphoneos-arm64.deb`
 
 **To install on a jailbroken iPad:**
 
 ```bash
-scp ios/dist/SpeedyNote_1.2.5_iphoneos-arm64.deb root@<ipad-ip>:/tmp/
-ssh root@<ipad-ip> 'dpkg -i /tmp/SpeedyNote_1.2.5_iphoneos-arm64.deb'
+scp ios/dist/SpeedyNote_1.2.5_iphoneos-arm64.deb mobile@<ipad-ip>:/tmp/
+ssh mobile@<ipad-ip> 'sudo dpkg -i /tmp/SpeedyNote_1.2.5_iphoneos-arm64.deb'
 ```
 
-Or host the `.deb` on an APT repository for installation via Sileo.
+**To test the full Sileo path without touching the production APT server:**
+
+```bash
+./ios/serve-repo.sh          # generates Packages/Release, serves ios/dist on :8080
+```
+
+Then add `http://<mac-ip>:8080/` as a source in Sileo, install, launch, and remove the source afterwards. This exercises the same download-index-install-uicache path as the real repo, so a package that works here will work there.
 
 #### `.ipa` — for TrollStore
 
@@ -322,6 +337,59 @@ Creates a standard `.ipa` (zipped `Payload/SpeedyNote.app/` structure).
 Output: `ios/dist/SpeedyNote_<version>.ipa`
 
 Transfer the `.ipa` to the iPad via AirDrop or USB, then open with TrollStore.
+
+---
+
+## Automated Builds (GitHub Actions)
+
+[`.github/workflows/build-ios.yml`](../../.github/workflows/build-ios.yml) builds both packages on a
+macOS runner and attaches them to the GitHub release.
+
+**Triggers:** pushing a `v*` tag, or a manual run from the Actions tab (`workflow_dispatch`).
+Artifacts are uploaded on every run; they are attached to a release only for tag pushes.
+
+**Outputs**, named exactly as the local scripts produce them:
+
+- `SpeedyNote_<version>.ipa`
+- `SpeedyNote_<version>_iphoneos-arm64.deb`
+
+**No secrets are required.** The ad-hoc path signs with ldid, so unlike the Android workflow
+there is no keystore or Apple credential involved.
+
+### How the runner reproduces a local setup
+
+`ios/build-device.sh` refers to Qt through absolute paths (`${HOME}/Qt/6.9.3/ios/bin/qt-cmake`).
+`install-qt-action` installs into `${dir}/Qt/<version>/<arch>`, so the workflow passes
+`dir: /Users/runner` and the scripts run unmodified. `extra: '--autodesktop'` adds the parallel
+host Qt required for cross-compilation.
+
+A verification step then asserts that `qt-cmake` and `Qt6Svg` are actually present and reports how
+many `qtbase_*.qm` catalogs were found, so a Qt packaging change fails immediately with a clear
+message rather than surfacing as a confusing CMake error or a silently English-only UI.
+
+Because `ios/Assets.xcassets/` is gitignored, the workflow runs `ios/generate-icons.sh` on every
+run; without it there would be no app icon or `Assets.car`.
+
+### Caching
+
+| Cached | Size | Key includes |
+|--------|------|--------------|
+| `ios/mupdf-build` | ~51 MB | MuPDF version, `build-mupdf.sh` hash, Xcode version |
+| `ios/mlkit-build` | ~93 MB | ML Kit version, `fetch-mlkit.sh` hash, Xcode version |
+
+`ios/mupdf-src` (~419 MB) is deliberately **not** cached: `build-mupdf.sh` runs `make clean` on
+every invocation, so only the installed output is worth keeping.
+
+Including the Xcode version in both keys means a runner image update rebuilds the static libraries
+instead of silently reusing ones built against a different SDK.
+
+### Release verification
+
+`ios/build-deb.sh` already refuses to package a binary that fails `ios/verify-signature.sh`, and
+re-checks the unpacked payload afterwards. The workflow adds an audit step that unpacks the
+finished `.deb` and prints `ldid -e` for the binary inside it, so every release carries a record of
+the entitlements it shipped with — which matters because a `.deb` install has nothing that
+re-signs the app.
 
 ---
 
@@ -340,6 +408,9 @@ All scripts are in the `ios/` directory and should be run from the SpeedyNote pr
 | `ios/run-device.sh [--list] [--ipa]` | Install and launch on connected device |
 | `ios/build-deb.sh` | Package ad-hoc build as rootless `.deb` |
 | `ios/build-ipa.sh` | Package ad-hoc build as `.ipa` |
+| `ios/verify-signature.sh <binary>` | Check that an ldid ad-hoc signature still matches the file |
+| `ios/serve-repo.sh [PORT]` | Serve `ios/dist` as a throwaway local APT repo for Sileo testing |
+| `ios/debug-device-log.sh [--raw] [--crash]` | Stream a connected iPad's syslog, highlighting sandbox/signing/lifecycle lines |
 
 ---
 
@@ -479,6 +550,92 @@ List available simulators:
 ```bash
 brew install ldid
 ```
+
+### `.deb` installs crash immediately (but the `.ipa` works)
+
+**Symptom:** Sileo installs the package and the icon appears, but launching the app shows a
+splash and returns to the home screen instantly. The same build installed as an `.ipa` via
+TrollStore works perfectly.
+
+**Cause:** an invalid ad-hoc code signature. TrollStore re-signs the main binary on install,
+so it repairs whatever the build produced — that is why the `.ipa` path hides the problem.
+A `.deb` install has no such step: `dpkg` just unpacks files, and AMFI validates the
+embedded signature at `exec`. If the CDHash does not match the bytes on disk, the kernel
+sends `SIGKILL` before any application code runs, so there is no Qt log and no useful
+crash report beyond a `CODESIGNING` termination reason.
+
+The usual trigger is modifying the binary after signing it — most often running `strip`
+after `ldid`.
+
+**Diagnose on the Mac:**
+
+```bash
+./ios/verify-signature.sh ios/build-device/Release-iphoneos/speedynote.app/speedynote
+```
+
+A stale signature reports a CodeDirectory page count that does not match the file's code
+limit.
+
+**Fix:** re-sign the (already stripped) binary, then repackage:
+
+```bash
+ldid -Sios/entitlements.plist ios/build-device/Release-iphoneos/speedynote.app/speedynote
+./ios/build-deb.sh
+```
+
+`build-device.sh` now strips before signing and verifies the result, and `build-deb.sh`
+refuses to package a binary that fails verification.
+
+**Confirm on-device** (SIGKILL-at-exec leaves a distinctive trace):
+
+```bash
+ssh mobile@<ipad-ip>
+ls -t /var/mobile/Library/Logs/CrashReporter | head
+```
+
+### `.deb` install shows a black screen (but the `.ipa` works)
+
+**Symptom:** the app installs from Sileo, launches, and stays on a black screen. It does
+*not* crash — the process stays alive and iOS never kills it.
+
+**Cause:** the sandbox is denying the app access to the GPU. `ios/entitlements.plist` marks
+the app `platform-application`, which is required for an app installed under
+`/var/jb/Applications` but also means it is judged against the *system* sandbox policy
+rather than the permissive profile ordinary third-party apps get. Under that policy, IOKit
+user clients must be named explicitly. Without them, Metal device creation returns nil and
+the app renders nothing while otherwise running normally.
+
+TrollStore installs the `.ipa` into a normal app bundle location where the standard app
+profile applies, so the GPU is allowed automatically — which is why the `.ipa` is unaffected.
+
+**Confirm it:**
+
+```bash
+./ios/debug-device-log.sh
+```
+
+Launch the app and look for:
+
+```
+kernel(Sandbox) <Error>: System Policy: speedynote(NNN) deny(1) \
+    iokit-open-user-client AGXDeviceUserClient
+kernel(Sandbox) <Error>: System Policy: speedynote(NNN) deny(1) \
+    iokit-open-user-client IOSurfaceRootUserClient
+```
+
+**Fix:** `ios/entitlements.plist` declares `com.apple.security.iokit-user-client-class`
+listing the GPU, IOSurface, framebuffer and HID user clients. `ios/verify-signature.sh`
+fails the build if `AGXDeviceUserClient` or `IOSurfaceRootUserClient` is absent.
+
+Two things are easy to get wrong here:
+
+- The key is `com.apple.security.iokit-user-client-class` — *not* under `com.apple.private`.
+- iOS 15+ reads the **DER** entitlements blob (slot 7 of the signature superblob) and
+  silently ignores an XML-only blob. ldid 2.1.5+ emits both; the verifier checks for the
+  DER blob so an older ldid cannot produce a package whose entitlements do nothing.
+
+Kodi/XBMC fixed the identical problem on jailbroken iPads in
+[commit d5dc244](https://github.com/Memphiz/xbmc/commit/d5dc244c7e34dd89b9f79a228f68b31137feed7d).
 
 ### Device: provisioning failure
 

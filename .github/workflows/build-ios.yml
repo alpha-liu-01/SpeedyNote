@@ -1,0 +1,303 @@
+name: Build SpeedyNote iPadOS
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags (e.g. v1.6.1)
+  workflow_dispatch:  # Allow manual trigger
+
+# Required for release uploads
+permissions:
+  contents: write
+
+env:
+  QT_VERSION: 6.9.3
+  MUPDF_VERSION: 1.24.10
+  MLKIT_VERSION: 8.0.0
+
+jobs:
+  build-ios:
+    name: Build iPadOS (.ipa + .deb)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # Qt 6.9.3 for iOS, plus the matching host Qt.
+      #
+      # ios/build-device.sh references Qt through absolute paths:
+      #     QT_CMAKE="${HOME}/Qt/6.9.3/ios/bin/qt-cmake"
+      #     HOST_LRELEASE="${HOME}/Qt/6.9.3/macos/bin/lrelease"
+      # install-qt-action installs into ${dir}/Qt/<version>/<arch>, so pointing
+      # dir at the runner's home reproduces those paths exactly and the build
+      # scripts run unmodified.
+      #
+      # --autodesktop installs the parallel host Qt (required to cross-compile,
+      # since moc/rcc must run natively) and sets QT_HOST_PATH.
+      #
+      # No `modules:` is requested. Qt SVG, Qt Tools and Qt Translations are
+      # essentials bundled in the Qt 6 base archives, and naming a module that
+      # aqtinstall does not recognise is a hard error. The verification step
+      # below asserts they actually arrived instead of assuming it.
+      # -----------------------------------------------------------------------
+      - name: Install Qt for iOS (and matching host Qt)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: mac
+          target: ios
+          dir: /Users/runner
+          extra: '--autodesktop'
+          cache: true
+          cache-key-prefix: qt-ios-${{ env.QT_VERSION }}
+
+      - name: Verify Qt layout matches what the build scripts expect
+        run: |
+          set -euo pipefail
+          QT_IOS="${HOME}/Qt/${QT_VERSION}/ios"
+          QT_HOST="${HOME}/Qt/${QT_VERSION}/macos"
+
+          echo "=== Expected Qt locations ==="
+          echo "  iOS target: ${QT_IOS}"
+          echo "  Host:       ${QT_HOST}"
+          echo ""
+
+          if [ ! -x "${QT_IOS}/bin/qt-cmake" ]; then
+            echo "ERROR: qt-cmake not found at ${QT_IOS}/bin/qt-cmake"
+            echo "ios/build-device.sh hardcodes this path. Installed tree:"
+            ls -la "${HOME}/Qt" 2>/dev/null || echo "  (no ${HOME}/Qt at all)"
+            exit 1
+          fi
+          echo "OK: qt-cmake present"
+
+          if [ ! -x "${QT_HOST}/bin/lrelease" ]; then
+            echo "::warning::Host lrelease missing at ${QT_HOST}/bin/lrelease; the committed .qm files will be used as-is"
+          else
+            echo "OK: host lrelease present"
+          fi
+
+          # Qt Svg is a hard requirement: CMakeLists.txt does
+          #   find_package(Qt6 REQUIRED COMPONENTS ... Svg)
+          # for the iOS target, so a missing module must fail loudly here
+          # rather than 20 minutes later during configure.
+          if [ ! -d "${QT_IOS}/lib/cmake/Qt6Svg" ]; then
+            echo "ERROR: Qt6Svg not found in the iOS Qt install."
+            echo "CMakeLists.txt requires the Svg component for iOS."
+            echo "Add 'modules: qtsvg' to the install-qt-action step."
+            exit 1
+          fi
+          echo "OK: Qt6Svg present"
+
+          # Qt's own catalogs get embedded into the binary via the generated
+          # qt_translations.qrc (CMakeLists.txt, "Mobile builds: embed
+          # qtbase_*.qm"). Without them CMake only warns, and the app silently
+          # ships English Save/Cancel/Discard buttons - worth flagging.
+          QM_COUNT=$(find "${QT_IOS}/translations" -name 'qtbase_*.qm' 2>/dev/null | wc -l | tr -d ' ')
+          echo "Qt base translation catalogs: ${QM_COUNT}"
+          if [ "${QM_COUNT}" -eq 0 ]; then
+            echo "::warning::No qtbase_*.qm in the iOS Qt install; standard dialog buttons will render in English"
+          fi
+
+      # -----------------------------------------------------------------------
+      # Host tooling.
+      #   ldid    - ad-hoc signing (must be 2.1.5+ so DER entitlements are
+      #             emitted; iOS 15+ ignores XML-only entitlements)
+      #   dpkg    - dpkg-deb, for building and re-inspecting the .deb
+      #   librsvg - rsvg-convert, for the app icon (see below)
+      # CocoaPods is normally preinstalled on GitHub macOS runners.
+      # -----------------------------------------------------------------------
+      - name: Install build tooling
+        run: |
+          set -euo pipefail
+          brew install ldid dpkg librsvg
+
+          if ! command -v pod &>/dev/null; then
+            echo "CocoaPods not preinstalled; installing via Homebrew"
+            brew install cocoapods
+          fi
+
+          echo "=== Tool versions ==="
+          echo "ldid:      $(brew list --versions ldid)"
+          echo "dpkg-deb:  $(dpkg-deb --version | head -1)"
+          echo "rsvg:      $(rsvg-convert --version)"
+          echo "cocoapods: $(pod --version)"
+
+      - name: Record toolchain identity
+        id: toolchain
+        run: |
+          set -euo pipefail
+          XCODE=$(xcodebuild -version | head -1 | awk '{print $2}')
+          SDK=$(xcrun --sdk iphoneos --show-sdk-version)
+          echo "xcode=${XCODE}" >> "$GITHUB_OUTPUT"
+          echo "sdk=${SDK}" >> "$GITHUB_OUTPUT"
+          echo "Xcode ${XCODE}, iphoneos SDK ${SDK}"
+
+      # -----------------------------------------------------------------------
+      # Version comes from CMakeLists.txt, the same source the packaging
+      # scripts read.
+      #
+      # NOTE: build-android.yml uses `grep -oP`, which is a GNU extension and
+      # does NOT exist in the BSD grep shipped on macOS runners. Use the sed
+      # expression that ios/build-deb.sh and ios/build-ipa.sh already use.
+      # -----------------------------------------------------------------------
+      - name: Extract version from CMakeLists.txt
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION=$(grep "project(SpeedyNote VERSION" CMakeLists.txt \
+            | sed -n 's/.*VERSION \([0-9.]*\).*/\1/p')
+          if [ -z "${VERSION}" ]; then
+            echo "ERROR: could not parse version from CMakeLists.txt"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "App version: ${VERSION}"
+
+      # -----------------------------------------------------------------------
+      # ios/Assets.xcassets/ is gitignored (.gitignore line 90), so the asset
+      # catalog does not exist on a fresh checkout. Without this step the build
+      # produces no AppIcon / Assets.car.
+      # -----------------------------------------------------------------------
+      - name: Generate app icon and asset catalog
+        run: ./ios/generate-icons.sh
+
+      # -----------------------------------------------------------------------
+      # MuPDF static libraries.
+      #
+      # Only the installed output (ios/mupdf-build, ~51 MB) is cached, not
+      # ios/mupdf-src (~419 MB of source plus objects that build-mupdf.sh
+      # discards with `make clean` on every run anyway).
+      #
+      # The key covers the MuPDF version, the build script (which carries the
+      # HarfBuzz patches), and the Xcode version, so a toolchain bump rebuilds
+      # rather than silently reusing static libs from a different SDK.
+      # -----------------------------------------------------------------------
+      - name: Restore MuPDF cache
+        id: cache-mupdf
+        uses: actions/cache@v4
+        with:
+          path: ios/mupdf-build
+          key: ios-mupdf-${{ env.MUPDF_VERSION }}-xcode${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('ios/build-mupdf.sh') }}
+
+      - name: Build MuPDF for device (skipped on cache hit)
+        if: steps.cache-mupdf.outputs.cache-hit != 'true'
+        run: ./ios/build-mupdf.sh
+
+      # -----------------------------------------------------------------------
+      # ML Kit Digital Ink xcframeworks (~93 MB).
+      #
+      # CMakeLists.txt forces SPEEDYNOTE_ENABLE_MLKIT_INK_OCR ON for iOS and
+      # only warns (turning OCR back off) if the frameworks are missing, so a
+      # silent cache/fetch failure would ship a build without handwriting OCR.
+      # The presence check below makes that a hard error instead.
+      # -----------------------------------------------------------------------
+      - name: Restore ML Kit cache
+        id: cache-mlkit
+        uses: actions/cache@v4
+        with:
+          path: ios/mlkit-build
+          key: ios-mlkit-${{ env.MLKIT_VERSION }}-xcode${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('ios/fetch-mlkit.sh') }}
+
+      - name: Fetch ML Kit frameworks (skipped on cache hit)
+        if: steps.cache-mlkit.outputs.cache-hit != 'true'
+        run: ./ios/fetch-mlkit.sh
+
+      - name: Verify ML Kit frameworks are present
+        run: |
+          set -euo pipefail
+          COUNT=$(find ios/mlkit-build/Frameworks -maxdepth 1 -name '*.xcframework' 2>/dev/null | wc -l | tr -d ' ')
+          echo "xcframeworks: ${COUNT}"
+          if [ "${COUNT}" -eq 0 ]; then
+            echo "ERROR: no ML Kit xcframeworks; the build would silently drop handwriting OCR."
+            exit 1
+          fi
+          ls -1 ios/mlkit-build/Frameworks
+
+      # -----------------------------------------------------------------------
+      # Ad-hoc device build. With no TEAM_ID the script builds Release, passes
+      # CODE_SIGNING_ALLOWED=NO to Xcode, strips, then fake-signs with ldid and
+      # runs ios/verify-signature.sh. No Apple credentials or secrets involved.
+      # -----------------------------------------------------------------------
+      - name: Build SpeedyNote for iPadOS (ad-hoc)
+        run: ./ios/build-device.sh
+
+      - name: Package .ipa (TrollStore)
+        run: ./ios/build-ipa.sh
+
+      - name: Package .deb (rootless, Sileo)
+        run: ./ios/build-deb.sh
+
+      # -----------------------------------------------------------------------
+      # Audit trail: dump the entitlements from the binary inside the finished
+      # .deb, so every release records exactly what it shipped with. A .deb
+      # install has nothing that re-signs the app, so these entitlements are
+      # load-bearing - missing GPU user clients produce a black screen with no
+      # crash. build-deb.sh already fails the build if they are absent; this
+      # step makes them visible in the log.
+      # -----------------------------------------------------------------------
+      - name: Audit packaged entitlements
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          DEB="ios/dist/SpeedyNote_${VERSION}_iphoneos-arm64.deb"
+
+          CHECK=$(mktemp -d)
+          dpkg-deb -x "${DEB}" "${CHECK}"
+          BIN="${CHECK}/var/jb/Applications/SpeedyNote.app/speedynote"
+
+          echo "=== Package metadata ==="
+          dpkg-deb -I "${DEB}"
+
+          echo ""
+          echo "=== Entitlements as shipped ==="
+          ldid -e "${BIN}"
+
+          echo ""
+          echo "=== Signature ==="
+          ./ios/verify-signature.sh "${BIN}"
+
+          rm -rf "${CHECK}"
+
+      - name: Summarise artifacts
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          {
+            echo "### SpeedyNote iPadOS ${VERSION}"
+            echo ""
+            echo "| Artifact | Size |"
+            echo "|---|---|"
+            for f in ios/dist/SpeedyNote_${VERSION}.ipa \
+                     ios/dist/SpeedyNote_${VERSION}_iphoneos-arm64.deb; do
+              echo "| \`$(basename "$f")\` | $(du -h "$f" | cut -f1) |"
+            done
+            echo ""
+            echo "Built with Xcode ${{ steps.toolchain.outputs.xcode }}, iphoneos SDK ${{ steps.toolchain.outputs.sdk }}, Qt ${QT_VERSION}."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # -----------------------------------------------------------------------
+      # Artifacts
+      # -----------------------------------------------------------------------
+      - name: Upload iPadOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpeedyNote-${{ steps.version.outputs.version }}-iPadOS
+          path: |
+            ios/dist/SpeedyNote_${{ steps.version.outputs.version }}.ipa
+            ios/dist/SpeedyNote_${{ steps.version.outputs.version }}_iphoneos-arm64.deb
+          if-no-files-found: error
+
+      # softprops/action-gh-release@v2, not @v1: v1 runs on node16, which
+      # GitHub Actions no longer provides. The other workflows in this repo
+      # still pin @v1 and will need the same bump.
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ios/dist/SpeedyNote_${{ steps.version.outputs.version }}.ipa
+            ios/dist/SpeedyNote_${{ steps.version.outputs.version }}_iphoneos-arm64.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
