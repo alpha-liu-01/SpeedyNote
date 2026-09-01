@@ -118,9 +118,14 @@ jobs:
             brew install cocoapods
           fi
 
+          # Same reasoning as the xcodebuild note below: capture in full and
+          # trim in the shell rather than closing a pipe early on a tool whose
+          # SIGPIPE behaviour we do not control.
+          DPKG_RAW=$(dpkg-deb --version)
+
           echo "=== Tool versions ==="
           echo "ldid:      $(brew list --versions ldid)"
-          echo "dpkg-deb:  $(dpkg-deb --version | head -1)"
+          echo "dpkg-deb:  ${DPKG_RAW%%$'\n'*}"
           echo "rsvg:      $(rsvg-convert --version)"
           echo "cocoapods: $(pod --version)"
 
@@ -128,8 +133,23 @@ jobs:
         id: toolchain
         run: |
           set -euo pipefail
-          XCODE=$(xcodebuild -version | head -1 | awk '{print $2}')
+          # Do NOT pipe xcodebuild into head. xcodebuild writes its output
+          # through NSFileHandle, which raises an uncaught
+          # NSFileHandleOperationException ("Broken pipe") on EPIPE instead of
+          # dying quietly on SIGPIPE the way an ordinary tool would. `head -1`
+          # closes the pipe after the first line, so xcodebuild aborts with
+          # exit 134 and pipefail turns that into a failed step.
+          # Capture the whole output instead, then split it in the shell.
+          XCODE_RAW=$(xcodebuild -version)
+          XCODE_LINE=${XCODE_RAW%%$'\n'*}   # "Xcode 26.0"
+          XCODE=${XCODE_LINE##* }           # "26.0"
           SDK=$(xcrun --sdk iphoneos --show-sdk-version)
+
+          if [ -z "${XCODE}" ] || [ -z "${SDK}" ]; then
+            echo "ERROR: could not determine toolchain version."
+            echo "xcodebuild said: ${XCODE_RAW}"
+            exit 1
+          fi
           echo "xcode=${XCODE}" >> "$GITHUB_OUTPUT"
           echo "sdk=${SDK}" >> "$GITHUB_OUTPUT"
           echo "Xcode ${XCODE}, iphoneos SDK ${SDK}"
