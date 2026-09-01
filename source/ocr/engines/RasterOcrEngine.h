@@ -82,6 +82,10 @@ protected:
         /// Optional per-character boxes in image-pixel space. When populated,
         /// charBoxesImage.size() == text.length(); otherwise empty.
         QVector<QRectF> charBoxesImage;
+        /// Recognition score in 0..1, on whatever scale the backend uses.
+        /// 1.0 means "no score available"; providesConfidence() keeps such
+        /// engines out of the UI anyway.
+        float confidence = 1.0f;
     };
 
     /**

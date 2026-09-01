@@ -6692,6 +6692,9 @@ void MainWindow::setupOcr()
     connect(m_ocrWorker, &OcrWorker::autoLanguageSupported, this, [this](bool supported) {
         m_ocrAutoLanguageSupported = supported;
     }, Qt::QueuedConnection);
+    connect(m_ocrWorker, &OcrWorker::confidenceSupported, this, [this](bool supported) {
+        m_toolbar->setOcrConfidenceSupported(supported);
+    }, Qt::QueuedConnection);
     // Engine status (e.g. Linux on-demand model download) -> OCR subtoolbar label.
     connect(m_ocrWorker, &OcrWorker::statusMessage, this, [this](const QString& message) {
         if (m_toolbar && m_toolbar->ocrSubToolbar()) {

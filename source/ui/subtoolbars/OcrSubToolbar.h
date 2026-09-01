@@ -22,6 +22,9 @@ public:
     void setDarkMode(bool darkMode) override;
 
     void setOcrAvailable(bool available);
+    /// Show or hide the confidence toggle. Hidden when the engine reports no
+    /// real score, in which case the toggle would silently do nothing.
+    void setConfidenceSupported(bool supported);
     void setStatusText(const QString& text);
     void clearStatusAfterDelay(int ms = 5000);
     bool isAutoOcrEnabled() const;
@@ -66,6 +69,7 @@ private:
     QTimer* m_statusClearTimer = nullptr;
 
     bool m_darkMode = false;
+    bool m_confidenceSupported = false;
 
     // Per-tab UI state cache.
     //

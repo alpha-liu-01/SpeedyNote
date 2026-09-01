@@ -126,6 +126,12 @@ VisionOcrEngine::recognizeImage(const QImage& strip, const QString& languageTag)
         QString text;
         QVector<QRectF> boxes;
 
+        // Character-weighted mean of the per-observation scores: one strip can
+        // hold several observations, and a long one should not be outvoted by a
+        // stray single glyph.
+        double confSum = 0.0;
+        int confChars = 0;
+
         for (VNRecognizedTextObservation *o in obs) {
             VNRecognizedText *cand = [[o topCandidates:1] firstObject];
             if (!cand)
@@ -133,6 +139,9 @@ VisionOcrEngine::recognizeImage(const QImage& strip, const QString& languageTag)
             NSString *s = cand.string;
             if (s.length == 0)
                 continue;
+
+            confSum += static_cast<double>(cand.confidence) * s.length;
+            confChars += static_cast<int>(s.length);
 
             if (!text.isEmpty()) {
                 text.append(QLatin1Char(' '));
@@ -159,6 +168,8 @@ VisionOcrEngine::recognizeImage(const QImage& strip, const QString& languageTag)
         out.text = text;
         if (!text.isEmpty() && boxes.size() == text.length())
             out.charBoxesImage = boxes;
+        if (confChars > 0)
+            out.confidence = static_cast<float>(confSum / confChars);
     }
 
     return out;

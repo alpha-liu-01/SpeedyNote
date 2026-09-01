@@ -49,7 +49,10 @@ void OcrSubToolbar::createWidgets()
 
     m_confidenceButton = makeIconButton(this, BUTTON_SIZE);
     m_confidenceButton->setCheckable(true);
-    m_confidenceButton->setToolTip(tr("Show Confidence Colors"));
+    m_confidenceButton->setToolTip(tr("Mark Low-Confidence Text"));
+    // Hidden until an engine claims a real score, so it never flashes on
+    // platforms that will not keep it.
+    m_confidenceButton->setVisible(false);
     addWidget(m_confidenceButton);
 
     m_snapButton = makeIconButton(this, BUTTON_SIZE);
@@ -159,9 +162,11 @@ void OcrSubToolbar::restoreTabState(int tabId)
     m_showTextButton->setChecked(state.showTextEnabled);
     m_showTextButton->blockSignals(false);
 
-    m_confidenceButton->blockSignals(true);
-    m_confidenceButton->setChecked(state.confidenceEnabled);
-    m_confidenceButton->blockSignals(false);
+    if (m_confidenceSupported) {
+        m_confidenceButton->blockSignals(true);
+        m_confidenceButton->setChecked(state.confidenceEnabled);
+        m_confidenceButton->blockSignals(false);
+    }
 
     // Snap-to-grid is NOT restored here. It lives on the Document
     // (doc->ocrSnapToBackground) and is synced by
@@ -173,7 +178,9 @@ void OcrSubToolbar::saveTabState(int tabId)
     TabState state;
     state.autoOcrEnabled = m_autoOcrButton->isChecked();
     state.showTextEnabled = m_showTextButton->isChecked();
-    state.confidenceEnabled = m_confidenceButton->isChecked();
+    // Never cache the flag while the toggle is hidden: restoring it later would
+    // switch the marking back on with no control to switch it off again.
+    state.confidenceEnabled = m_confidenceSupported && m_confidenceButton->isChecked();
     // Snap-to-grid intentionally not saved; see TabState comment.
     state.initialized = true;
     m_tabStates[tabId] = state;
@@ -197,12 +204,27 @@ void OcrSubToolbar::setOcrAvailable(bool available)
     m_showTextButton->setEnabled(true);
     m_confidenceButton->setEnabled(true);
     m_snapButton->setEnabled(true);
+    // Visibility of the confidence toggle is owned by setConfidenceSupported:
+    // cached text stays viewable without an engine, but a score depends on
+    // which engine produced the data.
 
     if (!available) {
         m_statusLabel->setText(tr("Cached text only"));
     } else {
         m_statusLabel->clear();
     }
+}
+
+void OcrSubToolbar::setConfidenceSupported(bool supported)
+{
+    m_confidenceSupported = supported;
+    m_confidenceButton->setVisible(supported);
+
+    // Signals stay live on the way down so MainWindow clears showConfidence on
+    // the OCR objects. Hiding a checked button would otherwise leave the
+    // marking painted with no way to turn it off.
+    if (!supported && m_confidenceButton->isChecked())
+        m_confidenceButton->setChecked(false);
 }
 
 void OcrSubToolbar::setStatusText(const QString& text)

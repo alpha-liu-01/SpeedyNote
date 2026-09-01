@@ -71,6 +71,9 @@ signals:
     /// Whether the engine's "auto" option really detects the script. False on
     /// Windows Ink, where it just means the recognizer Windows chose.
     void autoLanguageSupported(bool supported);
+    /// Whether the engine reports a real recognition score. False engines get
+    /// the confidence toggle hidden rather than left inert.
+    void confidenceSupported(bool supported);
     void resultsReady(const QString& pageId,
                       const QVector<OcrTextBlock>& blocks);
     void batchProgress(int completed, int total);

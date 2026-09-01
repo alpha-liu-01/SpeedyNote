@@ -64,4 +64,7 @@ public:
 
 private:
     void drawLockBadge(QPainter& painter, const QRectF& rect) const;
+    /// Wavy amber/red underline along the bottom of @p rect when confidence is
+    /// below the warn threshold. No-op otherwise; callers gate on showConfidence.
+    void drawConfidenceUnderline(QPainter& painter, const QRectF& rect, qreal zoom) const;
 };

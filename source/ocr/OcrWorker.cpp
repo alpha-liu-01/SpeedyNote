@@ -293,6 +293,7 @@ void OcrWorker::initEngine()
     if (ok) {
         emit languagesAvailable(m_engine->availableLanguages());
         emit autoLanguageSupported(m_engine->supportsAutoLanguageDetection());
+        emit confidenceSupported(m_engine->providesConfidence());
         emitDownloadedLanguages();
     }
 }

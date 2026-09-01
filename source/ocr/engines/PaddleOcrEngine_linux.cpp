@@ -529,6 +529,12 @@ PaddleOcrEngine::recognizeImage(const QImage& strip, const QString& languageTag)
     std::vector<Emit> emits;
     emits.reserve(T);
 
+    // Mean winning-class probability over the emitted timesteps, which is how
+    // PP-OCR derives its per-line score. Blank and repeat timesteps are skipped
+    // so a long silent tail cannot inflate or deflate the average.
+    double probSum = 0.0;
+    int probCount = 0;
+
     int prevRaw = -1;
     for (int t = 0; t < T; ++t) {
         const float* p = logits + static_cast<size_t>(t) * C;
@@ -541,14 +547,28 @@ PaddleOcrEngine::recognizeImage(const QImage& strip, const QString& languageTag)
             const QString ch = (best < model->charTable.size())
                                    ? model->charTable[best]
                                    : QString();
-            if (!ch.isEmpty())
+            if (!ch.isEmpty()) {
                 emits.push_back({ch, t});
+
+                // Softmax of the winner, shifted by the max (which is bestVal)
+                // for stability: p_best = 1 / sum(exp(p[c] - bestVal)).
+                double denom = 0.0;
+                for (int c = 0; c < C; ++c)
+                    denom += std::exp(static_cast<double>(p[c] - bestVal));
+                if (denom > 0.0) {
+                    probSum += 1.0 / denom;
+                    probCount += 1;
+                }
+            }
         }
         prevRaw = best;
     }
 
     if (emits.empty())
         return out;
+
+    if (probCount > 0)
+        out.confidence = static_cast<float>(probSum / probCount);
 
     // --- 4. Text + approximate per-char boxes in received-strip pixels. -----
     // CTC gives a meaningful column (good X); Y is weak so each box spans the
