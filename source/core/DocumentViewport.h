@@ -2984,6 +2984,11 @@ private:
     QElapsedTimer m_touchCooldownTimer;
     bool m_touchCooldownActive = false;
     static constexpr qint64 TOUCH_COOLDOWN_MS = 300;
+
+    /// True while the touch sequence in flight began on a child widget. Only
+    /// TouchBegin carries a position we can hit-test, so the routing decision
+    /// has to be remembered for the TouchUpdate and TouchEnd that follow.
+    bool m_touchSequenceOnChild = false;
     
     // =========================================================================
     // CUSTOMIZABLE VALUES

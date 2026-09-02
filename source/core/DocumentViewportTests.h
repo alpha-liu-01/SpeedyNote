@@ -44,6 +44,7 @@
 #include <QTemporaryDir>
 #include <QSignalSpy>
 #include <QSlider>
+#include <QTabletEvent>
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextDocument>
@@ -4938,9 +4939,9 @@ public:
             == expectedGeometry(viewport.pageRect(3)))
             return fail("the button anchored to the right page instead of the row");
 
-        // ----- Stylus pass-through -----
-        // A pen press over the button propagates up to the canvas, which has to
-        // leave it unhandled so Qt synthesizes a mouse event for the button.
+        // ----- Stylus hover pass-through -----
+        // Hover moves over the button reach the canvas by propagation, and have
+        // to be left unhandled rather than treated as a canvas interaction.
         if (!viewport.pointerOverViewportWidget(
                 QRectF(viewport.m_addPageButton->geometry()).center()))
             return fail("the button area was not excluded from canvas input");
@@ -4954,9 +4955,63 @@ public:
         QMouseEvent release(QEvent::MouseButtonRelease, centre, centre,
                             Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
         QApplication::sendEvent(button, &press);
+
+        // ----- The press must not leak into the canvas -----
+        // sendEvent() runs Qt's mouse propagation loop, so an unaccepted press
+        // climbs to DocumentViewport and is run as a canvas gesture. The button
+        // sits below the last page, where that arms an off-page pan whose flags
+        // then swallow the pen release that would complete the click. Checked
+        // between the press and the release, because the leaked release would
+        // balance the leaked press and hide the problem.
+        if (viewport.m_pointerActive || viewport.m_offPagePanArmed)
+            return fail("a press on the button started a canvas gesture");
+
         QApplication::sendEvent(button, &release);
         if (requested.count() != 1)
             return fail("clicking the button did not request a page");
+        if (viewport.m_pointerActive || viewport.m_offPagePanArmed)
+            return fail("a release on the button started a canvas gesture");
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        // ----- A stylus reaches the button without the canvas involved -----
+        const QPointingDevice* pen = QPointingDevice::primaryPointingDevice();
+        QTabletEvent penPress(QEvent::TabletPress, pen, centre, centre,
+                              1.0, 0, 0, 0.0, 0.0, 0, Qt::NoModifier,
+                              Qt::LeftButton, Qt::LeftButton);
+        QTabletEvent penRelease(QEvent::TabletRelease, pen, centre, centre,
+                                0.0, 0, 0, 0.0, 0.0, 0, Qt::NoModifier,
+                                Qt::LeftButton, Qt::NoButton);
+        QApplication::sendEvent(button, &penPress);
+        if (viewport.m_pointerActive || viewport.m_offPagePanArmed)
+            return fail("a stylus press on the button started a canvas gesture");
+        QApplication::sendEvent(button, &penRelease);
+        if (requested.count() != 2)
+            return fail("a stylus press on the button did not request a page");
+
+        // ----- A stale armed pan cannot deafen the stylus -----
+        // An unbalanced mouse press leaves this state behind, and tabletEvent's
+        // mouse-gesture guard would otherwise swallow every pen event from here
+        // on, until an unrelated focus change happened to clear it.
+        viewport.setLayoutMode(LayoutMode::SingleColumn);
+        viewport.setPanOffset(QPointF(0, 0));
+        viewport.m_pointerActive = true;
+        viewport.m_activeSource = PointerEvent::Mouse;
+        viewport.m_offPagePanArmed = true;
+        viewport.m_offPagePanDragging = false;
+        const QPointF onPage =
+            viewport.documentToViewport(viewport.pageRect(0).center());
+        QTabletEvent stalePress(QEvent::TabletPress, pen, onPage, onPage,
+                                1.0, 0, 0, 0.0, 0.0, 0, Qt::NoModifier,
+                                Qt::LeftButton, Qt::LeftButton);
+        QApplication::sendEvent(&viewport, &stalePress);
+        if (viewport.m_offPagePanArmed
+            || viewport.m_activeSource == PointerEvent::Mouse)
+            return fail("a stale armed pan still swallowed the stylus press");
+        QTabletEvent staleRelease(QEvent::TabletRelease, pen, onPage, onPage,
+                                  0.0, 0, 0, 0.0, 0.0, 0, Qt::NoModifier,
+                                  Qt::LeftButton, Qt::NoButton);
+        QApplication::sendEvent(&viewport, &staleRelease);
+#endif
 
         // ----- Documents with nothing to append to -----
         auto edgeless = Document::createNew("Edgeless", Document::Mode::Edgeless);

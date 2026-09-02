@@ -4321,6 +4321,9 @@ void DocumentViewport::hideEvent(QHideEvent* event)
     m_offPagePanArmed = false;
     m_offPagePanDragging = false;
     m_isPanToolDragging = false;
+    // A sequence interrupted by a tab switch never gets its TouchEnd, so clear
+    // the latch here rather than leaving the next sequence routed to a child.
+    m_touchSequenceOnChild = false;
     
     // Also reset touch handler state including inertia
     // This prevents inertia callbacks from accessing invalid widget state
@@ -4431,10 +4434,23 @@ void DocumentViewport::leaveEvent(QEvent* event)
 
 void DocumentViewport::tabletEvent(QTabletEvent* event)
 {
+    // A mouse press whose release never arrived leaves an armed off-page pan
+    // behind, and the mouse-gesture guard further down would then swallow every
+    // pen event for the rest of the session. Only a pan that has started
+    // dragging holds state worth protecting, so drop stale arming here, before
+    // the widget passthrough below needs a truthful m_pointerActive. Limited to
+    // presses: hovering has nothing to recover.
+    if (event->type() == QEvent::TabletPress && m_pointerActive
+        && m_activeSource == PointerEvent::Mouse
+        && m_offPagePanArmed && !m_offPagePanDragging) {
+        cancelOffPagePan();
+    }
+
     // Stylus events over the inline editor, the formatting bars or the add-page
     // button arrive here by propagation. Leave them unhandled so Qt synthesizes
     // mouse events for those widgets instead of treating the pen as a canvas
-    // interaction.
+    // interaction. The button handles its own presses, so what reaches here for
+    // it is hover, but the rule is the same either way.
     if (!m_pointerActive && pointerOverViewportWidget(SN_EVENT_POS(event))) {
         event->ignore();
         return;
@@ -5004,18 +5020,35 @@ bool DocumentViewport::event(QEvent* event)
         }
         
         // Check if the touch started on a child widget (like MissingPdfBanner)
-        // If so, let Qt's normal event propagation handle it instead of intercepting
-        if (event->type() == QEvent::TouchBegin && !SN_TOUCH_POINTS(touchEvent).isEmpty()) {
-            QPointF touchPos = SN_TP_POS(SN_TOUCH_POINTS(touchEvent).first());
-            QWidget* childWidget = childAt(touchPos.toPoint());
-            
-            // If touch is on a child widget (not directly on DocumentViewport),
-            // let Qt handle normal event propagation to the child
-            if (childWidget && childWidget != this) {
-                // Don't intercept - let the event propagate to child widgets
-                // This allows banner buttons, etc. to receive touch input
-                return QWidget::event(event);
+        // If so, let Qt's normal event propagation handle it instead of intercepting.
+        // Only TouchBegin can be routed by hit test, so the decision is latched
+        // for the rest of the sequence: otherwise the gesture handler claims the
+        // TouchUpdate and TouchEnd, and a finger that drifts while pressing a
+        // floating button pans the canvas out from under it.
+        if (event->type() == QEvent::TouchBegin) {
+            m_touchSequenceOnChild = false;
+            if (!SN_TOUCH_POINTS(touchEvent).isEmpty()) {
+                QPointF touchPos = SN_TP_POS(SN_TOUCH_POINTS(touchEvent).first());
+                QWidget* childWidget = childAt(touchPos.toPoint());
+
+                // If touch is on a child widget (not directly on DocumentViewport),
+                // let Qt handle normal event propagation to the child
+                if (childWidget && childWidget != this) {
+                    // Don't intercept - let the event propagate to child widgets
+                    // This allows banner buttons, etc. to receive touch input
+                    m_touchSequenceOnChild = true;
+                    return QWidget::event(event);
+                }
             }
+        } else if (m_touchSequenceOnChild) {
+            if (event->type() == QEvent::TouchEnd
+                || event->type() == QEvent::TouchCancel) {
+                m_touchSequenceOnChild = false;
+            }
+            // Left unaccepted on purpose: that is what keeps Qt synthesizing
+            // mouse events for the child, which is how a finger reaches a
+            // widget that only handles mouse input.
+            return QWidget::event(event);
         }
         
         if (m_touchHandler && m_touchHandler->handleTouchEvent(touchEvent)) {
