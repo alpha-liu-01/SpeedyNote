@@ -74,7 +74,7 @@
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="88"/>
         <source>Share the selected notebook(s) as a notebook package.</source>
-        <translation type="unfinished"></translation>
+        <translation>Compartir el bloc o los blocs de notas seleccionados como un paquete de bloc de notas.</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="91"/>
@@ -84,7 +84,7 @@
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="92"/>
         <source>Export the selected notebook(s) as a notebook package.</source>
-        <translation type="unfinished"></translation>
+        <translation>Exportar el bloc o los blocs de notas seleccionados como un paquete de bloc de notas.</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="103"/>
@@ -3448,7 +3448,10 @@ Guarde el documento antes de exportar.
 It must be saved before it can be exported.
 
 Would you like to save now?</source>
-        <translation type="unfinished"></translation>
+        <translation>Este documento aún no se ha guardado.
+Debe guardarse antes de poder exportarlo.
+
+¿Desea guardarlo ahora?</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="3342"/>
@@ -3474,7 +3477,7 @@ Tamaño: %2 MB</translation>
     <message>
         <location filename="../../source/MainWindow.cpp" line="3429"/>
         <source>Edgeless canvases cannot be exported to PDF. Export as a notebook package instead.</source>
-        <translation type="unfinished"></translation>
+        <translation>Los lienzos sin bordes no se pueden exportar a PDF. Expórtelos como un paquete de bloc de notas en su lugar.</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="3486"/>

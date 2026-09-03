@@ -74,7 +74,7 @@
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="88"/>
         <source>Share the selected notebook(s) as a notebook package.</source>
-        <translation type="unfinished"></translation>
+        <translation>Das oder die ausgewählten Notizbücher als Notizbuch-Paket teilen.</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="91"/>
@@ -84,7 +84,7 @@
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="92"/>
         <source>Export the selected notebook(s) as a notebook package.</source>
-        <translation type="unfinished"></translation>
+        <translation>Das oder die ausgewählten Notizbücher als Notizbuch-Paket exportieren.</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="103"/>
@@ -3448,7 +3448,10 @@ Möchten Sie jetzt speichern?</translation>
 It must be saved before it can be exported.
 
 Would you like to save now?</source>
-        <translation type="unfinished"></translation>
+        <translation>Dieses Dokument wurde noch nicht gespeichert.
+Es muss vor dem Exportieren gespeichert werden.
+
+Möchten Sie jetzt speichern?</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="3342"/>
@@ -3474,7 +3477,7 @@ Größe: %2 MB</translation>
     <message>
         <location filename="../../source/MainWindow.cpp" line="3429"/>
         <source>Edgeless canvases cannot be exported to PDF. Export as a notebook package instead.</source>
-        <translation type="unfinished"></translation>
+        <translation>Unendliche Arbeitsflächen können nicht als PDF exportiert werden. Exportieren Sie stattdessen als Notizbuch-Paket.</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="3486"/>

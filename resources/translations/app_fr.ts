@@ -74,7 +74,7 @@
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="88"/>
         <source>Share the selected notebook(s) as a notebook package.</source>
-        <translation type="unfinished"></translation>
+        <translation>Partager le ou les carnets sélectionnés sous forme de paquet de carnet.</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="91"/>
@@ -84,7 +84,7 @@
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="92"/>
         <source>Export the selected notebook(s) as a notebook package.</source>
-        <translation type="unfinished"></translation>
+        <translation>Exporter le ou les carnets sélectionnés sous forme de paquet de carnet.</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="103"/>
@@ -3448,7 +3448,10 @@ Voulez-vous l&apos;enregistrer maintenant ?</translation>
 It must be saved before it can be exported.
 
 Would you like to save now?</source>
-        <translation type="unfinished"></translation>
+        <translation>Ce document n&apos;a pas encore été enregistré.
+Il doit l&apos;être avant de pouvoir être exporté.
+
+Voulez-vous l&apos;enregistrer maintenant ?</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="3342"/>
@@ -3474,7 +3477,7 @@ Taille : %2 Mo</translation>
     <message>
         <location filename="../../source/MainWindow.cpp" line="3429"/>
         <source>Edgeless canvases cannot be exported to PDF. Export as a notebook package instead.</source>
-        <translation type="unfinished"></translation>
+        <translation>Les toiles sans bords ne peuvent pas être exportées au format PDF. Exportez-les plutôt sous forme de paquet de carnet.</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="3486"/>

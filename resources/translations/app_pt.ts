@@ -74,7 +74,7 @@
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="88"/>
         <source>Share the selected notebook(s) as a notebook package.</source>
-        <translation type="unfinished"></translation>
+        <translation>Compartilhar o(s) caderno(s) selecionado(s) como um pacote de caderno.</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="91"/>
@@ -84,7 +84,7 @@
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="92"/>
         <source>Export the selected notebook(s) as a notebook package.</source>
-        <translation type="unfinished"></translation>
+        <translation>Exportar o(s) caderno(s) selecionado(s) como um pacote de caderno.</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="103"/>
@@ -3448,7 +3448,10 @@ Deseja salvar agora?</translation>
 It must be saved before it can be exported.
 
 Would you like to save now?</source>
-        <translation type="unfinished"></translation>
+        <translation>Este documento ainda não foi salvo.
+Ele precisa ser salvo antes de poder ser exportado.
+
+Deseja salvar agora?</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="3342"/>
@@ -3474,7 +3477,7 @@ Tamanho: %2 MB</translation>
     <message>
         <location filename="../../source/MainWindow.cpp" line="3429"/>
         <source>Edgeless canvases cannot be exported to PDF. Export as a notebook package instead.</source>
-        <translation type="unfinished"></translation>
+        <translation>Telas infinitas não podem ser exportadas para PDF. Exporte como um pacote de caderno.</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="3486"/>
