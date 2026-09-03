@@ -10967,6 +10967,24 @@ QColor DocumentViewport::textBackdropForPage(const Page* page) const
     return TextBoxObject::defaultBackgroundColor(darkPaper);
 }
 
+QColor DocumentViewport::paperColorForPage(const Page* page) const
+{
+    if (!page) return m_backgroundColor;
+
+    if (page->backgroundType == Page::BackgroundType::PDF) {
+        // MuPdfProvider clears every page to white before drawing it, so the
+        // PDF's paper is white no matter what page->backgroundColor holds -
+        // applyBackgroundSettings() used to stamp the notebook paper onto PDF
+        // pages too, and saved bundles still carry that. Run the same transform
+        // the raster gets so the fill and the page that lands on it agree.
+        return (m_isDarkMode && m_pdfDarkModeEnabled)
+            ? DarkModeUtils::invertColorLightness(QColor(Qt::white))
+            : QColor(Qt::white);
+    }
+
+    return page->backgroundColor;
+}
+
 void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, const QPointF& viewportPos)
 {
     if (!m_document) return;
@@ -19098,7 +19116,7 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
     QRectF pageRect(0, 0, pageSize.width(), pageSize.height());
     
     // 1. Fill with page background color
-    painter.fillRect(pageRect, page->backgroundColor);
+    painter.fillRect(pageRect, paperColorForPage(page));
     
     // 2. Render background based on type
     switch (page->backgroundType) {

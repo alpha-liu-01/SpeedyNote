@@ -1777,6 +1777,19 @@ public:
      */
     QColor textBackdropForPage(const Page* page) const;
 
+    /**
+     * @brief The paper color a page will actually show on screen.
+     *
+     * @param page The page being painted; null falls back to the viewport gutter.
+     *
+     * A PDF page's paper is white (the renderer clears it) and has its lightness
+     * inverted for dark mode, so the fill painted underneath takes the same
+     * transform and ignores page->backgroundColor, which holds the notebook
+     * paper rather than the PDF's. Otherwise a page whose raster has not arrived
+     * yet disagrees with the pages around it.
+     */
+    QColor paperColorForPage(const Page* page) const;
+
     struct InlineTextEditSession {
         Document* document = nullptr;
         QString objectId;

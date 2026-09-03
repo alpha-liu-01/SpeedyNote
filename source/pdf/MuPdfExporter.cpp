@@ -6,6 +6,8 @@
 
 #ifdef SPEEDYNOTE_MUPDF_EXPORT
 
+#include "MuPdfLocks.h"
+
 #include "../core/DarkModeUtils.h"
 #include "../core/Document.h"
 #include "../core/Page.h"
@@ -981,8 +983,9 @@ QVector<int> MuPdfExporter::parsePageRange(const QString& rangeString, int total
 
 bool MuPdfExporter::initContext()
 {
-    // Create MuPDF context
-    m_ctx = fz_new_context(nullptr, nullptr, FZ_STORE_DEFAULT);
+    // Create MuPDF context. The shared lock handlers keep this context safe
+    // against concurrent renders elsewhere in the process (BUG-Q003).
+    m_ctx = fz_new_context(nullptr, snMuPdfLocks(), FZ_STORE_DEFAULT);
     if (!m_ctx) {
         qWarning() << "[MuPdfExporter] Failed to create MuPDF context";
         return false;

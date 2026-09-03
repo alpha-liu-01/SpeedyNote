@@ -8,6 +8,7 @@
 #pragma once
 
 #include "DocumentViewport.h"
+#include "DarkModeUtils.h"
 #include "Document.h"
 #include "ObjectConstraints.h"
 #include "Page.h"
@@ -5508,6 +5509,87 @@ public:
         return true;
     }
 
+    /**
+     * @brief The fill under an unrendered page must match what the page renders to.
+     *
+     * A PDF page's raster is cleared to white and then lightness-inverted for
+     * dark mode, so the fill has to be derived from white and not from
+     * page->backgroundColor, which holds the notebook paper colour. Control
+     * Panel's Apply used to stamp that onto PDF pages, so inverting it produced
+     * a bright placeholder over near-black pages - the exact opposite.
+     */
+    static bool testPdfPlaceholderPaper() {
+        printf("  testPdfPlaceholderPaper... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto doc = Document::createNew("Pdf placeholder paper");
+        DocumentViewport viewport;
+        viewport.setDocument(doc.get());
+
+        // A PDF page as the open-PDF path actually creates it: paper left at the
+        // Document default, which is hardcoded white.
+        Page* pdfPage = doc->page(0);
+        if (!pdfPage) return fail("the document had no first page");
+        pdfPage->backgroundType = Page::BackgroundType::PDF;
+        pdfPage->pdfPageNumber = 0;
+        pdfPage->backgroundColor = Qt::white;
+
+        // ----- Dark mode with inversion on: the raster goes dark, so must the fill -----
+        viewport.setDarkMode(true);
+        viewport.setPdfDarkModeEnabled(true);
+        QColor paper = viewport.paperColorForPage(pdfPage);
+        if (paper.lightness() >= 128)
+            return fail("an inverted PDF page kept a light placeholder");
+        if (paper != DarkModeUtils::invertColorLightness(QColor(Qt::white)))
+            return fail("the placeholder did not match the raster's own transform");
+
+        // ----- Inversion off: the raster stays white, so the fill must too -----
+        viewport.setPdfDarkModeEnabled(false);
+        if (viewport.paperColorForPage(pdfPage) != QColor(Qt::white))
+            return fail("a non-inverted PDF page got a dark placeholder anyway");
+
+        // ----- Light mode: unchanged regardless of the inversion setting -----
+        viewport.setDarkMode(false);
+        viewport.setPdfDarkModeEnabled(true);
+        if (viewport.paperColorForPage(pdfPage) != QColor(Qt::white))
+            return fail("light mode inverted the placeholder");
+
+        // ----- A stamped paper colour must not reach the placeholder -----
+        // This is the case that regressed: applyBackgroundSettings() wrote the
+        // notebook paper onto PDF pages, and saved bundles still carry it, so
+        // inverting the stored colour gave #d4d4d4 over a black page.
+        pdfPage->backgroundColor = QColor("#2b2b2b");
+        viewport.setDarkMode(true);
+        viewport.setPdfDarkModeEnabled(true);
+        paper = viewport.paperColorForPage(pdfPage);
+        if (paper.lightness() >= 128)
+            return fail("a stamped paper colour was inverted into a bright placeholder");
+        if (paper != DarkModeUtils::invertColorLightness(QColor(Qt::white)))
+            return fail("the stamped page did not fall back to inverted white");
+        viewport.setPdfDarkModeEnabled(false);
+        if (viewport.paperColorForPage(pdfPage) != QColor(Qt::white))
+            return fail("a stamped paper colour survived with inversion off");
+
+        // ----- Non-PDF paper is the user's choice and stays put -----
+        // Only PDF pages have their paper decided by the renderer. A light page
+        // colour in dark mode is a deliberate notebook, not a bug to correct.
+        Page* gridPage = doc->addPage();
+        if (!gridPage) return fail("could not add a second page");
+        gridPage->backgroundType = Page::BackgroundType::Grid;
+        gridPage->backgroundColor = QColor(0xff, 0xfd, 0xe7);  // cream paper
+        viewport.setDarkMode(true);
+        viewport.setPdfDarkModeEnabled(true);
+        if (viewport.paperColorForPage(gridPage) != QColor(0xff, 0xfd, 0xe7))
+            return fail("dark mode overrode a grid page's own paper colour");
+
+        printf("PASSED\n");
+        return true;
+    }
+
     // ===== Run All Unit Tests =====
     
     static bool runUnitTests() {
@@ -5575,6 +5657,7 @@ public:
         runTest(testGestureSnapshotExcludesChildren,
                 "testGestureSnapshotExcludesChildren");
         runTest(testPdfWarningState, "testPdfWarningState");
+        runTest(testPdfPlaceholderPaper, "testPdfPlaceholderPaper");
         
         printf("\n=== Results: %d passed, %d failed ===\n\n", passed, failed);
         // The caller goes on to open a window and block in the event loop, so

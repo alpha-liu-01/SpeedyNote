@@ -26,6 +26,7 @@
 | **BUG-I006** | Virtual keyboard pops up on all UI components | ✅ Fixed (FocusIn event filter) |
 | **BUG-I007** | Pinch-to-zoom unreliable | ✅ Fixed (native touch tracking + per-finger TouchBegin) |
 | **BUG-I008** | Dialogs cannot be moved or resized | ✅ Fixed (shared mobile dialog-maximizing filter) |
+| **BUG-I009** | Latent SEGV in MuPDF JPEG2000 decoder during concurrent renders | ✅ Fixed (shared fz_locks_context) |
 
 ---
 
@@ -357,6 +358,26 @@ Promoted Android's `AndroidDialogFilter` (added for the OEM z-order freeze, see 
 **Known limitations:**
 - Message boxes and other small alerts now occupy the whole window. This matches Android behavior; if it becomes a visual problem the fix is a max-width content container inside the maximized window rather than dropping the filter.
 - Clamping `minimumSize` does not lower a layout's own `minimumSizeHint`, so a dense dialog can still clip at very narrow Stage Manager widths. The remedy for such a dialog is wrapping its content in a `QScrollArea`.
+
+---
+
+### BUG-I009: Latent SEGV in MuPDF JPEG2000 Decoder During Concurrent Renders
+**Status:** 🟢 Fixed (pre-emptively)
+**Priority:** Critical
+**Category:** PDF Rendering / Thread Safety
+
+**Symptom:**
+Not yet observed on iPadOS, but the same crash was reproduced on the macOS x86_64 build: a SIGSEGV in `fz_free()` with a NULL `fz_context*`, reached from MuPDF's OpenJPEG allocator hook while two pooled render threads decode JPEG2000 images at once (scrolling pages while scrolling the page-panel thumbnails).
+
+**Root Cause:**
+MuPDF keeps the "current context" for OpenJPEG in the global `opj_secret`, serialised only by `fz_lock(ctx, FZ_LOCK_FREETYPE)`. SpeedyNote created contexts with `fz_new_context(nullptr, nullptr, ...)`, which selects MuPDF's no-op default locks, so thread-local providers raced on that global. `ios/build-mupdf.sh` builds MuPDF with bundled OpenJPEG (`USE_SYSTEM_OPENJPEG` unset), which is exactly the configuration that puts `opj_secret` on the allocation path — the same exposure that made the crash reachable on macOS.
+
+**Fix:**
+All `fz_new_context()` calls now pass the shared handlers from `source/pdf/MuPdfLocks.h`, backed by one static `QMutex[FZ_LOCK_MAX]`. Full analysis in `docs/QT5_BACKPORT_BUG_TRACKING.md` under BUG-Q003.
+
+**Affected files:**
+- `source/pdf/MuPdfLocks.h` / `source/pdf/MuPdfLocks.cpp` (new)
+- `source/pdf/MuPdfProvider.cpp`, `source/pdf/MuPdfExporter.cpp`, `source/pdf/PdfMaterializer.cpp`
 
 ---
 

@@ -16,6 +16,8 @@
 #include <QDebug>
 
 #ifdef SPEEDYNOTE_MUPDF_EXPORT
+#include "MuPdfLocks.h"
+
 #include "../core/Document.h"
 #include "../core/Page.h"
 #include "../objects/LinkObject.h"
@@ -474,7 +476,7 @@ inline bool testHighlightAnnotationExport()
     }
     
     // Reopen and inspect
-    fz_context* ctx = fz_new_context(nullptr, nullptr, FZ_STORE_DEFAULT);
+    fz_context* ctx = fz_new_context(nullptr, snMuPdfLocks(), FZ_STORE_DEFAULT);
     if (!ctx) {
         qDebug() << "FAIL: could not create a MuPDF context";
         return false;

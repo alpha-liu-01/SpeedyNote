@@ -16,7 +16,7 @@
 |-----|-------------|--------|
 | **BUG-Q001** | Stroke cache renders at wrong scale/position below zoom threshold | ✅ Fixed |
 | **BUG-Q002** | Inconsistent font character spacing on Windows | ✅ Fixed |
-| **BUG-Q003** | SEGV in MuPDF JPEG2000 decoder during concurrent PDF renders | ✅ Fixed |
+| **BUG-Q003** | SEGV in MuPDF JPEG2000 decoder during concurrent PDF renders (all platforms, not Qt5-only) | ✅ Fixed |
 
 ---
 
@@ -129,7 +129,7 @@ font.setHintingPreference(QFont::PreferNoHinting);
 **Status:** ✅ Fixed
 **Priority:** Critical
 **Category:** PDF Rendering / Thread Safety
-**Affects:** Qt5/Win32 only (Qt6 uses a prebuilt MuPDF with proper pthread locking)
+**Affects:** Every target that links a MuPDF built with bundled OpenJPEG — win32 (Qt5), macOS, iPadOS, Android. Originally believed to be Qt5/Win32-only; see "Why the other platforms looked immune" below.
 
 **Symptom:**
 When scrolling through a PDF document quickly (fast enough that no previously rendered pages remain in the viewport), the application crashes with a SIGSEGV in `fz_free()`, called from MuPDF's OpenJPEG allocator hook during JPEG2000 image decoding on a QtConcurrent background thread.
@@ -168,30 +168,45 @@ SpeedyNote uses thread-local `MuPdfProvider` instances (one per QtConcurrent wor
 
 The same pattern exists for HarfBuzz (`fz_hb_secret` in `harfbuzz.c`) and FreeType (`ftmemory.user` in `font.c`).
 
-**Why Qt6 is unaffected:**
-The Qt6 build uses a prebuilt MuPDF package from MSYS2 (64-bit), which was compiled with `HAVE_PTHREAD=yes`. That build's `fz_ft_lock` acquires a real pthread mutex, serialising access to the global variables. The Qt5/Win32 build compiles MuPDF from source without `HAVE_PTHREAD`, so all internal locking is no-ops.
+**Why the other platforms looked immune:**
+The original diagnosis credited the prebuilt MSYS2 MuPDF with `HAVE_PTHREAD=yes` locking. That is wrong: MuPDF has no pthread fallback for `fz_locks_default`, and `HAVE_PTHREAD` only affects MuPDF's own tools. The real differentiator is **who supplies `opj_malloc`/`opj_free`**:
+
+- Packaged MuPDF (MSYS2, Homebrew) is built with `USE_SYSTEM_LIBS=yes`, which implies `USE_SYSTEM_OPENJPEG=yes`. OpenJPEG then comes from its own shared library and uses its own `malloc`-based allocators, so `opj_secret` is never on the allocation path and the race cannot fire.
+- A self-built MuPDF with bundled OpenJPEG (`USE_SYSTEM_OPENJPEG=no`) compiles OpenJPEG against MuPDF's `opj_malloc`/`opj_free` hooks in `load-jpx.c`, which is what makes the race reachable. `-DNDEBUG` also strips the `assert(ctx != NULL)` those hooks carry, so a NULL context goes straight into `fz_free`.
+
+That is why the crash first showed up on win32/Qt5 (bundled since day one) and reappeared on macOS the moment `macos/build-mupdf.sh` replaced Homebrew's MuPDF with a self-contained static build. iPadOS and Android have the same exposure through `ios/build-mupdf.sh` and `android/build-mupdf.sh`. The HarfBuzz and FreeType globals are inside libmupdf itself, so those two races exist on packaged builds too.
 
 **Fix:**
-Provide a real `fz_locks_context` (backed by static `QMutex[FZ_LOCK_MAX]`) to `fz_new_context()` on Qt5, so that every `MuPdfProvider` — including each thread-local instance — shares the same set of mutexes. This makes MuPDF's own fine-grained locking (`fz_ft_lock`/`fz_ft_unlock`) functional, serialising only the critical sections (JPEG2000 decode, FreeType access, HarfBuzz access, allocation refcounting) while the rest of each render runs in parallel.
+Provide a real `fz_locks_context` (backed by static `QMutex[FZ_LOCK_MAX]`) to **every** `fz_new_context()` call on **every** platform, so all contexts in the process — including each thread-local provider — share one set of mutexes. This makes MuPDF's own fine-grained locking (`fz_ft_lock`/`fz_ft_unlock`) functional, serialising only the critical sections (JPEG2000 decode, FreeType access, HarfBuzz access, allocation refcounting) while the rest of each render runs in parallel.
+
+The callbacks live in their own translation unit so all context creators share them:
 
 ```cpp
-// Shared lock callbacks (file scope)
-static QMutex s_mupdfLocks[FZ_LOCK_MAX];
-static void sn_mupdf_lock(void*, int lock)   { s_mupdfLocks[lock].lock();   }
-static void sn_mupdf_unlock(void*, int lock) { s_mupdfLocks[lock].unlock(); }
-static fz_locks_context s_mupdfLocksCtx = { nullptr, sn_mupdf_lock, sn_mupdf_unlock };
+// source/pdf/MuPdfLocks.cpp
+QMutex s_locks[FZ_LOCK_MAX];
+void snMuPdfLock(void*, int lock)   { s_locks[lock].lock();   }
+void snMuPdfUnlock(void*, int lock) { s_locks[lock].unlock(); }
+fz_locks_context s_locksContext = { nullptr, snMuPdfLock, snMuPdfUnlock };
 
-// In constructor
-m_ctx = fz_new_context(nullptr, &s_mupdfLocksCtx, FZ_STORE_DEFAULT);
+// Every call site
+m_ctx = fz_new_context(nullptr, snMuPdfLocks(), SN_MUPDF_STORE_MAX);
 ```
 
-This is strictly better than a blanket global mutex around the entire render, which would eliminate all page-level parallelism. With fine-grained locks, most of the render (page loading, rasterisation, pixel copying) proceeds concurrently; only the small sections that touch global state block.
+Passing the locks to only *some* contexts is not enough: one context with no-op locks ignores the mutexes the others hold, and the race returns. This is also strictly better than a blanket global mutex around the entire render, which would eliminate all page-level parallelism. With fine-grained locks, most of the render (page loading, rasterisation, pixel copying) proceeds concurrently; only the small sections that touch global state block.
+
+Lock ordering is safe: MuPDF holds `FZ_LOCK_FREETYPE` across the whole JPX decode and allocates inside it (taking `FZ_LOCK_ALLOC`), but nothing takes `FZ_LOCK_FREETYPE` while holding `FZ_LOCK_ALLOC`, so there is no cycle. Non-recursive `QMutex` is fine because MuPDF never re-takes a lock it already holds.
 
 **Affected files:**
-- `source/pdf/MuPdfProvider.cpp` — `renderPageToImage()`
+- `source/pdf/MuPdfLocks.h` / `source/pdf/MuPdfLocks.cpp` — shared lock handlers (new)
+- `source/pdf/MuPdfProvider.cpp` — constructor
+- `source/pdf/MuPdfExporter.cpp` — `initContext()`
+- `source/pdf/PdfMaterializer.cpp` — `materialize()`
+- `source/pdf/MuPdfExporterTests.h` — round-trip test context
+- `CMakeLists.txt` — `PDF_SOURCES`
 
 **Verification:**
 - Open a PDF with JPEG2000 images (or any complex PDF)
 - Scroll rapidly through the document until no pages remain in the viewport
+- Open the sidebar and page panel, scroll the thumbnails while switching pages (drives the viewport and thumbnail thread pools at once)
 - Repeat 10–20 times — no crash should occur
-- Compare render performance with Qt6 to confirm no visible degradation
+- Confirm no visible render slowdown while scrolling
