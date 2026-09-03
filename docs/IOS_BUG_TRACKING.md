@@ -25,6 +25,7 @@
 | **BUG-I005** | File picker fails on real jailbroken device | ✅ Fixed (entitlements plist) |
 | **BUG-I006** | Virtual keyboard pops up on all UI components | ✅ Fixed (FocusIn event filter) |
 | **BUG-I007** | Pinch-to-zoom unreliable | ✅ Fixed (native touch tracking + per-finger TouchBegin) |
+| **BUG-I008** | Dialogs cannot be moved or resized | ✅ Fixed (shared mobile dialog-maximizing filter) |
 
 ---
 
@@ -328,6 +329,34 @@ This is the iOS counterpart of Android's BUG-A005 (Pinch-to-Zoom Unreliable). Bo
 | Second finger delivery | `TouchUpdate` with partial point data | Separate `TouchBegin` per finger |
 | Core fix | Position caching + stale ID detection | Skip nuclear reset when second finger joins |
 | Coordinate format | Physical pixels (needs DPR conversion) | Screen points (direct `mapFromGlobal`) |
+
+---
+
+### BUG-I008: Dialogs Cannot Be Moved or Resized
+**Status:** Fixed  
+**Priority:** Medium  
+**Category:** UI / Window Management  
+**Platform:** iPad (Simulator and real device)
+
+**Symptom:**  
+Dialogs (Settings, Document Settings, Save Document, Share/Export, message boxes) open at whatever size the widget code requested and cannot be adjusted. There is no title bar to drag and no edge to pull, so an oversized dialog leaves content permanently off-screen and an undersized one stays cramped. An Apple Pencil does not help -- there is nothing to grab.
+
+**Root Cause:**  
+Qt's iOS platform plugin renders every top-level `QWindow` as a `QUIView` inside a single `UIWindow`. There are no window decorations and `QIOSWindow` implements no move or resize interaction, because iOS has no window manager for an app's own views. The dialog geometry that widget code sets at construction is therefore final. Most of SpeedyNote's dialog sizes are desktop-derived (`resize(450, 400)` in `ControlPanelDialog`, `resize(780, 420)` in `PdfSourcesDialog`), and several also set an explicit `setMaximumSize()`, so they cannot fill an iPad window even if something tries to enlarge them. In a narrow Split View or Stage Manager window the same sizes overflow instead.
+
+**Fix:**  
+Promoted Android's `AndroidDialogFilter` (added for the OEM z-order freeze, see BUG-A001 context) into a shared `MobileDialogFilter` installed on both Android and iOS. On `QEvent::Show`, for any top-level `QDialog` it lifts `maximumSize`, clamps `minimumSize` to the screen's available geometry, then maximizes, raises, and activates the dialog. The 50 ms deferred re-raise stays Android-only: it exists to beat OEM skins that reorder windows asynchronously, and iOS stacks `QUIView`s in creation order so there is no z-order race.
+
+`Qt::WindowMaximized` is used rather than `Qt::WindowFullScreen` deliberately. `QIOSWindow::setWindowState()` derives the maximized rect from `availableGeometry()` intersected with the current `UIWindow` bounds, so the dialog stays inside the safe area (clear of the status bar and home indicator) and follows Split View / Stage Manager resizes. Fullscreen would use raw screen geometry and slide under the system UI.
+
+**Affected files:**
+- `source/Main.cpp` -- `AndroidDialogFilter` renamed to `MobileDialogFilter`, moved out of the `Q_OS_ANDROID` JNI include block into a shared `Q_OS_ANDROID || Q_OS_IOS` block, extended with the `isWindow()` guard plus the size-constraint handling; installation moved out of the Android-only branch
+
+**Desktop impact:** None. The filter is compiled and installed only on Android and iOS.
+
+**Known limitations:**
+- Message boxes and other small alerts now occupy the whole window. This matches Android behavior; if it becomes a visual problem the fix is a max-width content container inside the maximized window rather than dropping the filter.
+- Clamping `minimumSize` does not lower a layout's own `minimumSizeHint`, so a dense dialog can still clip at very narrow Stage Manager widths. The remedy for such a dialog is wrapping its content in a `QScrollArea`.
 
 ---
 

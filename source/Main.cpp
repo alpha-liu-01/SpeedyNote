@@ -34,32 +34,62 @@
 #include <QDebug>
 #include <QPalette>
 #include <QJniObject>
+#endif
+
+#ifdef Q_OS_IOS
+#include "ios/IOSPlatformHelper.h"
+#include "ios/IOSTouchTracker.h"
+#endif
+
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 #include <QDialog>
 #include <QEvent>
-#include <QTimer>
 #include <QPointer>
+#include <QScreen>
+#include <QTimer>
 
 /**
- * @brief Event filter that maximizes QDialog windows on Android.
- * 
- * On some OEM Android skins (notably Samsung One UI), Qt's QDialog windows
+ * @brief Event filter that maximizes top-level QDialog windows on mobile.
+ *
+ * Android: on some OEM skins (notably Samsung One UI), Qt's QDialog windows
  * are placed behind the main activity window, making them invisible while
- * still blocking input (modal). This makes the app appear frozen.
- * 
- * The fix: maximize all dialogs so they fill the screen (standard Android UX),
- * then raise + activate them. The deferred raise handles OEM skins that
- * process the show event asynchronously and override the initial z-order.
+ * still blocking input (modal). This makes the app appear frozen. The deferred
+ * raise handles skins that process the show event asynchronously and override
+ * the initial z-order.
+ *
+ * iOS: every top-level QWindow is a QUIView inside a single UIWindow, without
+ * decorations or any move/resize implementation, so whatever geometry a dialog
+ * requests is final -- the user cannot adjust it, not even with a pencil.
+ * Maximizing also keeps desktop-sized dialogs from overflowing a narrow Split
+ * View or Stage Manager window.
+ *
+ * Qt::WindowMaximized rather than Qt::WindowFullScreen is deliberate:
+ * QIOSWindow derives the maximized geometry from availableGeometry()
+ * intersected with the current UIWindow bounds, so the dialog stays inside the
+ * safe area and follows multitasking resizes.
  */
-class AndroidDialogFilter : public QObject {
+class MobileDialogFilter : public QObject {
 public:
     using QObject::QObject;
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override {
         if (event->type() == QEvent::Show) {
-            if (auto* dialog = qobject_cast<QDialog*>(obj)) {
+            auto* dialog = qobject_cast<QDialog*>(obj);
+            if (dialog && dialog->isWindow()) {
+                // Desktop-oriented size constraints would keep the dialog from
+                // filling the window, and neither platform offers a way to
+                // resize it by hand.
+                dialog->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
+                if (QScreen* screen = dialog->screen()) {
+                    const QSize avail = screen->availableGeometry().size();
+                    dialog->setMinimumSize(
+                        qMin(dialog->minimumWidth(), avail.width()),
+                        qMin(dialog->minimumHeight(), avail.height()));
+                }
                 dialog->setWindowState(dialog->windowState() | Qt::WindowMaximized);
                 dialog->raise();
                 dialog->activateWindow();
+#ifdef Q_OS_ANDROID
                 QPointer<QDialog> guard(dialog);
                 QTimer::singleShot(50, dialog, [guard]() {
                     if (guard) {
@@ -67,16 +97,12 @@ protected:
                         guard->activateWindow();
                     }
                 });
+#endif
             }
         }
         return QObject::eventFilter(obj, event);
     }
 };
-#endif
-
-#ifdef Q_OS_IOS
-#include "ios/IOSPlatformHelper.h"
-#include "ios/IOSTouchTracker.h"
 #endif
 
 #ifdef Q_OS_MACOS
@@ -893,12 +919,15 @@ int main(int argc, char* argv[])
     logAndroidPaths();
     applyAndroidPalette(app);
     applyAndroidFonts(app);
-    app.installEventFilter(new AndroidDialogFilter(&app));
 #elif defined(Q_OS_IOS)
     IOSPlatformHelper::applyPalette(app);
     IOSPlatformHelper::applyFonts(app);
     IOSPlatformHelper::installKeyboardFilter(app);
     IOSTouchTracker::install();
+#endif
+
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+    app.installEventFilter(new MobileDialogFilter(&app));
 #endif
 
     QTranslator translator;
