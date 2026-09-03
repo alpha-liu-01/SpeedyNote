@@ -79,6 +79,17 @@
 
 
   <releases type="embedded">
+    <release version="1.6.3" date="2026-09-03">
+      <description>
+        <p>Bug Fixes and Improvements:</p>
+        <ul>
+          <li>Fixed the problem that the add page button below the last page could cause undefined behavior when tapped by a finger, and not respond to stylus input at all.</li>
+          <li>Fixed the problem that the missing pdf banner could not respond to stylus input, and physically shift during a viewport scroll.</li>
+          <li>Fixed the problem that text annotations could be moved with the ObjectSelect tool.</li>
+          <li>Fixed the problem that the PDF exporting tab would still show up right after an edgeless document was exported before saving, causing an invalid pdf range error.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.6.2" date="2026-09-02">
       <description>
         <p>New Features:</p>
