@@ -257,6 +257,11 @@ MainWindow::MainWindow(QWidget *parent)
     // the document whose scroll handle the button was sitting next to.
     connect(m_splitViewManager, &SplitViewManager::searchRequested,
             this, &MainWindow::showPdfSearchBar);
+    // The missing-PDF banners are per-pane and owned by the manager, so Review
+    // Sources arrives here once with the viewport whose document to repair,
+    // rather than needing a reconnect on every active-viewport change.
+    connect(m_splitViewManager, &SplitViewManager::reviewPdfSourcesRequested,
+            this, &MainWindow::showPdfSourcesDialog);
     // The search bar anchors to the active pane's top-right corner, so anything
     // that moves that corner has to move the bar with it.
     connect(m_splitViewManager, &SplitViewManager::activePaneChanged,
@@ -2451,10 +2456,6 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_linkSlotsConn);
         m_linkSlotsConn = {};
     }
-    if (m_pdfSourcesConn) {
-        disconnect(m_pdfSourcesConn);
-        m_pdfSourcesConn = {};
-    }
     if (m_pdfBannerReserveConn) {
         disconnect(m_pdfBannerReserveConn);
         m_pdfBannerReserveConn = {};
@@ -3016,13 +3017,15 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         }
     }
     
-    m_pdfSourcesConn = connect(viewport, &DocumentViewport::requestPdfSources,
-            this, [this, viewport]() {
-        showPdfSourcesDialog(viewport);
-    });
     m_pdfBannerReserveConn = connect(viewport, &DocumentViewport::topBannerReserveChanged,
             this, &MainWindow::updatePdfSearchBarPosition);
     updatePdfSourceUi(viewport);
+
+    // Unconditionally, because the reserve can change without any viewport
+    // emitting: arriving at a clean document from a warned one leaves this
+    // viewport's own state untouched, so nothing above would fire and the
+    // search bar would stay pushed down by the banner that is no longer there.
+    updatePdfSearchBarPosition();
 }
 
 void MainWindow::applySubToolbarValuesToViewport(ToolType tool)

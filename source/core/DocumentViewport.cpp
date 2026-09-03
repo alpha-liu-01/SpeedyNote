@@ -523,56 +523,59 @@ void DocumentViewport::showPdfSourceWarning(int sourceCount, int affectedPages,
                                             const QString& singleSourceName,
                                             const QString& warningSignature)
 {
-    if (!m_missingPdfBanner) {
-        m_missingPdfBanner = new MissingPdfBanner(this);
-        
-        connect(m_missingPdfBanner, &MissingPdfBanner::reviewSourcesClicked,
-                this, [this]() { emit requestPdfSources(); });
-        connect(m_missingPdfBanner, &MissingPdfBanner::dismissed,
-                this, [this]() {
-            m_dismissedPdfWarningSignature = m_pdfWarningSignature;
-            emit topBannerReserveChanged();
-        });
-    }
-    
+    const int reserveBefore = topBannerReserve();
+
+    m_pdfWarningSourceCount = sourceCount;
+    m_pdfWarningAffectedPages = affectedPages;
+    m_pdfWarningSingleName = singleSourceName;
     m_pdfWarningSignature = warningSignature;
-    m_missingPdfBanner->setSummary(sourceCount, affectedPages, singleSourceName);
-    
-    m_missingPdfBanner->setFixedWidth(width());
-    m_missingPdfBanner->move(0, 0);
-    
-    if (m_dismissedPdfWarningSignature != warningSignature) {
-        // Also cancels an in-flight hide animation if health changed again.
-        const bool wasShowing = m_missingPdfBanner->isVisible();
-        m_missingPdfBanner->showAnimated();
-        if (!wasShowing) emit topBannerReserveChanged();
-    }
+
+    emit pdfWarningChanged();
+    // Only when the strip genuinely appears or disappears. A re-show carrying
+    // the same signature must not make top-anchored overlays jump.
+    if (topBannerReserve() != reserveBefore) emit topBannerReserveChanged();
 }
 
 void DocumentViewport::hidePdfSourceWarning()
 {
+    const int reserveBefore = topBannerReserve();
+
     m_pdfWarningSignature.clear();
     m_dismissedPdfWarningSignature.clear();
-    if (m_missingPdfBanner && m_missingPdfBanner->isVisible()) {
-        m_missingPdfBanner->hideAnimated();
-        emit topBannerReserveChanged();
-    }
+
+    emit pdfWarningChanged();
+    if (topBannerReserve() != reserveBefore) emit topBannerReserveChanged();
+}
+
+DocumentViewport::PdfWarning DocumentViewport::pdfWarning() const
+{
+    PdfWarning w;
+    w.visible = !m_pdfWarningSignature.isEmpty()
+             && m_dismissedPdfWarningSignature != m_pdfWarningSignature;
+    w.sourceCount = m_pdfWarningSourceCount;
+    w.affectedPages = m_pdfWarningAffectedPages;
+    w.singleSourceName = m_pdfWarningSingleName;
+    return w;
+}
+
+void DocumentViewport::dismissPdfSourceWarning()
+{
+    if (m_pdfWarningSignature.isEmpty()) return;
+    if (m_dismissedPdfWarningSignature == m_pdfWarningSignature) return;
+
+    m_dismissedPdfWarningSignature = m_pdfWarningSignature;
+
+    emit pdfWarningChanged();
+    emit topBannerReserveChanged();
 }
 
 int DocumentViewport::topBannerReserve() const
 {
-    if (!m_missingPdfBanner || !m_missingPdfBanner->isVisible()) {
-        return 0;
-    }
-    // The banner stays visible for the length of its slide-out, so a dismissed
-    // or superseded warning still reports isVisible(). Treating those as gone
-    // lets a top-anchored overlay settle in one move instead of chasing the
-    // animation in either direction.
-    if (m_pdfWarningSignature.isEmpty() ||
-        m_dismissedPdfWarningSignature == m_pdfWarningSignature) {
-        return 0;
-    }
-    return m_missingPdfBanner->height();
+    // Derived from the state, not from the widget, which the viewport no longer
+    // owns. Reporting a dismissed warning as gone while its slide-out is still
+    // playing is deliberate: a top-anchored overlay settles in one move instead
+    // of chasing the animation in either direction.
+    return pdfWarning().visible ? MissingPdfBanner::BANNER_HEIGHT : 0;
 }
 
 // ===== Theme / Dark Mode =====
@@ -3626,10 +3629,6 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
     emitScrollFractions();
     update();
     
-    // Update missing PDF banner width if visible
-    if (m_missingPdfBanner && m_missingPdfBanner->isVisible()) {
-        m_missingPdfBanner->setFixedWidth(width());
-    }
     updateInlineTextEditorGeometry();
     updateTextBoxFormatBarGeometry();
     updateLinkObjectBarGeometry();
@@ -4483,7 +4482,7 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
     // Stylus events over any of the viewport's child widgets arrive here by
     // propagation. Leave them unhandled so a mouse event is synthesized for
     // that child instead of the pen being treated as a canvas interaction.
-    // Accepting one is what kept the missing-PDF banner unreachable with a pen.
+    // Accepting one is what once kept the missing-PDF banner pen-unreachable.
     if (!m_pointerActive && pointerOverViewportWidget(SN_EVENT_POS(event))) {
         event->ignore();
         return;
@@ -5052,8 +5051,9 @@ bool DocumentViewport::event(QEvent* event)
             }
         }
         
-        // Check if the touch started on a child widget (like MissingPdfBanner)
-        // If so, let Qt's normal event propagation handle it instead of intercepting.
+        // Check if the touch started on a child widget (a format bar, the
+        // inline editor, the add-page button). If so, let Qt's normal event
+        // propagation handle it instead of intercepting.
         // Only TouchBegin can be routed by hit test, so the decision is latched
         // for the rest of the sequence: otherwise the gesture handler claims the
         // TouchUpdate and TouchEnd, and a finger that drifts while pressing a
@@ -5068,7 +5068,7 @@ bool DocumentViewport::event(QEvent* event)
                 // let Qt handle normal event propagation to the child
                 if (childWidget && childWidget != this) {
                     // Don't intercept - let the event propagate to child widgets
-                    // This allows banner buttons, etc. to receive touch input
+                    // so their buttons and fields receive touch input
                     m_touchSequenceOnChild = true;
                     return QWidget::event(event);
                 }
@@ -12549,23 +12549,9 @@ void DocumentViewport::captureObjectDragBackground()
     // Phase O4.1.3: Start throttle timer for drag updates
     m_dragUpdateTimer.start();
     
-    // QWidget::grab() includes visible child widgets. The floating bars remain
-    // live and follow the object during a drag, so including one in the cached
-    // canvas would leave a second, frozen copy at the drag origin. The add-page
-    // button is stationary, but it would still be baked in and then drawn again
-    // on top, doubling its shadow.
-    const bool restoreFormatBar =
-        m_textBoxFormatBar && !m_textBoxFormatBar->isHidden();
-    if (restoreFormatBar)
-        m_textBoxFormatBar->hide();
-    const bool restoreLinkBar =
-        m_linkObjectBar && !m_linkObjectBar->isHidden();
-    if (restoreLinkBar)
-        m_linkObjectBar->hide();
-    const bool restoreAddPage =
-        m_addPageButton && !m_addPageButton->isHidden();
-    if (restoreAddPage)
-        m_addPageButton->hide();
+    // The floating bars need no hiding here: grabOpaqueViewport() captures the
+    // canvas without its child widgets, so a bar that follows the object during
+    // the drag cannot leave a frozen copy at the drag origin.
 
     // Temporarily disable selected object rendering
     m_skipSelectedObjectRendering = true;
@@ -12576,22 +12562,6 @@ void DocumentViewport::captureObjectDragBackground()
     
     // Re-enable selected object rendering
     m_skipSelectedObjectRendering = false;
-
-    if (restoreFormatBar) {
-        m_textBoxFormatBar->show();
-        updateTextBoxFormatBarGeometry();
-        m_textBoxFormatBar->raise();
-    }
-    if (restoreLinkBar) {
-        m_linkObjectBar->show();
-        updateLinkObjectBarGeometry();
-        m_linkObjectBar->raise();
-    }
-    if (restoreAddPage) {
-        m_addPageButton->show();
-        updateAddPageButtonGeometry();
-        m_addPageButton->raise();
-    }
     
     // Phase O4.1.2: Pre-render selected objects to cache at current zoom
     // This is the key optimization - no image scaling needed during drag!
@@ -17056,19 +17026,29 @@ QPixmap DocumentViewport::grabOpaqueViewport()
         return QPixmap();
     }
     
-    // Mirrors what grab() does, differing only in the format it renders into.
+    // Mirrors what grab() does, differing in the format it renders into and in
+    // leaving the child widgets out. Callers all blit this frame translated or
+    // scaled while the overlay children stay live at their fixed positions, so
+    // an included child would show up a second time as a ghost alongside the
+    // real one. render() draws children by default; the flags below say not to.
     const qreal dpr = devicePixelRatioF();
     QImage frame(QSize(qRound(width() * dpr), qRound(height() * dpr)),
                  QImage::Format_RGB32);
     if (frame.isNull()) {
-        return grab();  // Allocation failed; the slower snapshot beats none at all.
+        // Allocation failed; the slower snapshot beats none at all. Not grab(),
+        // which takes no flags and would bake the overlays back in.
+        QPixmap fallback(QSize(qRound(width() * dpr), qRound(height() * dpr)));
+        fallback.setDevicePixelRatio(dpr);
+        fallback.fill(m_backgroundColor);
+        render(&fallback, QPoint(), QRegion(), QWidget::DrawWindowBackground);
+        return fallback;
     }
     frame.setDevicePixelRatio(dpr);
     
     // RGB32 has no transparency to start from, so any pixel render() leaves
     // untouched would show uninitialized memory rather than blank canvas.
     frame.fill(m_backgroundColor);
-    render(&frame);
+    render(&frame, QPoint(), QRegion(), QWidget::DrawWindowBackground);
     
     QPixmap snapshot = QPixmap::fromImage(std::move(frame));
     // fromImage() may or may not carry the ratio across; callers scale by it.

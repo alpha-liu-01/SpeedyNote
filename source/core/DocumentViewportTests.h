@@ -42,7 +42,6 @@
 #include <QFontComboBox>
 #include <QLineEdit>
 #include <QMouseEvent>
-#include <QPushButton>
 #include <QTemporaryDir>
 #include <QSignalSpy>
 #include <QSlider>
@@ -1983,19 +1982,23 @@ public:
                  .contains(viewport.m_textBoxFormatBar->geometry()))
             return fail("format bar was not clamped to viewport");
 
+        // The drag snapshot is the canvas alone. The capture used to hide the
+        // bars by hand to achieve that; grabOpaqueViewport() now leaves every
+        // child out, so the bar stays live across the capture and its
+        // visibility cannot change the result.
         viewport.captureObjectDragBackground();
         if (viewport.m_textBoxFormatBar->isHidden()
             || viewport.m_objectDragBackgroundSnapshot.isNull())
-            return fail("drag capture did not restore live format bar");
+            return fail("drag capture disturbed the live format bar");
         viewport.m_textBoxFormatBar->hide();
         viewport.m_skipSelectedObjectRendering = true;
-        const QPixmap expectedDragBackground = viewport.grab();
+        const QPixmap expectedDragBackground = viewport.grabOpaqueViewport();
         viewport.m_skipSelectedObjectRendering = false;
         viewport.m_textBoxFormatBar->show();
         viewport.updateTextBoxFormatBarGeometry();
         if (viewport.m_objectDragBackgroundSnapshot.toImage()
                 != expectedDragBackground.toImage())
-            return fail("drag snapshot retained a frozen format bar");
+            return fail("drag snapshot retained the live format bar");
         viewport.m_objectDragBackgroundSnapshot = QPixmap();
         viewport.m_dragObjectRenderedCache = QPixmap();
 
@@ -5040,12 +5043,16 @@ public:
     /**
      * @brief Pointer input over a viewport child belongs to that child.
      *
-     * pointerOverViewportWidget() used to name individual widgets, which left
-     * MissingPdfBanner out and made its buttons unreachable with a stylus: the
-     * canvas accepted the tablet event, and that accept is what suppresses the
-     * mouse event the buttons need. The band below the last page made it worse,
-     * because a press there arms an off-page pan, or draws on the page beneath
-     * once the banner has been scrolled over one.
+     * pointerOverViewportWidget() used to name individual widgets one by one,
+     * which is how the add-page button ended up left out. A press there is
+     * especially damaging because the button sits in the band below the last
+     * page, so falling through to the canvas arms an off-page pan, and for a
+     * stylus the canvas accepting the event is what suppresses the mouse event
+     * the button needs.
+     *
+     * The events go straight to the viewport rather than through the widget
+     * tree on purpose: that is the propagated event, the one that only reaches
+     * here because the child left it unhandled.
      */
     static bool testOverlayChildInputRouting() {
         printf("  testOverlayChildInputRouting... ");
@@ -5068,47 +5075,39 @@ public:
         viewport.setLayoutMode(LayoutMode::SingleColumn);
         viewport.setCurrentTool(ToolType::Pen);
 
-        viewport.showPdfSourceWarning(1, 2, QStringLiteral("missing.pdf"),
-                                      QStringLiteral("sig"));
-        MissingPdfBanner* banner = viewport.m_missingPdfBanner;
-        if (!banner)
-            return fail("the warning did not create a banner");
+        // Scroll to the very bottom so the add-page band, and the button in it,
+        // are on screen.
+        viewport.setPanOffset(QPointF(0, viewport.totalContentSize().height()));
+        ActionBarButton* addPage = viewport.m_addPageButton;
+        if (!addPage || addPage->isHidden())
+            return fail("a paged document did not show the add-page button");
+        if (!viewport.rect().contains(addPage->geometry()))
+            return fail("the add-page button did not land inside the viewport");
 
-        // The banner slides in from above, so wait for it to land rather than
-        // racing the animation, which would otherwise undo a forced offset on
-        // its next tick. The forced value is only a fallback for a timer that
-        // never fires under WA_DontShowOnScreen.
-        QElapsedTimer settle;
-        settle.start();
-        while (banner->y() != 0 && settle.elapsed() < 2000)
-            QApplication::processEvents();
-        if (banner->y() != 0)
-            banner->setProperty("slideOffset", 0);
-
-        if (!banner->isVisible()
-            || banner->geometry() != QRect(0, 0, viewport.width(), 40))
-            return fail("the banner did not settle across the viewport top");
-
-        // ----- The banner is part of the overlay hit test -----
-        const QPointF bannerCentre = QRectF(banner->geometry()).center();
-        if (!viewport.pointerOverViewportWidget(bannerCentre))
-            return fail("the banner was not excluded from canvas input");
-        // Its buttons are deeper children, so childAt() has to recurse.
-        QPushButton* bannerButton = banner->findChild<QPushButton*>();
-        if (!bannerButton)
-            return fail("the banner has no buttons to hit-test");
-        if (!viewport.pointerOverViewportWidget(
-                bannerButton->mapTo(&viewport, bannerButton->rect().center())))
-            return fail("a button inside the banner was not excluded");
-        if (viewport.pointerOverViewportWidget(QPointF(450, 400)))
+        // ----- The overlay hit test -----
+        const QPointF overlayCentre = QRectF(addPage->geometry()).center();
+        if (!viewport.pointerOverViewportWidget(overlayCentre))
+            return fail("the add-page button was not excluded from canvas input");
+        if (viewport.pointerOverViewportWidget(QPointF(450, 40)))
             return fail("bare canvas was treated as an overlay");
-
-        // ----- Scroll a page under the banner -----
-        // This is where the leak used to draw rather than pan, so it is the
-        // strictest place to press.
-        viewport.setPanOffset(QPointF(0, viewport.pageRect(0).center().y()));
-        if (viewport.viewportToPage(bannerCentre).pageIndex < 0)
-            return fail("no page ended up beneath the banner");
+        // childAt() has to recurse, so check a nested child too. The inline
+        // editor is the deepest of the overlays.
+        auto box = std::make_unique<TextBoxObject>();
+        box->position = QPointF(80.0, 80.0);
+        box->size = QSizeF(240.0, 90.0);
+        TextBoxObject* boxRaw = box.get();
+        doc->page(0)->addObject(std::move(box));
+        viewport.setPanOffset(QPointF(0, 0));
+        viewport.startInlineTextEdit(boxRaw, false);
+        if (viewport.m_inlineTextBoxEditor
+            && viewport.m_inlineTextBoxEditor->editor()) {
+            QWidget* deep = viewport.m_inlineTextBoxEditor->editor();
+            if (!viewport.pointerOverViewportWidget(
+                    deep->mapTo(&viewport, deep->rect().center())))
+                return fail("a widget nested inside an overlay was not excluded");
+        }
+        viewport.cancelInlineTextEdit();
+        viewport.setPanOffset(QPointF(0, viewport.totalContentSize().height()));
 
         Page* page = doc->page(0);
         if (!page || !page->activeLayer())
@@ -5118,35 +5117,43 @@ public:
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         // ----- A stylus press must be left unaccepted -----
         // That is the whole mechanism: an accepted tablet event stops the
-        // platform promoting it, so the banner's buttons never see a press.
+        // platform promoting it, so the child's buttons never see a press.
         const QPointingDevice* pen = QPointingDevice::primaryPointingDevice();
-        QTabletEvent penPress(QEvent::TabletPress, pen, bannerCentre, bannerCentre,
+        QTabletEvent penPress(QEvent::TabletPress, pen, overlayCentre, overlayCentre,
                               1.0, 0, 0, 0.0, 0.0, 0, Qt::NoModifier,
                               Qt::LeftButton, Qt::LeftButton);
         QApplication::sendEvent(&viewport, &penPress);
         if (penPress.isAccepted())
-            return fail("the canvas swallowed a stylus press on the banner");
+            return fail("the canvas swallowed a stylus press on the overlay");
         if (viewport.m_pointerActive || viewport.m_offPagePanArmed)
-            return fail("a stylus press on the banner started a canvas gesture");
+            return fail("a stylus press on the overlay started a canvas gesture");
         if (page->activeLayer()->strokes().size() != strokesBefore)
-            return fail("a stylus press on the banner drew on the page beneath");
+            return fail("a stylus press on the overlay drew on the page");
 #endif
 
         // ----- A mouse press must not fall through either -----
-        // The banner background and its labels do not accept presses, so
-        // without the guard this reaches the canvas and pans on drag.
-        QMouseEvent press(QEvent::MouseButtonPress, bannerCentre, bannerCentre,
+        // Overlay backgrounds and labels do not accept presses on their own, so
+        // without the guard those reach the canvas and pan on drag.
+        QMouseEvent press(QEvent::MouseButtonPress, overlayCentre, overlayCentre,
                           Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
         QApplication::sendEvent(&viewport, &press);
         if (viewport.m_pointerActive || viewport.m_offPagePanArmed)
-            return fail("a mouse press on the banner started a canvas gesture");
+            return fail("a mouse press on the overlay started a canvas gesture");
         if (page->activeLayer()->strokes().size() != strokesBefore)
-            return fail("a mouse press on the banner drew on the page beneath");
+            return fail("a mouse press on the overlay drew on the page");
+
+        // ----- A right-click on an overlay opens no canvas menu -----
+        QContextMenuEvent menu(QContextMenuEvent::Mouse, overlayCentre.toPoint(),
+                               viewport.mapToGlobal(overlayCentre.toPoint()));
+        QApplication::sendEvent(&viewport, &menu);
+        if (menu.isAccepted())
+            return fail("the canvas claimed a right-click on the overlay");
 
         // ----- An in-flight gesture is not cut short by an overlay -----
         // The regression this guard could cause: a stroke that passes under a
         // bar has to keep receiving moves, which is why every guard is
         // conditioned on !m_pointerActive.
+        viewport.setPanOffset(QPointF(0, 0));
         const QPointF onPage(450, 300);
         QMouseEvent drawPress(QEvent::MouseButtonPress, onPage, onPage,
                               Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
@@ -5154,7 +5161,8 @@ public:
         if (!viewport.m_pointerActive)
             return fail("a press on the page did not start a gesture");
 
-        const QPointF overOverlay = bannerCentre;
+        viewport.setPanOffset(QPointF(0, viewport.totalContentSize().height()));
+        const QPointF overOverlay = QRectF(addPage->geometry()).center();
         QMouseEvent drawMove(QEvent::MouseMove, overOverlay, overOverlay,
                              Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
         QApplication::sendEvent(&viewport, &drawMove);
@@ -5168,6 +5176,152 @@ public:
             return fail("the release over the overlay left the gesture open");
 
         viewport.hide();
+        printf("PASSED\n");
+        return true;
+    }
+
+    /**
+     * @brief The canvas snapshot excludes the overlay children.
+     *
+     * Every caller of grabOpaqueViewport() blits the frame translated or scaled
+     * while the overlay children stay live at fixed positions, so a child baked
+     * into it is drawn twice: once as a ghost that slides or grows with the
+     * canvas, once for real. render() draws children by default, which is what
+     * made this happen.
+     */
+    static bool testGestureSnapshotExcludesChildren() {
+        printf("  testGestureSnapshotExcludesChildren... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto doc = Document::createNew("Snapshot children");
+        doc->addPage();
+
+        DocumentViewport viewport;
+        viewport.resize(600, 500);
+        viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+        viewport.show();
+        QApplication::processEvents();
+        viewport.setDocument(doc.get());
+        viewport.setZoomLevel(1.0);
+        viewport.setLayoutMode(LayoutMode::SingleColumn);
+
+        // The add-page button stands in for all five overlays: it is the one
+        // that needs no selection to appear.
+        viewport.setPanOffset(QPointF(0, viewport.totalContentSize().height()));
+        ActionBarButton* addPage = viewport.m_addPageButton;
+        if (!addPage || addPage->isHidden())
+            return fail("a paged document did not show the add-page button");
+        if (!viewport.rect().contains(addPage->geometry()))
+            return fail("the add-page button did not land inside the viewport");
+
+        const QImage shown = viewport.grabOpaqueViewport().toImage();
+        addPage->hide();
+        const QImage hidden = viewport.grabOpaqueViewport().toImage();
+        addPage->show();
+
+        if (shown.isNull() || hidden.isNull())
+            return fail("the snapshot came back null");
+        if (shown != hidden)
+            return fail("the canvas snapshot changed with an overlay's visibility");
+
+        // Guards against the comparison above passing for the wrong reason: the
+        // button has to actually be painting something at that spot, which
+        // grab() shows because it always includes children.
+        const QImage grabbedShown = viewport.grab().toImage();
+        addPage->hide();
+        const QImage grabbedHidden = viewport.grab().toImage();
+        addPage->show();
+        if (grabbedShown == grabbedHidden)
+            return fail("the add-page button painted nothing to exclude");
+
+        viewport.hide();
+        printf("PASSED\n");
+        return true;
+    }
+
+    /**
+     * @brief The missing-PDF warning state machine the pane's banner renders.
+     *
+     * The viewport keeps the state and the pane owns the widget, so this is the
+     * whole of the viewport's side: what to show, and whether to show it at all
+     * given what the user has already dismissed.
+     */
+    static bool testPdfWarningState() {
+        printf("  testPdfWarningState... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto doc = Document::createNew("Pdf warning state");
+        DocumentViewport viewport;
+        viewport.setDocument(doc.get());
+
+        QSignalSpy contentSpy(&viewport, &DocumentViewport::pdfWarningChanged);
+        QSignalSpy reserveSpy(&viewport, &DocumentViewport::topBannerReserveChanged);
+
+        if (viewport.pdfWarning().visible || viewport.topBannerReserve() != 0)
+            return fail("a fresh viewport claimed a warning");
+
+        // ----- Raising a warning -----
+        viewport.showPdfSourceWarning(1, 3, QStringLiteral("missing.pdf"),
+                                      QStringLiteral("sig-a"));
+        DocumentViewport::PdfWarning w = viewport.pdfWarning();
+        if (!w.visible || w.sourceCount != 1 || w.affectedPages != 3
+            || w.singleSourceName != QStringLiteral("missing.pdf"))
+            return fail("the warning did not carry its summary");
+        if (viewport.topBannerReserve() != MissingPdfBanner::BANNER_HEIGHT)
+            return fail("a raised warning reserved no strip");
+        if (contentSpy.count() != 1 || reserveSpy.count() != 1)
+            return fail("raising a warning did not announce itself once");
+
+        // ----- Re-showing the same warning -----
+        // updatePdfSourceUi runs on several unrelated triggers, so this happens
+        // often. The strip does not change, so nothing anchored to it may move.
+        viewport.showPdfSourceWarning(1, 3, QStringLiteral("missing.pdf"),
+                                      QStringLiteral("sig-a"));
+        if (reserveSpy.count() != 1)
+            return fail("an unchanged warning moved the top-anchored overlays");
+
+        // ----- Dismissal -----
+        viewport.dismissPdfSourceWarning();
+        if (viewport.pdfWarning().visible || viewport.topBannerReserve() != 0)
+            return fail("a dismissed warning stayed up");
+        if (reserveSpy.count() != 2)
+            return fail("dismissal did not free the strip");
+        viewport.dismissPdfSourceWarning();
+        if (reserveSpy.count() != 2)
+            return fail("a second dismissal announced a change");
+
+        // A re-show with the same signature must stay dismissed: the source
+        // health has not moved, so neither should the banner.
+        viewport.showPdfSourceWarning(1, 3, QStringLiteral("missing.pdf"),
+                                      QStringLiteral("sig-a"));
+        if (viewport.pdfWarning().visible)
+            return fail("a dismissed warning came back unchanged");
+
+        // A different signature means the health changed, so it shows again.
+        viewport.showPdfSourceWarning(2, 5, QString(), QStringLiteral("sig-b"));
+        w = viewport.pdfWarning();
+        if (!w.visible || w.sourceCount != 2 || w.affectedPages != 5
+            || !w.singleSourceName.isEmpty())
+            return fail("changed source health did not raise a new warning");
+
+        // ----- Clearing -----
+        // Also forgets the dismissal, so a warning that returns later is shown
+        // rather than silently suppressed.
+        viewport.hidePdfSourceWarning();
+        if (viewport.pdfWarning().visible || viewport.topBannerReserve() != 0)
+            return fail("a cleared warning stayed up");
+        viewport.showPdfSourceWarning(2, 5, QString(), QStringLiteral("sig-b"));
+        if (!viewport.pdfWarning().visible)
+            return fail("clearing did not forget the earlier dismissal");
+
         printf("PASSED\n");
         return true;
     }
@@ -5234,6 +5388,9 @@ public:
                 "testOcrTextBoxConversion");
         runTest(testOverlayChildInputRouting,
                 "testOverlayChildInputRouting");
+        runTest(testGestureSnapshotExcludesChildren,
+                "testGestureSnapshotExcludesChildren");
+        runTest(testPdfWarningState, "testPdfWarningState");
         
         printf("\n=== Results: %d passed, %d failed ===\n\n", passed, failed);
         // The caller goes on to open a window and block in the event loop, so

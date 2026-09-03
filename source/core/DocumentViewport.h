@@ -237,7 +237,6 @@ class QDragMoveEvent;
 class QDragLeaveEvent;
 class QDropEvent;
 class TouchGestureHandler;
-class MissingPdfBanner;
 class LinkObject;
 struct LinkSlot;
 
@@ -445,15 +444,40 @@ public:
     Document* document() const { return m_document; }
     
     // ===== Missing PDF Banner (Phase R.3) =====
-    
+    //
+    // The viewport owns the warning state, not the widget. The banner itself is
+    // one per pane, owned by SplitViewManager and parented to the pane's stack,
+    // so it never enters the canvas snapshot or the canvas input path. It reads
+    // the bound viewport's pdfWarning() and follows pdfWarningChanged().
+
+    /**
+     * @brief What a pane's banner should be showing for this document.
+     */
+    struct PdfWarning {
+        bool visible = false;   ///< Whether the banner should be up at all.
+        int sourceCount = 0;
+        int affectedPages = 0;
+        QString singleSourceName;
+    };
+
     void showPdfSourceWarning(int sourceCount, int affectedPages,
                               const QString& singleSourceName,
                               const QString& warningSignature);
     
     /**
-     * @brief Hide the missing PDF banner.
+     * @brief Clear the warning, and the memory of it having been dismissed.
      */
     void hidePdfSourceWarning();
+
+    PdfWarning pdfWarning() const;
+
+    /**
+     * @brief Record that the user dismissed the warning currently in effect.
+     *
+     * Suppresses it until the underlying source health changes, which shows up
+     * as a different signature.
+     */
+    void dismissPdfSourceWarning();
 
     /**
      * @brief Height of the strip the missing-PDF banner occupies at the top of
@@ -2052,11 +2076,14 @@ public:
      *        viewport floats over its canvas.
      *
      * Answered by childAt(), so every child is covered without being named:
-     * the inline text editor, the two object bars, the add-page button and the
-     * missing-PDF banner. Pointer events are delivered to the deepest child and
-     * propagate back up when that child does not handle them. Consuming those
-     * here would make the canvas react to overlay interactions and, for a
-     * stylus, would suppress the mouse events those widgets rely on.
+     * the inline text editor, the two object bars and the add-page button.
+     * Pointer events are delivered to the deepest child and propagate back up
+     * when that child does not handle them. Consuming those here would make the
+     * canvas react to overlay interactions and, for a stylus, would suppress
+     * the mouse events those widgets rely on.
+     *
+     * Overlays that are not viewport children, such as the pane's missing-PDF
+     * banner, never reach the canvas at all and need no test here.
      */
     bool pointerOverViewportWidget(const QPointF& viewportPos) const;
     void updateTextBoxFormatBarGeometry();
@@ -2864,7 +2891,10 @@ signals:
      */
     void strokesChanged();
 
-    void requestPdfSources();
+    /**
+     * @brief pdfWarning() changed, so the pane's banner needs re-rendering.
+     */
+    void pdfWarningChanged();
 
     /**
      * @brief The missing-PDF banner appeared or went away, so topBannerReserve()
@@ -2926,7 +2956,10 @@ private:
     Document* m_document = nullptr;
     
     // ===== Missing PDF Banner (Phase R.3) =====
-    MissingPdfBanner* m_missingPdfBanner = nullptr;
+    // State only; the widget belongs to the pane. See the public section.
+    int m_pdfWarningSourceCount = 0;
+    int m_pdfWarningAffectedPages = 0;
+    QString m_pdfWarningSingleName;
     QString m_pdfWarningSignature;
     QString m_dismissedPdfWarningSignature;
     
@@ -3865,6 +3898,11 @@ private:
      * Measured full-viewport blit, alpha source against alpha-free source:
      * 229 vs 1698 Mpix/s on a Snapdragon 845, and 110 vs 428 on an Exynos 7870.
      * These snapshots are fully opaque regardless, so the channel is pure cost.
+     *
+     * The canvas only: the overlay children are excluded. Every caller blits
+     * the frame translated or scaled while those children stay live and fixed,
+     * so including one would draw it twice - once as a moving ghost, once for
+     * real.
      */
     QPixmap grabOpaqueViewport();
     
