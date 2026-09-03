@@ -119,6 +119,10 @@
 #include "ios/IOSPlatformHelper.h"
 
 #endif // Q_OS_ANDROID / Q_OS_IOS
+
+#ifdef Q_OS_MACOS
+#include "macos/MacPlatformHelper.h"
+#endif
 // #include "HandwritingLineEdit.h"
 #include "ControlPanelDialog.h"  // Phase CP.1: Re-enabled with cleaned up tabs
 #include "ui/dialogs/DocumentSettingsDialog.h"  // Per-document override panel
@@ -5224,6 +5228,12 @@ bool MainWindow::isDarkMode() {
     );
 #elif defined(Q_OS_IOS)
     return IOSPlatformHelper::isDarkMode();
+#elif defined(Q_OS_MACOS)
+    // Ask AppKit rather than the palette: nothing forces a palette on macOS
+    // (updateApplicationPalette and applyWindowsPalette are both Windows-only),
+    // so the heuristic below only reports dark if the Qt build in use happens to
+    // pick up the system appearance.
+    return MacPlatformHelper::isDarkMode();
 #else
     // On Linux and other platforms, use palette-based detection
     QColor bg = palette().color(QPalette::Window);

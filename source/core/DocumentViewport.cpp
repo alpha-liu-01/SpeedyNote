@@ -10967,6 +10967,22 @@ QColor DocumentViewport::textBackdropForPage(const Page* page) const
     return TextBoxObject::defaultBackgroundColor(darkPaper);
 }
 
+QColor DocumentViewport::paperColorForPage(const Page* page) const
+{
+    if (!page) return m_backgroundColor;
+
+    // Same reasoning as textBackdropForPage: a PDF page's paper is whatever the
+    // renderer makes of it. The raster gets invertImageLightness() applied when
+    // dark mode and inversion are both on, so the fill beneath it needs the
+    // matching per-color transform or an unrendered page flashes white.
+    if (page->backgroundType == Page::BackgroundType::PDF
+        && m_isDarkMode && m_pdfDarkModeEnabled) {
+        return DarkModeUtils::invertColorLightness(page->backgroundColor);
+    }
+
+    return page->backgroundColor;
+}
+
 void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, const QPointF& viewportPos)
 {
     if (!m_document) return;
@@ -19098,7 +19114,7 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
     QRectF pageRect(0, 0, pageSize.width(), pageSize.height());
     
     // 1. Fill with page background color
-    painter.fillRect(pageRect, page->backgroundColor);
+    painter.fillRect(pageRect, paperColorForPage(page));
     
     // 2. Render background based on type
     switch (page->backgroundType) {

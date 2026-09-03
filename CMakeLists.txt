@@ -73,10 +73,12 @@ if(APPLE AND NOT IOS)
     message(STATUS "Apple Vision OCR: ENABLED")
 endif()
 
-# The Vision bridge is Objective-C++ (.mm). macOS desktop builds otherwise use
-# only C/C++, so OBJCXX must be enabled explicitly (the iOS branch does the same
-# for the ML Kit bridge).
-if(SPEEDYNOTE_ENABLE_VISION_OCR)
+# The Vision bridge and the macOS dark-mode helper are Objective-C++ (.mm).
+# macOS desktop builds otherwise use only C/C++, so OBJCXX must be enabled
+# explicitly (the iOS branch does the same for the ML Kit bridge). The macOS
+# clause is separate from the Vision one so the platform helper still builds if
+# Vision OCR is ever turned off.
+if(SPEEDYNOTE_ENABLE_VISION_OCR OR (APPLE AND NOT IOS))
     enable_language(OBJCXX)
 endif()
 
@@ -1052,7 +1054,7 @@ if(IOS)
     )
 endif()
 
-# macOS desktop-specific sources (system menu bar, About dialog).
+# macOS desktop-specific sources (system menu bar, About dialog, dark mode).
 # Excluded from iOS, Android, Windows, Linux. APPLE is true for both macOS
 # and iOS, so the explicit "AND NOT IOS" guard is required.
 set(MACOS_PLATFORM_SOURCES "")
@@ -1060,6 +1062,12 @@ if(APPLE AND NOT IOS)
     set(MACOS_PLATFORM_SOURCES
         source/macos/MacMenuBar.cpp
         source/macos/AboutDialog.cpp
+        source/macos/MacPlatformHelper.mm
+    )
+    # Enable Objective-C++ compilation for .mm files
+    set_source_files_properties(
+        source/macos/MacPlatformHelper.mm
+        PROPERTIES LANGUAGE OBJCXX
     )
 endif()
 
@@ -1319,6 +1327,10 @@ elseif(APPLE)
     else()
         message(FATAL_ERROR "MuPDF is required for PDF support on macOS. Install with: brew install mupdf")
     endif()
+    # AppKit for MacPlatformHelper's appearance query (NSApp / NSAppearance).
+    # It usually arrives transitively via the Qt Cocoa plugin, but dark mode
+    # detection should not depend on that.
+    list(APPEND PLATFORM_LIBS "-framework AppKit")
     if(SPEEDYNOTE_ENABLE_VISION_OCR)
         target_compile_definitions(speedynote PRIVATE SPEEDYNOTE_HAS_VISION_OCR)
         list(APPEND PLATFORM_LIBS
