@@ -17,7 +17,8 @@ class QWidget;
 /**
  * Combined notebook export dialog.
  *
- * The PDF tab exposes rendering/page options and excludes edgeless notebooks.
+ * The PDF tab exposes rendering/page options and excludes edgeless notebooks; it
+ * is omitted entirely when none of the selected notebooks can be exported to PDF.
  * The package tab exports every selected notebook as an .snbx archive.
  */
 class BatchExportDialog : public QDialog

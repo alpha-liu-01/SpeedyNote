@@ -19,6 +19,11 @@
  * Size: 36×36 logical pixels, fully round
  * 
  * Supports dark/light mode icon switching via setDarkMode().
+ *
+ * Consumes the pointer events it handles - mouse and stylus alike, and even
+ * while disabled - instead of letting them propagate. That makes it safe to
+ * parent directly to DocumentViewport, which would otherwise run a leaked
+ * press as a canvas gesture.
  */
 class ActionBarButton : public QWidget {
     Q_OBJECT
@@ -114,6 +119,7 @@ protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void tabletEvent(QTabletEvent* event) override;
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     void enterEvent(QEnterEvent* event) override;
 #else

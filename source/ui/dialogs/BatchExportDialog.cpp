@@ -45,9 +45,9 @@ BatchExportDialog::BatchExportDialog(const QStringList& bundlePaths,
     setupUi();
     loadSettings();
 
-    const int requestedTab = initialFormat == Snbx ? 1 : 0;
-    m_tabs->setCurrentIndex(
-        requestedTab == 0 && m_validPdfBundles.isEmpty() ? 1 : requestedTab);
+    // Index-free, because setupUi() drops the PDF tab when nothing can use it.
+    const int wanted = m_tabs->indexOf(initialFormat == Snbx ? m_snbxTab : m_pdfTab);
+    m_tabs->setCurrentIndex(wanted >= 0 ? wanted : m_tabs->indexOf(m_snbxTab));
     validateExportButton();
 
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
@@ -79,13 +79,19 @@ void BatchExportDialog::setupUi()
     mainLayout->setContentsMargins(20, 20, 20, 20);
     mainLayout->setSpacing(14);
 
-    auto* heading = new QLabel(
+    // With nothing PDF-exportable the PDF tab is dropped below, leaving no format
+    // to choose between.
+    const bool pdfAvailable = !m_validPdfBundles.isEmpty();
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
-        tr("Choose how to share the selected notebook(s)."),
+    const QString headingText = pdfAvailable
+        ? tr("Choose how to share the selected notebook(s).")
+        : tr("Share the selected notebook(s) as a notebook package.");
 #else
-        tr("Choose an export format and configure its options."),
+    const QString headingText = pdfAvailable
+        ? tr("Choose an export format and configure its options.")
+        : tr("Export the selected notebook(s) as a notebook package.");
 #endif
-        this);
+    auto* heading = new QLabel(headingText, this);
     heading->setWordWrap(true);
     heading->setAlignment(Qt::AlignCenter);
     heading->setStyleSheet(QStringLiteral("font-size: 15px; font-weight: 600;"));
@@ -96,7 +102,13 @@ void BatchExportDialog::setupUi()
     m_snbxTab = createSnbxTab();
     m_tabs->addTab(m_pdfTab, tr("PDF"));
     m_tabs->addTab(m_snbxTab, tr("Notebook Package (.snbx)"));
-    m_tabs->setTabEnabled(0, !m_validPdfBundles.isEmpty());
+    // Auto-hide keys off tab count, so removing the page also retires the tab bar
+    // and leaves a single-purpose dialog rather than one greyed-out tab.
+    m_tabs->setTabBarAutoHide(true);
+    if (!pdfAvailable) {
+        m_tabs->removeTab(m_tabs->indexOf(m_pdfTab));
+        m_pdfTab->hide();  // removeTab does not delete the page
+    }
     connect(m_tabs, &QTabWidget::currentChanged,
             this, &BatchExportDialog::validateExportButton);
     mainLayout->addWidget(m_tabs, 1);

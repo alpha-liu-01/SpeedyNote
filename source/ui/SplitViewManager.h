@@ -28,6 +28,7 @@ class QStackedWidget;
 class QTimer;
 class PageWheelPicker;   // SP3: floating page-wheel next to the page-axis handle
 class ActionBarButton;   // floating search button stacked under the page-wheel
+class MissingPdfBanner;  // per-pane top strip warning about unavailable PDFs
 struct PdfSearchMatch;  // SBS3: search-hit results feed the scroll-bar markers
 
 class SplitViewManager : public QWidget {
@@ -247,6 +248,16 @@ signals:
      */
     void searchRequested();
 
+    /**
+     * @brief Emitted when Review Sources is pressed on a pane's missing-PDF
+     *        banner.
+     *
+     * Carries the viewport the banner was rendering, so the dialog repairs that
+     * document rather than whichever happens to be active. The originating pane
+     * is made active first, so in practice the two agree.
+     */
+    void reviewPdfSourcesRequested(DocumentViewport* viewport);
+
 private slots:
     void onLeftViewportChanged(DocumentViewport* vp);
     void onRightViewportChanged(DocumentViewport* vp);
@@ -273,6 +284,7 @@ private:
         ViewportScrollBar* hBar = nullptr;   // cross axis (horizontal), docked top
         PageWheelPicker* wheel = nullptr;    // SP3: floats beside the vertical handle
         ActionBarButton* searchBtn = nullptr;  // stacked under the wheel, same visibility
+        MissingPdfBanner* banner = nullptr;  // top strip, driven by bound->pdfWarning()
         QTimer* vFadeTimer = nullptr;        // fades the vertical (page-axis) bar
         QTimer* hFadeTimer = nullptr;        // fades the horizontal (cross-axis) bar
         QPointer<DocumentViewport> bound;
@@ -284,6 +296,7 @@ private:
         QMetaObject::Connection cSearchMarker;  // SBS3: vBar searchMarkerActivated -> forward
         QMetaObject::Connection cViewToWheel;   // SP3: viewport currentPageChanged -> wheel
         QMetaObject::Connection cWheelToView;   // SP3: wheel currentPageChanged -> scrollToPage
+        QMetaObject::Connection cPdfWarning;    // viewport pdfWarningChanged -> syncPdfBanner
     };
 
     QStackedWidget* stackForPane(Pane pane) const;
@@ -292,6 +305,15 @@ private:
     void destroyScrollBars(Pane pane);
     void repositionScrollBars(Pane pane);
     void bindScrollBars(Pane pane, DocumentViewport* vp);
+
+    /**
+     * @brief Render the bound viewport's pdfWarning() into the pane's banner.
+     *
+     * @param animate Slide it, for a change the user just caused. A rebind onto
+     *                a different document passes false, since a 200ms slide on
+     *                every tab switch reads as a glitch rather than feedback.
+     */
+    void syncPdfBanner(Pane pane, bool animate);
     // SP3: float the page-wheel next to the vertical handle / track its
     // visibility. The search button rides along directly beneath it, sharing
     // both the anchor and the visibility rule.

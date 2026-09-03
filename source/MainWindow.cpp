@@ -257,6 +257,11 @@ MainWindow::MainWindow(QWidget *parent)
     // the document whose scroll handle the button was sitting next to.
     connect(m_splitViewManager, &SplitViewManager::searchRequested,
             this, &MainWindow::showPdfSearchBar);
+    // The missing-PDF banners are per-pane and owned by the manager, so Review
+    // Sources arrives here once with the viewport whose document to repair,
+    // rather than needing a reconnect on every active-viewport change.
+    connect(m_splitViewManager, &SplitViewManager::reviewPdfSourcesRequested,
+            this, &MainWindow::showPdfSourcesDialog);
     // The search bar anchors to the active pane's top-right corner, so anything
     // that moves that corner has to move the bar with it.
     connect(m_splitViewManager, &SplitViewManager::activePaneChanged,
@@ -2451,10 +2456,6 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_linkSlotsConn);
         m_linkSlotsConn = {};
     }
-    if (m_pdfSourcesConn) {
-        disconnect(m_pdfSourcesConn);
-        m_pdfSourcesConn = {};
-    }
     if (m_pdfBannerReserveConn) {
         disconnect(m_pdfBannerReserveConn);
         m_pdfBannerReserveConn = {};
@@ -3016,13 +3017,15 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         }
     }
     
-    m_pdfSourcesConn = connect(viewport, &DocumentViewport::requestPdfSources,
-            this, [this, viewport]() {
-        showPdfSourcesDialog(viewport);
-    });
     m_pdfBannerReserveConn = connect(viewport, &DocumentViewport::topBannerReserveChanged,
             this, &MainWindow::updatePdfSearchBarPosition);
     updatePdfSourceUi(viewport);
+
+    // Unconditionally, because the reserve can change without any viewport
+    // emitting: arriving at a clean document from a warned one leaves this
+    // viewport's own state untouched, so nothing above would fire and the
+    // search bar would stay pushed down by the banner that is no longer there.
+    updatePdfSearchBarPosition();
 }
 
 void MainWindow::applySubToolbarValuesToViewport(ToolType tool)
@@ -3325,35 +3328,29 @@ void MainWindow::showExportDialog()
         return;
     }
     
-    // Get bundle path - document must be saved
-    QString bundlePath = doc->bundlePath();
-    if (bundlePath.isEmpty()) {
-        QMessageBox::warning(this, dialogTitle,
-                             tr("Please save the document before exporting."));
-        return;
-    }
-    
-    // Check for unsaved changes - require saving first
-    if (doc->modified) {
-        const QString savePrompt = tr(
-            "The document has unsaved changes.\n"
-            "Please save the document before exporting.\n\n"
-            "Would you like to save now?");
-        QMessageBox::StandardButton result = QMessageBox::question(
-            this, tr("Save Document First"),
-            savePrompt,
-            QMessageBox::Save | QMessageBox::Cancel);
-        
-        if (result == QMessageBox::Save) {
-            saveDocument();
-            // If still modified after save attempt, user cancelled or save failed
-            if (doc->modified) {
-                return;
-            }
-        } else {
+    // Export reads the notebook from disk, so it has to be on disk first. Saving a
+    // new canvas also relocates its bundle out of the temp directory, so the path
+    // is only knowable after the save.
+    if (doc->bundlePath().isEmpty() || doc->modified) {
+        const QString savePrompt = doc->bundlePath().isEmpty()
+            ? tr("This document has not been saved yet.\n"
+                 "It must be saved before it can be exported.\n\n"
+                 "Would you like to save now?")
+            : tr("The document has unsaved changes.\n"
+                 "Please save the document before exporting.\n\n"
+                 "Would you like to save now?");
+        if (QMessageBox::question(this, tr("Save Document First"), savePrompt,
+                                  QMessageBox::Save | QMessageBox::Cancel)
+            != QMessageBox::Save) {
+            return;
+        }
+        saveDocument();
+        // Either symptom means the user cancelled the save dialog or the save failed.
+        if (doc->modified || doc->bundlePath().isEmpty()) {
             return;
         }
     }
+    const QString bundlePath = doc->bundlePath();
     
     BatchExportDialog dialog(QStringList{bundlePath}, this);
     if (dialog.exec() == QDialog::Accepted) {
@@ -3421,6 +3418,16 @@ void MainWindow::showExportDialog()
         // Get valid bundles (dialog filters out edgeless)
         QStringList validBundles = dialog.validPdfBundles();
         if (validBundles.isEmpty()) {
+            return;
+        }
+
+        // The dialog classifies bundles by reading document.json off disk. The open
+        // document is the authoritative answer, and MuPdfExporter has no edgeless
+        // support at all: pageCount() is 0, which surfaces as "Invalid page range".
+        if (doc->isEdgeless()) {
+            QMessageBox::warning(this, dialogTitle,
+                tr("Edgeless canvases cannot be exported to PDF. "
+                   "Export as a notebook package instead."));
             return;
         }
         

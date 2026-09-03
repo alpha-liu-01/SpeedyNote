@@ -8,6 +8,7 @@
 #include "widgets/ViewportScrollBar.h"
 #include "widgets/PageWheelPicker.h"  // SP3: floating page-wheel next to the handle
 #include "widgets/ActionBarButton.h"  // floating search button under the page-wheel
+#include "banners/MissingPdfBanner.h"  // per-pane missing-PDF warning strip
 #include "../core/DocumentViewport.h"
 #include "../core/Document.h"
 #include "../core/DarkModeUtils.h"
@@ -654,6 +655,27 @@ void SplitViewManager::createScrollBars(Pane pane)
         emit searchRequested();
     });
 
+    // Missing-PDF warning strip across the pane's top. It lives here rather
+    // than inside the viewport so it stays out of the canvas snapshot, which is
+    // blitted translated during gestures, and out of the canvas input path.
+    b.banner = new MissingPdfBanner(stack);
+    b.banner->setShown(false);
+    connect(b.banner, &MissingPdfBanner::reviewSourcesClicked, this, [this, pane]() {
+        PaneBars& bars = m_paneBars[static_cast<int>(pane)];
+        if (!bars.bound) return;
+
+        // The dialog is modal over the whole window, so make the pane the user
+        // pressed in current before handing its viewport over for repair.
+        setActivePane(pane);
+        emit reviewPdfSourcesRequested(bars.bound);
+    });
+    connect(b.banner, &MissingPdfBanner::dismissed, this, [this, pane]() {
+        PaneBars& bars = m_paneBars[static_cast<int>(pane)];
+        // The dismissal belongs to the document, not the pane: reopening the
+        // same notebook in the other pane should not resurrect the warning.
+        if (bars.bound) bars.bound->dismissPdfSourceWarning();
+    });
+
     // Independent fade timers so each axis hides on its own inactivity.
     b.vFadeTimer = new QTimer(this);
     b.vFadeTimer->setSingleShot(true);
@@ -687,12 +709,14 @@ void SplitViewManager::destroyScrollBars(Pane pane)
     disconnect(b.cSearchMarker);
     disconnect(b.cViewToWheel);
     disconnect(b.cWheelToView);
+    disconnect(b.cPdfWarning);
     if (b.vFadeTimer) { b.vFadeTimer->stop(); delete b.vFadeTimer; }
     if (b.hFadeTimer) { b.hFadeTimer->stop(); delete b.hFadeTimer; }
     delete b.vBar;
     delete b.hBar;
     delete b.wheel;
     delete b.searchBtn;
+    delete b.banner;
     b = PaneBars{};
 }
 
@@ -728,6 +752,17 @@ void SplitViewManager::repositionScrollBars(Pane pane)
                         hY,
                         qMax(0, w - corner - margin * 2),
                         thickness);
+
+    // Full pane width, flush to the top. Only the width and x are set here: the
+    // y belongs to the slide animation, which drives it through setSlideOffset.
+    // Raised above the stack's current viewport page, but before the bars, so a
+    // top-docked cross-axis bar still draws over it.
+    if (b.banner) {
+        b.banner->setFixedWidth(w);
+        b.banner->move(0, b.banner->y());
+        b.banner->raise();
+    }
+
     b.vBar->raise();
     b.hBar->raise();
 
@@ -813,6 +848,30 @@ void SplitViewManager::syncPageWheelVisibility(Pane pane)
     }
 }
 
+void SplitViewManager::syncPdfBanner(Pane pane, bool animate)
+{
+    PaneBars& b = m_paneBars[static_cast<int>(pane)];
+    if (!b.banner) return;
+
+    const DocumentViewport::PdfWarning w =
+        b.bound ? b.bound->pdfWarning() : DocumentViewport::PdfWarning{};
+
+    if (w.visible)
+        b.banner->setSummary(w.sourceCount, w.affectedPages, w.singleSourceName);
+
+    if (animate) {
+        // showAnimated() also cancels an in-flight hide, so source health that
+        // flips back before the slide-out finishes reverses cleanly.
+        if (w.visible) b.banner->showAnimated();
+        else if (b.banner->isVisible()) b.banner->hideAnimated();
+    } else {
+        b.banner->setShown(w.visible);
+    }
+
+    // Width and stacking, which the banner cannot know on its own.
+    repositionScrollBars(pane);
+}
+
 void SplitViewManager::bindScrollBars(Pane pane, DocumentViewport* vp)
 {
     PaneBars& b = m_paneBars[static_cast<int>(pane)];
@@ -827,11 +886,21 @@ void SplitViewManager::bindScrollBars(Pane pane, DocumentViewport* vp)
     disconnect(b.cSearchMarker);
     disconnect(b.cViewToWheel);
     disconnect(b.cWheelToView);
+    disconnect(b.cPdfWarning);
     b.cViewToV = b.cViewToH = b.cVToView = b.cHToView = b.cMarker
               = b.cSearchMarker = b.cViewToWheel = b.cWheelToView
-              = QMetaObject::Connection{};
+              = b.cPdfWarning = QMetaObject::Connection{};
 
     b.bound = vp;
+
+    // Before the empty-pane bail-out below: a pane that lost its viewport still
+    // has to drop the previous document's banner.
+    if (vp) {
+        b.cPdfWarning = connect(vp, &DocumentViewport::pdfWarningChanged,
+                                this, [this, pane]() { syncPdfBanner(pane, true); });
+    }
+    syncPdfBanner(pane, false);
+
     if (!vp) return;
 
     // Initialize handle sizes and positions from the viewport's current state.

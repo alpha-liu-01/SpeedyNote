@@ -109,6 +109,19 @@ static void initEraserJni()
 static constexpr qreal PDF_TO_PAGE_SCALE = 96.0 / 72.0;  // PDF coords → Page coords
 static constexpr qreal PAGE_TO_PDF_SCALE = 72.0 / 96.0;  // Page coords → PDF coords
 
+/**
+ * @brief Whether an object is an annotation: a link that marks text.
+ *
+ * Its geometry belongs to the text it marks, which is why it refuses to be
+ * dragged, resized or rotated. A link with an empty region is a standalone
+ * icon rather than an annotation, and moves as freely as any other object.
+ */
+static bool isAnnotation(const InsertedObject* obj)
+{
+    const auto* link = dynamic_cast<const LinkObject*>(obj);
+    return link && !link->region.isEmpty();
+}
+
 // Note: eventMatchesAction() helper was removed - all keyboard shortcuts
 // are now handled by MainWindow's QShortcut system for focus-independent operation.
 
@@ -523,56 +536,59 @@ void DocumentViewport::showPdfSourceWarning(int sourceCount, int affectedPages,
                                             const QString& singleSourceName,
                                             const QString& warningSignature)
 {
-    if (!m_missingPdfBanner) {
-        m_missingPdfBanner = new MissingPdfBanner(this);
-        
-        connect(m_missingPdfBanner, &MissingPdfBanner::reviewSourcesClicked,
-                this, [this]() { emit requestPdfSources(); });
-        connect(m_missingPdfBanner, &MissingPdfBanner::dismissed,
-                this, [this]() {
-            m_dismissedPdfWarningSignature = m_pdfWarningSignature;
-            emit topBannerReserveChanged();
-        });
-    }
-    
+    const int reserveBefore = topBannerReserve();
+
+    m_pdfWarningSourceCount = sourceCount;
+    m_pdfWarningAffectedPages = affectedPages;
+    m_pdfWarningSingleName = singleSourceName;
     m_pdfWarningSignature = warningSignature;
-    m_missingPdfBanner->setSummary(sourceCount, affectedPages, singleSourceName);
-    
-    m_missingPdfBanner->setFixedWidth(width());
-    m_missingPdfBanner->move(0, 0);
-    
-    if (m_dismissedPdfWarningSignature != warningSignature) {
-        // Also cancels an in-flight hide animation if health changed again.
-        const bool wasShowing = m_missingPdfBanner->isVisible();
-        m_missingPdfBanner->showAnimated();
-        if (!wasShowing) emit topBannerReserveChanged();
-    }
+
+    emit pdfWarningChanged();
+    // Only when the strip genuinely appears or disappears. A re-show carrying
+    // the same signature must not make top-anchored overlays jump.
+    if (topBannerReserve() != reserveBefore) emit topBannerReserveChanged();
 }
 
 void DocumentViewport::hidePdfSourceWarning()
 {
+    const int reserveBefore = topBannerReserve();
+
     m_pdfWarningSignature.clear();
     m_dismissedPdfWarningSignature.clear();
-    if (m_missingPdfBanner && m_missingPdfBanner->isVisible()) {
-        m_missingPdfBanner->hideAnimated();
-        emit topBannerReserveChanged();
-    }
+
+    emit pdfWarningChanged();
+    if (topBannerReserve() != reserveBefore) emit topBannerReserveChanged();
+}
+
+DocumentViewport::PdfWarning DocumentViewport::pdfWarning() const
+{
+    PdfWarning w;
+    w.visible = !m_pdfWarningSignature.isEmpty()
+             && m_dismissedPdfWarningSignature != m_pdfWarningSignature;
+    w.sourceCount = m_pdfWarningSourceCount;
+    w.affectedPages = m_pdfWarningAffectedPages;
+    w.singleSourceName = m_pdfWarningSingleName;
+    return w;
+}
+
+void DocumentViewport::dismissPdfSourceWarning()
+{
+    if (m_pdfWarningSignature.isEmpty()) return;
+    if (m_dismissedPdfWarningSignature == m_pdfWarningSignature) return;
+
+    m_dismissedPdfWarningSignature = m_pdfWarningSignature;
+
+    emit pdfWarningChanged();
+    emit topBannerReserveChanged();
 }
 
 int DocumentViewport::topBannerReserve() const
 {
-    if (!m_missingPdfBanner || !m_missingPdfBanner->isVisible()) {
-        return 0;
-    }
-    // The banner stays visible for the length of its slide-out, so a dismissed
-    // or superseded warning still reports isVisible(). Treating those as gone
-    // lets a top-anchored overlay settle in one move instead of chasing the
-    // animation in either direction.
-    if (m_pdfWarningSignature.isEmpty() ||
-        m_dismissedPdfWarningSignature == m_pdfWarningSignature) {
-        return 0;
-    }
-    return m_missingPdfBanner->height();
+    // Derived from the state, not from the widget, which the viewport no longer
+    // owns. Reporting a dismissed warning as gone while its slide-out is still
+    // playing is deliberate: a top-anchored overlay settles in one move instead
+    // of chasing the animation in either direction.
+    return pdfWarning().visible ? MissingPdfBanner::BANNER_HEIGHT : 0;
 }
 
 // ===== Theme / Dark Mode =====
@@ -3626,10 +3642,6 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
     emitScrollFractions();
     update();
     
-    // Update missing PDF banner width if visible
-    if (m_missingPdfBanner && m_missingPdfBanner->isVisible()) {
-        m_missingPdfBanner->setFixedWidth(width());
-    }
     updateInlineTextEditorGeometry();
     updateTextBoxFormatBarGeometry();
     updateLinkObjectBarGeometry();
@@ -3651,6 +3663,16 @@ void DocumentViewport::mousePressEvent(QMouseEvent* event)
         && inlineEditTargetContains(SN_MOUSE_POS(event));
     if (m_contextMenuTargetsInlineEditor) {
         event->accept();
+        return;
+    }
+
+    // A press over one of the viewport's child widgets belongs to that child.
+    // It only reaches here because the child left it unhandled - a banner
+    // label, or a bar's background - and running it as a canvas press would
+    // pan or draw underneath the overlay. Skipped while a gesture is in flight
+    // so a stroke that passes under a bar is not cut short.
+    if (!m_pointerActive && pointerOverViewportWidget(SN_MOUSE_POS(event))) {
+        event->ignore();
         return;
     }
 
@@ -3735,6 +3757,14 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
         return;
     }
     
+    // Over a child widget the canvas has no business reacting, not even to
+    // hover: the off-page branch below would otherwise advertise the pan
+    // cursor across an overlay that will not pan.
+    if (!m_pointerActive && pointerOverViewportWidget(SN_MOUSE_POS(event))) {
+        event->ignore();
+        return;
+    }
+
     // Process move if we have an active pointer or for hover
     const bool objectRightDrag =
         m_currentTool == ToolType::ObjectSelect
@@ -3782,6 +3812,13 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
         if (!offPageHover && m_currentTool == ToolType::Highlighter) {
             updateLinkCursor(m_lastPointerPos);
         }
+        
+        // ObjectSelect needs the same per-move refresh: whether a drag would be
+        // refused depends on which object is under the pointer, so the
+        // transition above is too coarse to catch it.
+        if (!offPageHover && m_currentTool == ToolType::ObjectSelect) {
+            updateHighlighterCursor();
+        }
     }
     event->accept();
 }
@@ -3807,6 +3844,13 @@ void DocumentViewport::mouseReleaseEvent(QMouseEvent* event)
     // CRITICAL: Reject touch-synthesized mouse events
     if (event->source() == Qt::MouseEventSynthesizedBySystem ||
         event->source() == Qt::MouseEventSynthesizedByQt) {
+        event->ignore();
+        return;
+    }
+
+    // A release over a child with no gesture in flight is the tail of a press
+    // the canvas already declined, so it has nothing to finish here.
+    if (!m_pointerActive && pointerOverViewportWidget(SN_MOUSE_POS(event))) {
         event->ignore();
         return;
     }
@@ -3851,6 +3895,15 @@ void DocumentViewport::contextMenuEvent(QContextMenuEvent* event)
             return;
         }
     }
+
+    // Right-clicking an overlay child is not a request for canvas actions.
+    // Unlike the pointer handlers this needs no gesture check: a menu request
+    // is never part of one.
+    if (pointerOverViewportWidget(event->pos())) {
+        event->ignore();
+        return;
+    }
+
     if (m_currentTool == ToolType::ObjectSelect) {
         const QString target = m_contextMenuObjectId;
         m_contextMenuObjectId.clear();
@@ -4321,6 +4374,9 @@ void DocumentViewport::hideEvent(QHideEvent* event)
     m_offPagePanArmed = false;
     m_offPagePanDragging = false;
     m_isPanToolDragging = false;
+    // A sequence interrupted by a tab switch never gets its TouchEnd, so clear
+    // the latch here rather than leaving the next sequence routed to a child.
+    m_touchSequenceOnChild = false;
     
     // Also reset touch handler state including inertia
     // This prevents inertia callbacks from accessing invalid widget state
@@ -4431,10 +4487,22 @@ void DocumentViewport::leaveEvent(QEvent* event)
 
 void DocumentViewport::tabletEvent(QTabletEvent* event)
 {
-    // Stylus events over the inline editor, the formatting bars or the add-page
-    // button arrive here by propagation. Leave them unhandled so Qt synthesizes
-    // mouse events for those widgets instead of treating the pen as a canvas
-    // interaction.
+    // A mouse press whose release never arrived leaves an armed off-page pan
+    // behind, and the mouse-gesture guard further down would then swallow every
+    // pen event for the rest of the session. Only a pan that has started
+    // dragging holds state worth protecting, so drop stale arming here, before
+    // the widget passthrough below needs a truthful m_pointerActive. Limited to
+    // presses: hovering has nothing to recover.
+    if (event->type() == QEvent::TabletPress && m_pointerActive
+        && m_activeSource == PointerEvent::Mouse
+        && m_offPagePanArmed && !m_offPagePanDragging) {
+        cancelOffPagePan();
+    }
+
+    // Stylus events over any of the viewport's child widgets arrive here by
+    // propagation. Leave them unhandled so a mouse event is synthesized for
+    // that child instead of the pen being treated as a canvas interaction.
+    // Accepting one is what once kept the missing-PDF banner pen-unreachable.
     if (!m_pointerActive && pointerOverViewportWidget(SN_EVENT_POS(event))) {
         event->ignore();
         return;
@@ -5003,19 +5071,37 @@ bool DocumentViewport::event(QEvent* event)
             }
         }
         
-        // Check if the touch started on a child widget (like MissingPdfBanner)
-        // If so, let Qt's normal event propagation handle it instead of intercepting
-        if (event->type() == QEvent::TouchBegin && !SN_TOUCH_POINTS(touchEvent).isEmpty()) {
-            QPointF touchPos = SN_TP_POS(SN_TOUCH_POINTS(touchEvent).first());
-            QWidget* childWidget = childAt(touchPos.toPoint());
-            
-            // If touch is on a child widget (not directly on DocumentViewport),
-            // let Qt handle normal event propagation to the child
-            if (childWidget && childWidget != this) {
-                // Don't intercept - let the event propagate to child widgets
-                // This allows banner buttons, etc. to receive touch input
-                return QWidget::event(event);
+        // Check if the touch started on a child widget (a format bar, the
+        // inline editor, the add-page button). If so, let Qt's normal event
+        // propagation handle it instead of intercepting.
+        // Only TouchBegin can be routed by hit test, so the decision is latched
+        // for the rest of the sequence: otherwise the gesture handler claims the
+        // TouchUpdate and TouchEnd, and a finger that drifts while pressing a
+        // floating button pans the canvas out from under it.
+        if (event->type() == QEvent::TouchBegin) {
+            m_touchSequenceOnChild = false;
+            if (!SN_TOUCH_POINTS(touchEvent).isEmpty()) {
+                QPointF touchPos = SN_TP_POS(SN_TOUCH_POINTS(touchEvent).first());
+                QWidget* childWidget = childAt(touchPos.toPoint());
+
+                // If touch is on a child widget (not directly on DocumentViewport),
+                // let Qt handle normal event propagation to the child
+                if (childWidget && childWidget != this) {
+                    // Don't intercept - let the event propagate to child widgets
+                    // so their buttons and fields receive touch input
+                    m_touchSequenceOnChild = true;
+                    return QWidget::event(event);
+                }
             }
+        } else if (m_touchSequenceOnChild) {
+            if (event->type() == QEvent::TouchEnd
+                || event->type() == QEvent::TouchCancel) {
+                m_touchSequenceOnChild = false;
+            }
+            // Left unaccepted on purpose: that is what keeps Qt synthesizing
+            // mouse events for the child, which is how a finger reaches a
+            // widget that only handles mouse input.
+            return QWidget::event(event);
         }
         
         if (m_touchHandler && m_touchHandler->handleTouchEvent(touchEvent)) {
@@ -7378,23 +7464,34 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
         
         // Start dragging if we have a selection
         if (!m_selectedObjects.isEmpty()) {
-            m_isDraggingObjects = true;
-            m_objectDragStartViewport = pe.viewportPos;
-            m_objectDragStartDoc = docPoint;
-            m_pointerActive = true;
-            
             // O2.3.2: Store original positions for undo, and so every move can
-            // be recomputed from the start position instead of accumulated
+            // be recomputed from the start position instead of accumulated.
+            // Annotations are left out: dragging one off its words leaves a
+            // mark that means nothing and exports to the PDF in the wrong
+            // place, which is the same reason resize and rotation refuse them.
+            // Every loop that moves an object keys off this map, so omitting
+            // one here is what refuses it.
             m_objectOriginalPositions.clear();
             for (InsertedObject* obj : m_selectedObjects) {
-                if (obj) {
+                if (obj && !isAnnotation(obj)) {
                     m_objectOriginalPositions[obj->id] = obj->position;
                 }
             }
-            captureObjectDragOriginPages();
             
-            // Phase O4.1: Capture background for fast drag rendering
-            captureObjectDragBackground();
+            // Nothing movable in the selection, so there is no gesture to run.
+            // Returning here also skips the drag snapshot an annotation would
+            // never use.
+            if (!m_objectOriginalPositions.isEmpty()) {
+                m_isDraggingObjects = true;
+                m_objectDragStartViewport = pe.viewportPos;
+                m_objectDragStartDoc = docPoint;
+                m_pointerActive = true;
+                
+                captureObjectDragOriginPages();
+                
+                // Phase O4.1: Capture background for fast drag rendering
+                captureObjectDragBackground();
+            }
         }
     } else {
         // Clicked on empty space
@@ -7591,6 +7688,10 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
                             // Multi-selection: need to search for each object's tile
                             for (InsertedObject* obj : m_selectedObjects) {
                                 if (!obj) continue;
+                                // Only what this drag moved; the map is the
+                                // record of that, so a refused annotation in
+                                // the selection dirties nothing.
+                                if (!m_objectOriginalPositions.contains(obj->id)) continue;
                                 for (const auto& coord : m_document->allLoadedTileCoords()) {
                                     Page* tile = m_document->getTile(coord.first, coord.second);
                                     if (tile && tile->objectById(obj->id)) {
@@ -7611,6 +7712,10 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
                     // entries below so the repair is undoable.
                     for (InsertedObject* obj : m_selectedObjects) {
                         if (!obj) continue;
+                        // Restricted to what this drag moved. In a mixed
+                        // selection an image moving is not licence to nudge a
+                        // refused annotation off the text it marks.
+                        if (!m_objectOriginalPositions.contains(obj->id)) continue;
                         clampObjectToPage(obj, pageIndexForObject(obj));
                     }
                     
@@ -8162,6 +8267,10 @@ void DocumentViewport::moveSelectedObjects(const QPointF& delta)
     
     for (InsertedObject* obj : m_selectedObjects) {
         if (!obj) continue;
+        // An annotation's geometry belongs to the text it marks, the same
+        // reason the drag path refuses it. Unused today, but this is where a
+        // keyboard nudge would land and would otherwise reopen the hole.
+        if (isAnnotation(obj)) continue;
         obj->position += delta;
         clampObjectToPage(obj, pageIndexForObject(obj));
     }
@@ -9760,21 +9869,12 @@ void DocumentViewport::syncTextBoxFormatBar()
 
 bool DocumentViewport::pointerOverViewportWidget(const QPointF& viewportPos) const
 {
-    const QPoint pos = viewportPos.toPoint();
-    if (m_textBoxFormatBar && m_textBoxFormatBar->isVisible()
-        && m_textBoxFormatBar->geometry().contains(pos)) {
-        return true;
-    }
-    if (m_addPageButton && m_addPageButton->isVisible()
-        && m_addPageButton->geometry().contains(pos)) {
-        return true;
-    }
-    if (m_linkObjectBar && m_linkObjectBar->isVisible()
-        && m_linkObjectBar->geometry().contains(pos)) {
-        return true;
-    }
-    return m_inlineTextBoxEditor && m_inlineTextBoxEditor->isVisible()
-        && m_inlineTextBoxEditor->geometry().contains(pos);
+    // childAt() is the same hit test Qt uses to deliver the event in the first
+    // place: deepest visible child, skipping anything transparent for mouse
+    // events. Naming individual widgets here is what left the missing-PDF
+    // banner unreachable with a stylus, so let the widget tree answer instead.
+    const QWidget* child = childAt(viewportPos.toPoint());
+    return child && child != this;
 }
 
 /**
@@ -12492,23 +12592,9 @@ void DocumentViewport::captureObjectDragBackground()
     // Phase O4.1.3: Start throttle timer for drag updates
     m_dragUpdateTimer.start();
     
-    // QWidget::grab() includes visible child widgets. The floating bars remain
-    // live and follow the object during a drag, so including one in the cached
-    // canvas would leave a second, frozen copy at the drag origin. The add-page
-    // button is stationary, but it would still be baked in and then drawn again
-    // on top, doubling its shadow.
-    const bool restoreFormatBar =
-        m_textBoxFormatBar && !m_textBoxFormatBar->isHidden();
-    if (restoreFormatBar)
-        m_textBoxFormatBar->hide();
-    const bool restoreLinkBar =
-        m_linkObjectBar && !m_linkObjectBar->isHidden();
-    if (restoreLinkBar)
-        m_linkObjectBar->hide();
-    const bool restoreAddPage =
-        m_addPageButton && !m_addPageButton->isHidden();
-    if (restoreAddPage)
-        m_addPageButton->hide();
+    // The floating bars need no hiding here: grabOpaqueViewport() captures the
+    // canvas without its child widgets, so a bar that follows the object during
+    // the drag cannot leave a frozen copy at the drag origin.
 
     // Temporarily disable selected object rendering
     m_skipSelectedObjectRendering = true;
@@ -12519,22 +12605,6 @@ void DocumentViewport::captureObjectDragBackground()
     
     // Re-enable selected object rendering
     m_skipSelectedObjectRendering = false;
-
-    if (restoreFormatBar) {
-        m_textBoxFormatBar->show();
-        updateTextBoxFormatBarGeometry();
-        m_textBoxFormatBar->raise();
-    }
-    if (restoreLinkBar) {
-        m_linkObjectBar->show();
-        updateLinkObjectBarGeometry();
-        m_linkObjectBar->raise();
-    }
-    if (restoreAddPage) {
-        m_addPageButton->show();
-        updateAddPageButtonGeometry();
-        m_addPageButton->raise();
-    }
     
     // Phase O4.1.2: Pre-render selected objects to cache at current zoom
     // This is the key optimization - no image scaling needed during drag!
@@ -14746,10 +14816,45 @@ void DocumentViewport::setHighlighterColor(const QColor& color)
     m_highlighterColor = color;
 }
 
+bool DocumentViewport::pointerOverUndraggableAnnotation(const QPointF& viewportPos) const
+{
+    if (m_currentTool != ToolType::ObjectSelect) return false;
+    // Mid-gesture the cursor belongs to whatever is being dragged.
+    if (m_isDraggingObjects || m_isResizingObject) return false;
+    if (m_selectedObjects.isEmpty()) return false;
+
+    InsertedObject* under = objectAtPoint(viewportToDocument(viewportPos));
+    if (!under || !isAnnotation(under)) return false;
+
+    // Selected ones only, which is where a drag would otherwise begin. Pressing
+    // an unselected annotation to select it works fine, so refusing there would
+    // be a lie about what the click does.
+    if (!m_selectedObjects.contains(under)) return false;
+
+    // And only when the whole selection is refused. In a mixed selection a
+    // press here still drags the movable members, so the gesture is not refused
+    // and advertising it as such would be the same kind of lie.
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (obj && !isAnnotation(obj)) return false;
+    }
+    return true;
+}
+
 void DocumentViewport::updateHighlighterCursor()
 {
     if (m_currentTool == ToolType::Pan) {
         setCursor(m_isPanToolDragging ? Qt::ClosedHandCursor : Qt::OpenHandCursor);
+        return;
+    }
+    
+    if (m_currentTool == ToolType::ObjectSelect) {
+        // The tool's only cursor distinction: annotations refuse to be dragged,
+        // and with no move cursor to withhold, saying so needs a cursor of its
+        // own. Reaches mouse users only - a pen or a finger shows no cursor -
+        // so the refusal itself is what carries the behaviour.
+        const QPointF pos = mapFromGlobal(QCursor::pos());
+        setCursor(pointerOverUndraggableAnnotation(pos) ? Qt::ForbiddenCursor
+                                                        : Qt::ArrowCursor);
         return;
     }
     
@@ -16999,19 +17104,29 @@ QPixmap DocumentViewport::grabOpaqueViewport()
         return QPixmap();
     }
     
-    // Mirrors what grab() does, differing only in the format it renders into.
+    // Mirrors what grab() does, differing in the format it renders into and in
+    // leaving the child widgets out. Callers all blit this frame translated or
+    // scaled while the overlay children stay live at their fixed positions, so
+    // an included child would show up a second time as a ghost alongside the
+    // real one. render() draws children by default; the flags below say not to.
     const qreal dpr = devicePixelRatioF();
     QImage frame(QSize(qRound(width() * dpr), qRound(height() * dpr)),
                  QImage::Format_RGB32);
     if (frame.isNull()) {
-        return grab();  // Allocation failed; the slower snapshot beats none at all.
+        // Allocation failed; the slower snapshot beats none at all. Not grab(),
+        // which takes no flags and would bake the overlays back in.
+        QPixmap fallback(QSize(qRound(width() * dpr), qRound(height() * dpr)));
+        fallback.setDevicePixelRatio(dpr);
+        fallback.fill(m_backgroundColor);
+        render(&fallback, QPoint(), QRegion(), QWidget::DrawWindowBackground);
+        return fallback;
     }
     frame.setDevicePixelRatio(dpr);
     
     // RGB32 has no transparency to start from, so any pixel render() leaves
     // untouched would show uninitialized memory rather than blank canvas.
     frame.fill(m_backgroundColor);
-    render(&frame);
+    render(&frame, QPoint(), QRegion(), QWidget::DrawWindowBackground);
     
     QPixmap snapshot = QPixmap::fromImage(std::move(frame));
     // fromImage() may or may not carry the ratio across; callers scale by it.

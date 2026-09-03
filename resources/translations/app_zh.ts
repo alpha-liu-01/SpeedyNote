@@ -67,185 +67,195 @@
         <translation type="unfinished">导出笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="84"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="87"/>
         <source>Choose how to share the selected notebook(s).</source>
         <translation type="unfinished">选择以何种形式分享选中的笔记本。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="86"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="88"/>
+        <source>Share the selected notebook(s) as a notebook package.</source>
+        <translation type="unfinished">以笔记本包的形式分享选中的笔记本。</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="91"/>
         <source>Choose an export format and configure its options.</source>
         <translation type="unfinished">选择一个导出的格式并编辑其选项。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="97"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="92"/>
+        <source>Export the selected notebook(s) as a notebook package.</source>
+        <translation type="unfinished">以笔记本包的形式导出选中的笔记本。</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="103"/>
         <source>PDF</source>
         <translation type="unfinished">PDF</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="98"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="104"/>
         <source>Notebook Package (.snbx)</source>
         <translation type="unfinished">笔记本压缩包 (.snbx)</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="107"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="119"/>
         <source>Cancel</source>
         <translation type="unfinished">取消</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="115"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="127"/>
         <source>Share</source>
         <translation type="unfinished">分享</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="117"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="129"/>
         <source>Export</source>
         <translation type="unfinished">导出</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="144"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="156"/>
         <source>Export paged notebooks as PDF documents.</source>
         <translation type="unfinished">导出分页笔记到PDF文档。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="156"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="168"/>
         <source>1 edgeless notebook will be skipped because it cannot be exported to PDF.</source>
         <translation type="unfinished">一个无边笔记将会被跳过，因为无法导出为PDF。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="157"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="169"/>
         <source>%1 edgeless notebooks will be skipped because they cannot be exported to PDF.</source>
         <translation type="unfinished">%1个无边笔记将会被跳过，因为无法导出为PDF。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="165"/>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="288"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="177"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="300"/>
         <source>Output Folder</source>
         <translation type="unfinished">输出文件夹</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="168"/>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="291"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="180"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="303"/>
         <source>Select output folder...</source>
         <translation type="unfinished">选择输出文件夹...</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="173"/>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="296"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="185"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="308"/>
         <source>Browse...</source>
         <translation type="unfinished">浏览...</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="181"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="193"/>
         <source>Exported PDFs will be sent to the system share sheet.</source>
         <translation type="unfinished">导出的PDF将会被发送到系统的分享路径。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="186"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="198"/>
         <source>Pages</source>
         <translation type="unfinished">页面</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="188"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="200"/>
         <source>All pages</source>
         <translation type="unfinished">全部页面</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="192"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="204"/>
         <source>Page range:</source>
         <translation type="unfinished">页面范围:</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="195"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="207"/>
         <source>e.g., 1-10, 15, 20-30</source>
         <translation type="unfinished">举例: 1-10, 15, 20-30</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="201"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="213"/>
         <source>Page range applies to all notebooks</source>
         <translation type="unfinished">页面范围适用于所有的笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="212"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="224"/>
         <source>Quality</source>
         <translation type="unfinished">质量</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="215"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="227"/>
         <source>96 DPI (Screen)</source>
         <translation type="unfinished">96 DPI （1x屏幕）</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="216"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="228"/>
         <source>150 DPI (Standard)</source>
         <translation type="unfinished">150 DPI （标准）</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="217"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="229"/>
         <source>300 DPI (Print)</source>
         <translation type="unfinished">300 DPI（打印级质量）</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="218"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="230"/>
         <source>Custom:</source>
         <translation type="unfinished">自定义：</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="232"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="244"/>
         <source> DPI</source>
         <translation type="unfinished"> DPI</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="241"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="253"/>
         <source>Options</source>
         <translation type="unfinished">选项</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="244"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="256"/>
         <source>Annotations only (blank background)</source>
         <translation type="unfinished">仅注释（空白背景）</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="246"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="258"/>
         <source>Render PDF background in dark mode</source>
         <translation type="unfinished">渲染暗黑PDF背景</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="248"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="260"/>
         <source>Darken light-coloured strokes for printing</source>
         <translation type="unfinished">为打印效果，把浅色笔画加深</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="250"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="262"/>
         <source>Include PDF metadata</source>
         <translation type="unfinished">包含PDF数据</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="252"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="264"/>
         <source>Include bookmarks/outline</source>
         <translation type="unfinished">保留书签、大纲</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="281"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="293"/>
         <source>Export notebook packages for backup, sharing, or transfer to another device.</source>
         <translation type="unfinished">导出笔记本压缩包来备份，分享或者是传输到另一个设备。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="304"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="316"/>
         <source>Exported packages will be sent to the system share sheet.</source>
         <translation type="unfinished">导出的页面将会被发送到系统的分享路径。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="310"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="322"/>
         <source>Include PDF copy in package</source>
         <translation type="unfinished">把PDF一起打包进笔记本包</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="312"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="324"/>
         <source>Embed the source PDF content so the package remains portable.</source>
         <translation type="unfinished">把源PDF嵌入来确保笔记本的便携。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="440"/>
+        <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="452"/>
         <source>Select Output Folder</source>
         <translation type="unfinished">选择输出文件夹</translation>
     </message>
@@ -1862,146 +1872,146 @@ This helps prevent accidental palm touches while writing. Only affects Y-Axis On
 <context>
     <name>DocumentViewport</name>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="1442"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="1458"/>
         <source>Target page not found.</source>
         <translation type="unfinished">找不到目标页。</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="2737"/>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10272"/>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10585"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="2753"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10372"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10685"/>
         <source>Text box cannot grow beyond the page</source>
         <translation type="unfinished">文本框不能放大到页面外。</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="3183"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3199"/>
         <source>No document loaded</source>
         <translation type="unfinished">没有加载文档</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="3951"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="4004"/>
         <source>Cut</source>
         <translation type="unfinished">剪切</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="3958"/>
-        <location filename="../../source/core/DocumentViewport.cpp" line="3997"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="4011"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="4050"/>
         <source>Copy</source>
         <translation type="unfinished">复制</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="3963"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="4016"/>
         <source>Paste</source>
         <translation type="unfinished">粘贴</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="3972"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="4025"/>
         <source>Edit Text</source>
         <translation type="unfinished">编辑文字</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="3940"/>
-        <location filename="../../source/core/DocumentViewport.cpp" line="3981"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3993"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="4034"/>
         <source>Delete</source>
         <translation type="unfinished">删除</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="2374"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="2390"/>
         <source>Add Page at End</source>
         <translation type="unfinished">在末尾添加页</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="3931"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3984"/>
         <source>Copy Text</source>
         <translation type="unfinished">复制文字</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="8478"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="8587"/>
         <source>Insert Image</source>
         <translation type="unfinished">插入图片</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="8480"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="8589"/>
         <source>Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)</source>
         <translation type="unfinished">图片  (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;全部文件 (*)</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="8975"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="9084"/>
         <source>Not enough room on this page to convert this text</source>
         <translation type="unfinished">在此页面上没有足够的空间来容纳这些文本。</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11062"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11162"/>
         <source>Start position link</source>
         <translation type="unfinished">开始位置链接</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11068"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11168"/>
         <source>Finish position link here</source>
         <translation type="unfinished">在这里完成位置链接</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11069"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11169"/>
         <source>Finish position link from &quot;%1&quot;</source>
         <translation type="unfinished">从&quot;%1&quot;完成位置链接</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11072"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11172"/>
         <source>Cancel position link</source>
         <translation type="unfinished">取消位置链接</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11075"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11175"/>
         <source>Add URL Link</source>
         <translation type="unfinished">添加URL链接</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11076"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11176"/>
         <source>Add Markdown Note</source>
         <translation type="unfinished">添加Markdown笔记</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11087"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11187"/>
         <source>Add URL</source>
         <translation type="unfinished">添加URL</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11087"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11187"/>
         <source>Enter URL:</source>
         <translation type="unfinished">输入URL：</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11220"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11320"/>
         <source>Cannot start a position link from this annotation.</source>
         <translation type="unfinished">无法从这一注释开始位置链接。</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11370"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11470"/>
         <source>The other end of this link no longer exists.</source>
         <translation type="unfinished">链接的另一头不再存在。</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11379"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11479"/>
         <source>That link slot is no longer free.</source>
         <translation type="unfinished">那个链接槽位不再空闲。</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11389"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11489"/>
         <source>Cannot finish the position link here.</source>
         <translation type="unfinished">无法在这里完成位置链接。</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11545"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11645"/>
         <source>Cannot create note: please save the document first.</source>
         <translation type="unfinished">无法创建笔记：请先保存文档。</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11556"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11656"/>
         <source>Untitled Note</source>
         <translation type="unfinished">无标题笔记</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="11564"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="11664"/>
         <source>Failed to create note file. Check disk space and permissions.</source>
         <translation type="unfinished">创建笔记文件失败：请先检查磁盘空间和权限。</translation>
     </message>
@@ -3040,150 +3050,156 @@ This action cannot be undone.</source>
 <context>
     <name>MainWindow</name>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7432"/>
+        <location filename="../../source/MainWindow.cpp" line="7439"/>
         <source>Untitled</source>
         <translation type="unfinished">无标题</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="578"/>
-        <location filename="../../source/MainWindow.cpp" line="9336"/>
+        <location filename="../../source/MainWindow.cpp" line="583"/>
+        <location filename="../../source/MainWindow.cpp" line="9343"/>
         <source>canvas</source>
         <translation type="unfinished">画布</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="578"/>
-        <location filename="../../source/MainWindow.cpp" line="9336"/>
+        <location filename="../../source/MainWindow.cpp" line="583"/>
+        <location filename="../../source/MainWindow.cpp" line="9343"/>
         <source>document</source>
         <translation type="unfinished">文档</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="581"/>
-        <location filename="../../source/MainWindow.cpp" line="9339"/>
+        <location filename="../../source/MainWindow.cpp" line="586"/>
+        <location filename="../../source/MainWindow.cpp" line="9346"/>
         <source>Save Changes?</source>
         <translation type="unfinished">保存修改？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="582"/>
+        <location filename="../../source/MainWindow.cpp" line="587"/>
         <source>This %1 has unsaved changes. Do you want to save before closing?</source>
         <translation type="unfinished">这个%1有未保存的内容。你是否要在关闭前把它保存？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="597"/>
-        <location filename="../../source/MainWindow.cpp" line="614"/>
-        <location filename="../../source/MainWindow.cpp" line="638"/>
-        <location filename="../../source/MainWindow.cpp" line="3763"/>
-        <location filename="../../source/MainWindow.cpp" line="3851"/>
-        <location filename="../../source/MainWindow.cpp" line="9357"/>
-        <location filename="../../source/MainWindow.cpp" line="9371"/>
-        <location filename="../../source/MainWindow.cpp" line="9385"/>
-        <location filename="../../source/MainWindow.cpp" line="9680"/>
+        <location filename="../../source/MainWindow.cpp" line="602"/>
+        <location filename="../../source/MainWindow.cpp" line="619"/>
+        <location filename="../../source/MainWindow.cpp" line="643"/>
+        <location filename="../../source/MainWindow.cpp" line="3770"/>
+        <location filename="../../source/MainWindow.cpp" line="3858"/>
+        <location filename="../../source/MainWindow.cpp" line="9364"/>
+        <location filename="../../source/MainWindow.cpp" line="9378"/>
+        <location filename="../../source/MainWindow.cpp" line="9392"/>
+        <location filename="../../source/MainWindow.cpp" line="9687"/>
         <source>Save Error</source>
         <translation type="unfinished">保存失败</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="598"/>
-        <location filename="../../source/MainWindow.cpp" line="3764"/>
-        <location filename="../../source/MainWindow.cpp" line="3852"/>
+        <location filename="../../source/MainWindow.cpp" line="603"/>
+        <location filename="../../source/MainWindow.cpp" line="3771"/>
+        <location filename="../../source/MainWindow.cpp" line="3859"/>
         <source>Failed to save document to:
 %1</source>
         <translation type="unfinished">无法保存文档到：
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="982"/>
+        <location filename="../../source/MainWindow.cpp" line="987"/>
         <source>Current Document Settings...</source>
         <translation type="unfinished">当前文档设置...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3371"/>
-        <location filename="../../source/MainWindow.cpp" line="3442"/>
+        <location filename="../../source/MainWindow.cpp" line="3368"/>
+        <location filename="../../source/MainWindow.cpp" line="3449"/>
         <source>Could not find a unique filename. Please choose a different location.</source>
         <translation type="unfinished">找不到一个独一无二的文件名。请换一个地方存储。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3712"/>
-        <location filename="../../source/MainWindow.cpp" line="3740"/>
+        <location filename="../../source/MainWindow.cpp" line="3719"/>
+        <location filename="../../source/MainWindow.cpp" line="3747"/>
         <source>Save Canvas</source>
         <translation type="unfinished">保存画布</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3712"/>
-        <location filename="../../source/MainWindow.cpp" line="3740"/>
-        <location filename="../../source/MainWindow.cpp" line="3827"/>
+        <location filename="../../source/MainWindow.cpp" line="3719"/>
+        <location filename="../../source/MainWindow.cpp" line="3747"/>
         <location filename="../../source/MainWindow.cpp" line="3834"/>
+        <location filename="../../source/MainWindow.cpp" line="3841"/>
         <source>Save Document</source>
         <translation type="unfinished">保存文档</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3742"/>
+        <location filename="../../source/MainWindow.cpp" line="3749"/>
         <source>SpeedyNote Bundle (*.snb)</source>
         <translation type="unfinished">SpeedyNote 包 (*.snb)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1003"/>
+        <location filename="../../source/MainWindow.cpp" line="1008"/>
         <source>Settings</source>
         <translation type="unfinished">设置</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3828"/>
         <location filename="../../source/MainWindow.cpp" line="3835"/>
+        <location filename="../../source/MainWindow.cpp" line="3842"/>
         <source>No document is open.</source>
         <translation type="unfinished">当前没有打开的文档。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4004"/>
+        <location filename="../../source/MainWindow.cpp" line="4011"/>
         <source>SpeedyNote Files (*.snb *.pdf);;SpeedyNote Bundle (*.snb);;PDF Documents (*.pdf);;All Files (*)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3987"/>
-        <location filename="../../source/MainWindow.cpp" line="4007"/>
+        <location filename="../../source/MainWindow.cpp" line="3994"/>
+        <location filename="../../source/MainWindow.cpp" line="4014"/>
         <source>Open Document</source>
         <translation type="unfinished">打开文档</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="992"/>
+        <location filename="../../source/MainWindow.cpp" line="997"/>
         <source>Lock All OCR Text</source>
         <translation type="unfinished">锁定全部OCR文本框</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="999"/>
+        <location filename="../../source/MainWindow.cpp" line="1004"/>
         <source>Import Pages from Other Doc (Debug)...</source>
         <translation type="unfinished">从另一个文档导入页面 (Debug)...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3317"/>
-        <location filename="../../source/MainWindow.cpp" line="3324"/>
+        <location filename="../../source/MainWindow.cpp" line="3320"/>
+        <location filename="../../source/MainWindow.cpp" line="3327"/>
         <source>No document is currently open.</source>
         <translation type="unfinished">当前没有已经打开的文档。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3332"/>
-        <source>Please save the document before exporting.</source>
-        <translation type="unfinished">请在导出前保存文档。</translation>
-    </message>
-    <message>
-        <location filename="../../source/MainWindow.cpp" line="3408"/>
+        <location filename="../../source/MainWindow.cpp" line="3405"/>
         <source>Share Notebook Package</source>
         <translation type="unfinished">分享打包的笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2930"/>
+        <location filename="../../source/MainWindow.cpp" line="2931"/>
         <source>Warning</source>
         <translation type="unfinished">警告</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3343"/>
+        <location filename="../../source/MainWindow.cpp" line="3336"/>
+        <source>This document has not been saved yet.
+It must be saved before it can be exported.
+
+Would you like to save now?</source>
+        <translation type="unfinished">此文档还未保存。
+它必须在导出前先保存。
+
+您现在要保存吗？</translation>
+    </message>
+    <message>
+        <location filename="../../source/MainWindow.cpp" line="3342"/>
         <source>Save Document First</source>
         <translation type="unfinished">先保存文档</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3386"/>
+        <location filename="../../source/MainWindow.cpp" line="3383"/>
         <source>PDF sources could not be finalized. Repair the unavailable sources and try again.</source>
         <translation type="unfinished">PDF源无法被确认。修复不可用的源后再试一次。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3414"/>
+        <location filename="../../source/MainWindow.cpp" line="3411"/>
         <source>Notebook exported successfully.
 
 File: %1
@@ -3194,13 +3210,18 @@ Size: %2 MB</source>
 体积: %2 MB</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3479"/>
-        <location filename="../../source/MainWindow.cpp" line="3482"/>
+        <location filename="../../source/MainWindow.cpp" line="3429"/>
+        <source>Edgeless canvases cannot be exported to PDF. Export as a notebook package instead.</source>
+        <translation type="unfinished">无边画布无法导出到PDF。改为导出为一个笔记本压缩包。</translation>
+    </message>
+    <message>
+        <location filename="../../source/MainWindow.cpp" line="3486"/>
+        <location filename="../../source/MainWindow.cpp" line="3489"/>
         <source>Share PDF</source>
         <translation type="unfinished">分享PDF</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3486"/>
+        <location filename="../../source/MainWindow.cpp" line="3493"/>
         <source>PDF exported successfully!
 
 Pages exported: %1
@@ -3211,41 +3232,41 @@ File size: %2 KB</source>
 文件大小: %2 KB</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3494"/>
+        <location filename="../../source/MainWindow.cpp" line="3501"/>
         <source>Failed to export PDF:
 %1</source>
         <translation type="unfinished">导出PDF失败：
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3701"/>
+        <location filename="../../source/MainWindow.cpp" line="3708"/>
         <source>Untitled Canvas</source>
         <translation type="unfinished">无标题画布</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3701"/>
+        <location filename="../../source/MainWindow.cpp" line="3708"/>
         <source>Untitled Document</source>
         <translation type="unfinished">无标题文档</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3723"/>
+        <location filename="../../source/MainWindow.cpp" line="3730"/>
         <source>Overwrite?</source>
         <translation type="unfinished">覆盖写入？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3724"/>
+        <location filename="../../source/MainWindow.cpp" line="3731"/>
         <source>A document named &apos;%1&apos; already exists.
 Do you want to replace it?</source>
         <translation type="unfinished">一个名为&apos;%1&apos; 的文档已经存在。
 你确定你要把它取代吗？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3980"/>
+        <location filename="../../source/MainWindow.cpp" line="3987"/>
         <source>No Documents</source>
         <translation type="unfinished">没有文档</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3981"/>
+        <location filename="../../source/MainWindow.cpp" line="3988"/>
         <source>No saved documents found.
 
 Documents are saved to:
@@ -3256,100 +3277,100 @@ Documents are saved to:
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3988"/>
+        <location filename="../../source/MainWindow.cpp" line="3995"/>
         <source>Select a document:</source>
         <translation type="unfinished">选择一个文档：</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4023"/>
-        <location filename="../../source/MainWindow.cpp" line="4888"/>
+        <location filename="../../source/MainWindow.cpp" line="4030"/>
+        <location filename="../../source/MainWindow.cpp" line="4895"/>
         <source>Load Error</source>
         <translation type="unfinished">加载失败</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4024"/>
+        <location filename="../../source/MainWindow.cpp" line="4031"/>
         <source>Failed to load document from:
 %1</source>
         <translation type="unfinished">无法从：
 %1中读取文档</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4209"/>
+        <location filename="../../source/MainWindow.cpp" line="4216"/>
         <source>Cannot Delete</source>
         <translation type="unfinished">无法删除</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4210"/>
+        <location filename="../../source/MainWindow.cpp" line="4217"/>
         <source>Cannot delete the last remaining page.</source>
         <translation type="unfinished">无法删除仅剩的一页。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4559"/>
-        <location filename="../../source/MainWindow.cpp" line="4667"/>
+        <location filename="../../source/MainWindow.cpp" line="4566"/>
+        <location filename="../../source/MainWindow.cpp" line="4674"/>
         <source>PDF Files (*.pdf);;All Files (*)</source>
         <translation type="unfinished">PDF 文件 (*.pdf);;所有文件 (*)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4670"/>
+        <location filename="../../source/MainWindow.cpp" line="4677"/>
         <source>Open PDF</source>
         <translation type="unfinished">打开 PDF</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4573"/>
-        <location filename="../../source/MainWindow.cpp" line="4691"/>
+        <location filename="../../source/MainWindow.cpp" line="4580"/>
+        <location filename="../../source/MainWindow.cpp" line="4698"/>
         <source>PDF Error</source>
         <translation type="unfinished">PDF故障</translation>
     </message>
     <message>
         <location filename="../../source/macos/MacMenuBar.cpp" line="172"/>
-        <location filename="../../source/MainWindow.cpp" line="971"/>
-        <location filename="../../source/MainWindow.cpp" line="3248"/>
+        <location filename="../../source/MainWindow.cpp" line="976"/>
+        <location filename="../../source/MainWindow.cpp" line="3251"/>
         <source>PDF Sources...</source>
         <translation type="unfinished">PDF 源...</translation>
     </message>
     <message>
         <location filename="../../source/macos/MacMenuBar.cpp" line="170"/>
-        <location filename="../../source/MainWindow.cpp" line="3247"/>
+        <location filename="../../source/MainWindow.cpp" line="3250"/>
         <source>Repair PDF Sources... (%1)</source>
         <translation type="unfinished">修复PDF源... (%1)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4558"/>
-        <location filename="../../source/MainWindow.cpp" line="4579"/>
+        <location filename="../../source/MainWindow.cpp" line="4565"/>
+        <location filename="../../source/MainWindow.cpp" line="4586"/>
         <source>Add Pages from PDF</source>
         <translation type="unfinished">给PDF添加页</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4574"/>
+        <location filename="../../source/MainWindow.cpp" line="4581"/>
         <source>The selected PDF could not be opened:
 %1</source>
         <translation type="unfinished">无法打开选中的无法PDF：
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4601"/>
+        <location filename="../../source/MainWindow.cpp" line="4608"/>
         <source>PDF Import</source>
         <translation type="unfinished">PDF导入</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4602"/>
+        <location filename="../../source/MainWindow.cpp" line="4609"/>
         <source>The selected PDF pages could not be added to this document.</source>
         <translation type="unfinished">选中的PDF页无法加入到此文档中。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4692"/>
+        <location filename="../../source/MainWindow.cpp" line="4699"/>
         <source>Failed to open PDF file:
 %1</source>
         <translation type="unfinished">无法打开PDF文件：
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4872"/>
+        <location filename="../../source/MainWindow.cpp" line="4879"/>
         <source>Open SpeedyNote Bundle (.snb folder)</source>
         <translation type="unfinished">打开SpeedyNote Bundle (.snb 文件夹)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4889"/>
+        <location filename="../../source/MainWindow.cpp" line="4896"/>
         <source>Selected folder is not a valid SpeedyNote bundle.
 Missing document.json manifest.
 
@@ -3360,150 +3381,150 @@ document.json manifest 缺失。
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5008"/>
+        <location filename="../../source/MainWindow.cpp" line="5015"/>
         <source>Jump to Page</source>
         <translation type="unfinished">跳到页</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5008"/>
+        <location filename="../../source/MainWindow.cpp" line="5015"/>
         <source>Enter Page Number:</source>
         <translation type="unfinished">输入页码：</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5953"/>
+        <location filename="../../source/MainWindow.cpp" line="5960"/>
         <source>Pick recolor target</source>
         <translation type="unfinished">选中重新上色的目标</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6612"/>
+        <location filename="../../source/MainWindow.cpp" line="6619"/>
         <source>No results found</source>
         <translation type="unfinished">没有找到结果</translation>
     </message>
     <message numerus="yes">
-        <location filename="../../source/MainWindow.cpp" line="6614"/>
+        <location filename="../../source/MainWindow.cpp" line="6621"/>
         <source>%n match(es)</source>
         <translation type="unfinished">
             <numerusform>找到了%n 个</numerusform>
         </translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6690"/>
+        <location filename="../../source/MainWindow.cpp" line="6697"/>
         <source>Scanning...</source>
         <translation type="unfinished">扫描中...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6747"/>
+        <location filename="../../source/MainWindow.cpp" line="6754"/>
         <source>Scanning all pages...</source>
         <translation type="unfinished">扫描全部页面中...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6825"/>
-        <location filename="../../source/MainWindow.cpp" line="6857"/>
+        <location filename="../../source/MainWindow.cpp" line="6832"/>
+        <location filename="../../source/MainWindow.cpp" line="6864"/>
         <source>Auto-scanning...</source>
         <translation type="unfinished">自动扫描中...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7003"/>
+        <location filename="../../source/MainWindow.cpp" line="7010"/>
         <source>Done: %1 words</source>
         <translation type="unfinished">完成：%1个词</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7015"/>
+        <location filename="../../source/MainWindow.cpp" line="7022"/>
         <source>OCR complete: %1 pages scanned, %2 with text</source>
         <translation type="unfinished">OCR完毕：扫描了%1页，共%2页</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7052"/>
+        <location filename="../../source/MainWindow.cpp" line="7059"/>
         <source>OCR error: %1</source>
         <translation type="unfinished">OCR错误: %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7239"/>
+        <location filename="../../source/MainWindow.cpp" line="7246"/>
         <source>System default</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">系统默认</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7240"/>
+        <location filename="../../source/MainWindow.cpp" line="7247"/>
         <source>System default (%1)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">系统默认 (%1)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7248"/>
+        <location filename="../../source/MainWindow.cpp" line="7255"/>
         <source>This engine cannot detect the script it is reading. It uses the handwriting recognizer Windows picked for your language, so choose a language below when writing in another script.</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">此引擎无法检测它读取的文本属于哪种语言。它会用Windows为你的默认语言准备的手写识别器，所以请在用另一种语言书写的时候在这下边手动选中一种语言。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7419"/>
+        <location filename="../../source/MainWindow.cpp" line="7426"/>
         <source>%1[*]</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7421"/>
+        <location filename="../../source/MainWindow.cpp" line="7428"/>
         <source>%1[*] — SpeedyNote</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7484"/>
+        <location filename="../../source/MainWindow.cpp" line="7491"/>
         <source>OCR Language</source>
         <translation type="unfinished">OCR语言</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7490"/>
+        <location filename="../../source/MainWindow.cpp" line="7497"/>
         <source>Document: %1</source>
         <translation type="unfinished">文档: %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7496"/>
+        <location filename="../../source/MainWindow.cpp" line="7503"/>
         <source>Handwriting recognition language for this document:</source>
         <translation type="unfinished">本文档的手写识别语言：</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7501"/>
+        <location filename="../../source/MainWindow.cpp" line="7508"/>
         <source>Use global setting</source>
         <translation type="unfinished">使用全局设置</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7236"/>
+        <location filename="../../source/MainWindow.cpp" line="7243"/>
         <source>Auto-detect (system default)</source>
         <translation type="unfinished">自动检测（默认）</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7565"/>
+        <location filename="../../source/MainWindow.cpp" line="7572"/>
         <source>&quot;Use global setting&quot; inherits from Settings &gt; Language &gt; Handwriting Recognition Language.</source>
         <translation type="unfinished">“使用全局设置”会继承设置 &gt; 语言 &gt; 手写检测语言。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7628"/>
+        <location filename="../../source/MainWindow.cpp" line="7635"/>
         <source>This recognized text is no longer available. A new scan may have replaced it.</source>
         <translation type="unfinished">识别出的文字不再可用。重新扫描可能会取代它。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="8621"/>
+        <location filename="../../source/MainWindow.cpp" line="8628"/>
         <source>New Edgeless Canvas</source>
         <translation type="unfinished">新的无边笔记</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="8626"/>
+        <location filename="../../source/MainWindow.cpp" line="8633"/>
         <source>New Paged Notebook</source>
         <translation type="unfinished">新的分页笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="8634"/>
+        <location filename="../../source/MainWindow.cpp" line="8641"/>
         <source>Open PDF...</source>
         <translation type="unfinished">打开PDF...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="8639"/>
+        <location filename="../../source/MainWindow.cpp" line="8646"/>
         <source>Open Notebook...</source>
         <translation type="unfinished">打开笔记本...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9340"/>
+        <location filename="../../source/MainWindow.cpp" line="9347"/>
         <source>The %1 &quot;%2&quot; has unsaved changes. Do you want to save before quitting?</source>
         <translation type="unfinished">这个 %1 &quot;%2&quot;有未保存的变更。你要在退出之前保存吗？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9358"/>
+        <location filename="../../source/MainWindow.cpp" line="9365"/>
         <source>Failed to save document to:
 %1
 
@@ -3513,12 +3534,12 @@ Quit anyway?</source>
 仍要退出吗？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9681"/>
+        <location filename="../../source/MainWindow.cpp" line="9688"/>
         <source>Failed to save document before closing.</source>
         <translation type="unfinished">无法在退出前保存文档。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9728"/>
+        <location filename="../../source/MainWindow.cpp" line="9735"/>
         <source>The file does not exist:
 %1</source>
         <translation type="unfinished">这个文件不存在：
@@ -3526,50 +3547,50 @@ Quit anyway?</source>
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9762"/>
-        <location filename="../../source/MainWindow.cpp" line="9780"/>
+        <location filename="../../source/MainWindow.cpp" line="9769"/>
+        <location filename="../../source/MainWindow.cpp" line="9787"/>
         <source>Open Error</source>
         <translation type="unfinished">打开失败</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9763"/>
+        <location filename="../../source/MainWindow.cpp" line="9770"/>
         <source>Failed to open file:
 %1</source>
         <translation type="unfinished">无法打开文件：
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9781"/>
+        <location filename="../../source/MainWindow.cpp" line="9788"/>
         <source>Failed to create tab for:
 %1</source>
         <translation type="unfinished">无法打开标签页给：
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3385"/>
-        <location filename="../../source/MainWindow.cpp" line="3394"/>
-        <location filename="../../source/MainWindow.cpp" line="3493"/>
+        <location filename="../../source/MainWindow.cpp" line="3382"/>
+        <location filename="../../source/MainWindow.cpp" line="3391"/>
+        <location filename="../../source/MainWindow.cpp" line="3500"/>
         <source>Export Failed</source>
         <translation type="unfinished">导出失败</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="615"/>
-        <location filename="../../source/MainWindow.cpp" line="639"/>
+        <location filename="../../source/MainWindow.cpp" line="620"/>
+        <location filename="../../source/MainWindow.cpp" line="644"/>
         <source>PDF sources could not be finalized. Repair the unavailable sources before closing.</source>
         <translation type="unfinished">PDF源无法被最终定稿。请在关闭前修复不可用的PDF源。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3309"/>
+        <location filename="../../source/MainWindow.cpp" line="3312"/>
         <source>Share Notebook</source>
         <translation type="unfinished">分享笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3311"/>
+        <location filename="../../source/MainWindow.cpp" line="3314"/>
         <source>Export Notebook</source>
         <translation type="unfinished">导出笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3338"/>
+        <location filename="../../source/MainWindow.cpp" line="3339"/>
         <source>The document has unsaved changes.
 Please save the document before exporting.
 
@@ -3580,76 +3601,76 @@ Would you like to save now?</source>
 你要现在保存吗？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3413"/>
-        <location filename="../../source/MainWindow.cpp" line="3485"/>
+        <location filename="../../source/MainWindow.cpp" line="3410"/>
+        <location filename="../../source/MainWindow.cpp" line="3492"/>
         <source>Export Complete</source>
         <translation type="unfinished">导出成功</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4265"/>
-        <location filename="../../source/MainWindow.cpp" line="4301"/>
-        <location filename="../../source/MainWindow.cpp" line="4317"/>
-        <location filename="../../source/MainWindow.cpp" line="4325"/>
+        <location filename="../../source/MainWindow.cpp" line="4272"/>
+        <location filename="../../source/MainWindow.cpp" line="4308"/>
+        <location filename="../../source/MainWindow.cpp" line="4324"/>
+        <location filename="../../source/MainWindow.cpp" line="4332"/>
         <source>Page Import (Debug)</source>
         <translation type="unfinished">页面导入 (Debug)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4266"/>
+        <location filename="../../source/MainWindow.cpp" line="4273"/>
         <source>No document is open in the active pane.</source>
         <translation type="unfinished">在活动的一栏没有已经打开的文档。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4302"/>
+        <location filename="../../source/MainWindow.cpp" line="4309"/>
         <source>Open a second document in another tab or split pane to import from.</source>
         <translation type="unfinished">在另一个标签页再打开一个文档或者是左右分栏来导入。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4318"/>
+        <location filename="../../source/MainWindow.cpp" line="4325"/>
         <source>Source document has no pages to import.</source>
         <translation type="unfinished">源文档没有可以导入的页面。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4326"/>
+        <location filename="../../source/MainWindow.cpp" line="4333"/>
         <source>Import failed.</source>
         <translation type="unfinished">导入失败。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4377"/>
-        <location filename="../../source/MainWindow.cpp" line="4409"/>
-        <location filename="../../source/MainWindow.cpp" line="4419"/>
+        <location filename="../../source/MainWindow.cpp" line="4384"/>
+        <location filename="../../source/MainWindow.cpp" line="4416"/>
+        <location filename="../../source/MainWindow.cpp" line="4426"/>
         <source>Copy Pages</source>
         <translation type="unfinished">复制页</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4378"/>
+        <location filename="../../source/MainWindow.cpp" line="4385"/>
         <source>Open another document in a tab or split pane to copy pages into it.</source>
         <translation type="unfinished">在另一个标签页再打开一个文档或者是左右分栏来导入。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4390"/>
+        <location filename="../../source/MainWindow.cpp" line="4397"/>
         <source>%1 (%2)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4410"/>
+        <location filename="../../source/MainWindow.cpp" line="4417"/>
         <source>Failed to copy the selected pages.</source>
         <translation type="unfinished">复制选中的页面失败。</translation>
     </message>
     <message numerus="yes">
-        <location filename="../../source/MainWindow.cpp" line="4420"/>
+        <location filename="../../source/MainWindow.cpp" line="4427"/>
         <source>Copied %n page(s) to &quot;%1&quot;.</source>
         <translation type="unfinished">
             <numerusform>已复制%n个页面到 &quot;%1&quot;。</numerusform>
         </translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7612"/>
-        <location filename="../../source/MainWindow.cpp" line="7627"/>
+        <location filename="../../source/MainWindow.cpp" line="7619"/>
+        <location filename="../../source/MainWindow.cpp" line="7634"/>
         <source>Convert OCR Text</source>
         <translation type="unfinished">转换OCR文本</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="7613"/>
+        <location filename="../../source/MainWindow.cpp" line="7620"/>
         <source>Convert this recognized text into an editable text box?
 
 The recognized block is removed and its ink is excluded from future scans.</source>
@@ -3658,23 +3679,23 @@ The recognized block is removed and its ink is excluded from future scans.</sour
 原本识别出的OCR文本将会被移除，对应的手写墨迹也将被排除在未来的OCR扫描之外。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9372"/>
-        <location filename="../../source/MainWindow.cpp" line="9386"/>
+        <location filename="../../source/MainWindow.cpp" line="9379"/>
+        <location filename="../../source/MainWindow.cpp" line="9393"/>
         <source>PDF sources could not be finalized. Repair the unavailable sources before quitting.</source>
         <translation type="unfinished">PDF源无法被最终定稿。请在离开前修复不可用的PDF源。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9727"/>
+        <location filename="../../source/MainWindow.cpp" line="9734"/>
         <source>File Not Found</source>
         <translation type="unfinished">找不到文件</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="553"/>
+        <location filename="../../source/MainWindow.cpp" line="558"/>
         <source>Notice</source>
         <translation type="unfinished">警告</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="554"/>
+        <location filename="../../source/MainWindow.cpp" line="559"/>
         <source>At least one tab must remain open.</source>
         <translation type="unfinished">至少保留一个选项卡。</translation>
     </message>
@@ -4375,7 +4396,7 @@ Double-click or double-tap to jump to a page</source>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="65"/>
         <source>PDF-backed pages keep a reference to the file they came from. Locate unavailable sources to restore their page backgrounds.</source>
-        <translation type="unfinished">有PDF背景的页面存了它们对应的文件是哪来的信息。找到不可用的源来恢复它们的页面背景。</translation>
+        <translation type="unfinished">PDF 格式的页面会保留对其来源文件的引用。找到无法访问的源文件以恢复其页面背景。</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="74"/>
@@ -4440,12 +4461,12 @@ Double-click or double-tap to jump to a page</source>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="220"/>
         <source>PDF Source Not Matched</source>
-        <translation type="unfinished">PDF源对不上</translation>
+        <translation type="unfinished">PDF源文件不匹配。</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="221"/>
         <source>The selected PDF is damaged or does not match the original source. No document links were changed.</source>
-        <translation type="unfinished">选中的PDF已损坏或者和原本的PDF对不上。没有文件链接被修改。</translation>
+        <translation type="unfinished">所选PDF文件已损坏或与原始文件不符。文档链接未做任何更改。</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="255"/>
@@ -4669,18 +4690,18 @@ Double-click or double-tap to jump to a page</source>
         <translation type="unfinished">无效的文件包：解包后未找到document.json</translation>
     </message>
     <message>
-        <location filename="../../source/Main.cpp" line="1111"/>
-        <location filename="../../source/Main.cpp" line="1129"/>
+        <location filename="../../source/Main.cpp" line="1140"/>
+        <location filename="../../source/Main.cpp" line="1158"/>
         <source>Restore Previous Session</source>
         <translation type="unfinished">恢复上次使用的内容</translation>
     </message>
     <message>
-        <location filename="../../source/Main.cpp" line="1112"/>
+        <location filename="../../source/Main.cpp" line="1141"/>
         <source>You had %1 other tab(s) open last time. Restore them?</source>
         <translation type="unfinished">你上次还打开了%1个标签页。要恢复吗？</translation>
     </message>
     <message>
-        <location filename="../../source/Main.cpp" line="1130"/>
+        <location filename="../../source/Main.cpp" line="1159"/>
         <source>You had %1 tab(s) open last time. Restore them?</source>
         <translation type="unfinished">你上次打开了%1个标签页。要恢复吗？</translation>
     </message>
@@ -5409,7 +5430,7 @@ Try a different search term.</source>
 <context>
     <name>SplitViewManager</name>
     <message>
-        <location filename="../../source/ui/SplitViewManager.cpp" line="644"/>
+        <location filename="../../source/ui/SplitViewManager.cpp" line="645"/>
         <source>Find in Document (Ctrl+F)</source>
         <translation type="unfinished">在文档中查找 (Ctrl+F)</translation>
     </message>

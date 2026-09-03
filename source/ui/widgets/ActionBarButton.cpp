@@ -1,7 +1,10 @@
 #include "ActionBarButton.h"
 
+#include "../../compat/qt_compat.h"  // Qt5/Qt6 tablet position shims
+
 #include <QPainter>
 #include <QMouseEvent>
+#include <QTabletEvent>
 
 ActionBarButton::ActionBarButton(QWidget* parent)
     : QWidget(parent)
@@ -163,26 +166,81 @@ void ActionBarButton::paintEvent(QPaintEvent* event)
 
 void ActionBarButton::mousePressEvent(QMouseEvent* event)
 {
-    if (m_enabled && event->button() == Qt::LeftButton) {
-        m_pressed = true;
-        update();
+    if (event->button() == Qt::LeftButton) {
+        if (m_enabled) {
+            m_pressed = true;
+            update();
+        }
+        // Accepted even while disabled: the base implementation ignores the
+        // event, and a button placed over the canvas would then have every
+        // press run as a canvas gesture by DocumentViewport as well.
+        event->accept();
+        return;
     }
     QWidget::mousePressEvent(event);
 }
 
 void ActionBarButton::mouseReleaseEvent(QMouseEvent* event)
 {
-    if (event->button() == Qt::LeftButton && m_pressed) {
-        m_pressed = false;
-        
-        // Check if release is within button bounds and button is enabled
-        if (m_enabled && rect().contains(event->pos())) {
-            emit clicked();
+    if (event->button() == Qt::LeftButton) {
+        if (m_pressed) {
+            m_pressed = false;
+
+            // Check if release is within button bounds and button is enabled
+            if (m_enabled && rect().contains(event->pos())) {
+                emit clicked();
+            }
+
+            update();
         }
-        
-        update();
+        event->accept();
+        return;
     }
     QWidget::mouseReleaseEvent(event);
+}
+
+void ActionBarButton::tabletEvent(QTabletEvent* event)
+{
+    // Handled here rather than left to the platform promoting an unhandled
+    // tablet event into a mouse event. That promotion is not tagged as
+    // synthesized, so for a button parented to DocumentViewport it arms an
+    // off-page pan, and the viewport then swallows the pen release that would
+    // have completed the click. Accepting these also suppresses the promotion,
+    // so the mouse path cannot fire a second time.
+    switch (event->type()) {
+        case QEvent::TabletPress:
+            if (m_enabled) {
+                m_pressed = true;
+                update();
+            }
+            event->accept();
+            return;
+
+        case QEvent::TabletMove:
+            if (m_pressed) {
+                event->accept();
+                return;
+            }
+            break;
+
+        case QEvent::TabletRelease:
+            if (m_pressed) {
+                m_pressed = false;
+
+                if (m_enabled && rect().contains(SN_EVENT_POS(event).toPoint())) {
+                    emit clicked();
+                }
+
+                update();
+            }
+            event->accept();
+            return;
+
+        default:
+            break;
+    }
+
+    QWidget::tabletEvent(event);
 }
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)

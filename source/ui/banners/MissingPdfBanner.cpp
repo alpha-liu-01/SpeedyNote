@@ -134,6 +134,16 @@ void MissingPdfBanner::hideAnimated()
     m_animation->start();
 }
 
+void MissingPdfBanner::setShown(bool shown)
+{
+    // Cancel whatever the animation was heading for, including the hide-on-
+    // finish connection, or it would undo this on its next tick.
+    disconnect(m_animation, &QPropertyAnimation::finished, nullptr, nullptr);
+    m_animation->stop();
+    setSlideOffset(shown ? 0 : -BANNER_HEIGHT);
+    setVisible(shown);
+}
+
 void MissingPdfBanner::setSlideOffset(int offset)
 {
     m_slideOffset = offset;
