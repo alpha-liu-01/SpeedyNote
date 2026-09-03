@@ -3654,6 +3654,16 @@ void DocumentViewport::mousePressEvent(QMouseEvent* event)
         return;
     }
 
+    // A press over one of the viewport's child widgets belongs to that child.
+    // It only reaches here because the child left it unhandled - a banner
+    // label, or a bar's background - and running it as a canvas press would
+    // pan or draw underneath the overlay. Skipped while a gesture is in flight
+    // so a stroke that passes under a bar is not cut short.
+    if (!m_pointerActive && pointerOverViewportWidget(SN_MOUSE_POS(event))) {
+        event->ignore();
+        return;
+    }
+
     // Child-widget presses stay in the editor. Any press delivered to the
     // canvas is an explicit outside click and commits the current session.
     if (m_inlineEditSession.active)
@@ -3735,6 +3745,14 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
         return;
     }
     
+    // Over a child widget the canvas has no business reacting, not even to
+    // hover: the off-page branch below would otherwise advertise the pan
+    // cursor across an overlay that will not pan.
+    if (!m_pointerActive && pointerOverViewportWidget(SN_MOUSE_POS(event))) {
+        event->ignore();
+        return;
+    }
+
     // Process move if we have an active pointer or for hover
     const bool objectRightDrag =
         m_currentTool == ToolType::ObjectSelect
@@ -3810,6 +3828,13 @@ void DocumentViewport::mouseReleaseEvent(QMouseEvent* event)
         event->ignore();
         return;
     }
+
+    // A release over a child with no gesture in flight is the tail of a press
+    // the canvas already declined, so it has nothing to finish here.
+    if (!m_pointerActive && pointerOverViewportWidget(SN_MOUSE_POS(event))) {
+        event->ignore();
+        return;
+    }
     
     // Ignore duplicate mouse releases from a stylus gesture, but never swallow
     // the release of a mouse ObjectSelect gesture if source state was disturbed.
@@ -3851,6 +3876,15 @@ void DocumentViewport::contextMenuEvent(QContextMenuEvent* event)
             return;
         }
     }
+
+    // Right-clicking an overlay child is not a request for canvas actions.
+    // Unlike the pointer handlers this needs no gesture check: a menu request
+    // is never part of one.
+    if (pointerOverViewportWidget(event->pos())) {
+        event->ignore();
+        return;
+    }
+
     if (m_currentTool == ToolType::ObjectSelect) {
         const QString target = m_contextMenuObjectId;
         m_contextMenuObjectId.clear();
@@ -4446,11 +4480,10 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
         cancelOffPagePan();
     }
 
-    // Stylus events over the inline editor, the formatting bars or the add-page
-    // button arrive here by propagation. Leave them unhandled so Qt synthesizes
-    // mouse events for those widgets instead of treating the pen as a canvas
-    // interaction. The button handles its own presses, so what reaches here for
-    // it is hover, but the rule is the same either way.
+    // Stylus events over any of the viewport's child widgets arrive here by
+    // propagation. Leave them unhandled so a mouse event is synthesized for
+    // that child instead of the pen being treated as a canvas interaction.
+    // Accepting one is what kept the missing-PDF banner unreachable with a pen.
     if (!m_pointerActive && pointerOverViewportWidget(SN_EVENT_POS(event))) {
         event->ignore();
         return;
@@ -9793,21 +9826,12 @@ void DocumentViewport::syncTextBoxFormatBar()
 
 bool DocumentViewport::pointerOverViewportWidget(const QPointF& viewportPos) const
 {
-    const QPoint pos = viewportPos.toPoint();
-    if (m_textBoxFormatBar && m_textBoxFormatBar->isVisible()
-        && m_textBoxFormatBar->geometry().contains(pos)) {
-        return true;
-    }
-    if (m_addPageButton && m_addPageButton->isVisible()
-        && m_addPageButton->geometry().contains(pos)) {
-        return true;
-    }
-    if (m_linkObjectBar && m_linkObjectBar->isVisible()
-        && m_linkObjectBar->geometry().contains(pos)) {
-        return true;
-    }
-    return m_inlineTextBoxEditor && m_inlineTextBoxEditor->isVisible()
-        && m_inlineTextBoxEditor->geometry().contains(pos);
+    // childAt() is the same hit test Qt uses to deliver the event in the first
+    // place: deepest visible child, skipping anything transparent for mouse
+    // events. Naming individual widgets here is what left the missing-PDF
+    // banner unreachable with a stylus, so let the widget tree answer instead.
+    const QWidget* child = childAt(viewportPos.toPoint());
+    return child && child != this;
 }
 
 /**

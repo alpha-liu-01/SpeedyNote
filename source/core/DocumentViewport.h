@@ -2051,11 +2051,12 @@ public:
      * @brief Whether a viewport point belongs to one of the child widgets the
      *        viewport floats over its canvas.
      *
-     * Covers the inline text editor, the two object bars and the add-page
-     * button. Stylus events are delivered to the deepest child and propagate
-     * back up when that child does not handle them. Consuming those here would
-     * make the canvas react to overlay interactions and would suppress the
-     * synthesized mouse events those widgets rely on.
+     * Answered by childAt(), so every child is covered without being named:
+     * the inline text editor, the two object bars, the add-page button and the
+     * missing-PDF banner. Pointer events are delivered to the deepest child and
+     * propagate back up when that child does not handle them. Consuming those
+     * here would make the canvas react to overlay interactions and, for a
+     * stylus, would suppress the mouse events those widgets rely on.
      */
     bool pointerOverViewportWidget(const QPointF& viewportPos) const;
     void updateTextBoxFormatBarGeometry();
