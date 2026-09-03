@@ -6,6 +6,8 @@
 
 #ifdef SPEEDYNOTE_MUPDF_EXPORT
 
+#include "MuPdfLocks.h"
+
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 
@@ -47,7 +49,10 @@ bool PdfMaterializer::materialize(const QString& originPath,
         return false;
     }
 
-    fz_context* ctx = fz_new_context(nullptr, nullptr, FZ_STORE_DEFAULT);
+    // Shared lock handlers: grafting runs while renders may be in flight on
+    // worker threads, and MuPDF's library globals need the same mutexes
+    // everywhere (BUG-Q003).
+    fz_context* ctx = fz_new_context(nullptr, snMuPdfLocks(), FZ_STORE_DEFAULT);
     if (!ctx) {
         setErr(QStringLiteral("Failed to create MuPDF context"));
         return false;

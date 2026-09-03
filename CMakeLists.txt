@@ -983,6 +983,7 @@ set(UI_SOURCES
 # - Faster rendering performance
 set(PDF_SOURCES
     source/pdf/PdfProviderFactory.cpp
+    source/pdf/MuPdfLocks.cpp
     source/pdf/MuPdfProvider.cpp
     source/pdf/PdfSearchEngine.cpp
     source/pdf/MuPdfExporter.cpp
