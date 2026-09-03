@@ -5512,9 +5512,11 @@ public:
     /**
      * @brief The fill under an unrendered page must match what the page renders to.
      *
-     * A PDF page's raster is lightness-inverted for dark mode, so a fill taken
-     * straight from page->backgroundColor left an unrendered page white against
-     * pages that had rendered near-black.
+     * A PDF page's raster is cleared to white and then lightness-inverted for
+     * dark mode, so the fill has to be derived from white and not from
+     * page->backgroundColor, which holds the notebook paper colour. Control
+     * Panel's Apply used to stamp that onto PDF pages, so inverting it produced
+     * a bright placeholder over near-black pages - the exact opposite.
      */
     static bool testPdfPlaceholderPaper() {
         printf("  testPdfPlaceholderPaper... ");
@@ -5555,6 +5557,22 @@ public:
         viewport.setPdfDarkModeEnabled(true);
         if (viewport.paperColorForPage(pdfPage) != QColor(Qt::white))
             return fail("light mode inverted the placeholder");
+
+        // ----- A stamped paper colour must not reach the placeholder -----
+        // This is the case that regressed: applyBackgroundSettings() wrote the
+        // notebook paper onto PDF pages, and saved bundles still carry it, so
+        // inverting the stored colour gave #d4d4d4 over a black page.
+        pdfPage->backgroundColor = QColor("#2b2b2b");
+        viewport.setDarkMode(true);
+        viewport.setPdfDarkModeEnabled(true);
+        paper = viewport.paperColorForPage(pdfPage);
+        if (paper.lightness() >= 128)
+            return fail("a stamped paper colour was inverted into a bright placeholder");
+        if (paper != DarkModeUtils::invertColorLightness(QColor(Qt::white)))
+            return fail("the stamped page did not fall back to inverted white");
+        viewport.setPdfDarkModeEnabled(false);
+        if (viewport.paperColorForPage(pdfPage) != QColor(Qt::white))
+            return fail("a stamped paper colour survived with inversion off");
 
         // ----- Non-PDF paper is the user's choice and stays put -----
         // Only PDF pages have their paper decided by the renderer. A light page

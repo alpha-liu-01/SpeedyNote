@@ -5376,15 +5376,19 @@ void MainWindow::applyBackgroundSettings(Page::BackgroundType type, const QColor
     for (int i = 0; i < doc->pageCount(); ++i) {
         Page* page = doc->page(i);
         if (page) {
-            // Preserve PDF backgrounds - only apply settings to non-PDF pages
+            // A PDF page draws only its raster: renderPage() takes the PDF branch
+            // of the backgroundType switch and never reaches the grid/lines
+            // pattern, and OCR snapping gates on backgroundIsGrid/backgroundIsLines,
+            // which are both false here. So none of these settings apply to it,
+            // and writing them anyway silently mutated imported pages and left a
+            // stale paper colour for MuPdfExporter::renderBlankPage() to find.
             if (page->backgroundType != Page::BackgroundType::PDF) {
                 page->backgroundType = type;
+                page->backgroundColor = bgColor;
+                page->gridColor = gridColor;
+                page->gridSpacing = gridSpacing;
+                page->lineSpacing = lineSpacing;
             }
-            // Always update colors and spacing (these affect the rendering even for PDF pages)
-            page->backgroundColor = bgColor;
-            page->gridColor = gridColor;
-            page->gridSpacing = gridSpacing;
-            page->lineSpacing = lineSpacing;
         }
     }
     
@@ -5394,14 +5398,15 @@ void MainWindow::applyBackgroundSettings(Page::BackgroundType type, const QColor
         for (const auto& coord : tileCoords) {
             Page* tile = doc->getTile(coord.first, coord.second);
             if (tile) {
-                // Preserve PDF backgrounds - only apply settings to non-PDF tiles
+                // Preserve PDF backgrounds - see the page loop above for why the
+                // colours and spacings are skipped along with the type.
                 if (tile->backgroundType != Page::BackgroundType::PDF) {
                     tile->backgroundType = type;
+                    tile->backgroundColor = bgColor;
+                    tile->gridColor = gridColor;
+                    tile->gridSpacing = gridSpacing;
+                    tile->lineSpacing = lineSpacing;
                 }
-                tile->backgroundColor = bgColor;
-                tile->gridColor = gridColor;
-                tile->gridSpacing = gridSpacing;
-                tile->lineSpacing = lineSpacing;
             }
         }
     }

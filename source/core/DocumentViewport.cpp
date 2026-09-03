@@ -10971,13 +10971,15 @@ QColor DocumentViewport::paperColorForPage(const Page* page) const
 {
     if (!page) return m_backgroundColor;
 
-    // Same reasoning as textBackdropForPage: a PDF page's paper is whatever the
-    // renderer makes of it. The raster gets invertImageLightness() applied when
-    // dark mode and inversion are both on, so the fill beneath it needs the
-    // matching per-color transform or an unrendered page flashes white.
-    if (page->backgroundType == Page::BackgroundType::PDF
-        && m_isDarkMode && m_pdfDarkModeEnabled) {
-        return DarkModeUtils::invertColorLightness(page->backgroundColor);
+    if (page->backgroundType == Page::BackgroundType::PDF) {
+        // MuPdfProvider clears every page to white before drawing it, so the
+        // PDF's paper is white no matter what page->backgroundColor holds -
+        // applyBackgroundSettings() used to stamp the notebook paper onto PDF
+        // pages too, and saved bundles still carry that. Run the same transform
+        // the raster gets so the fill and the page that lands on it agree.
+        return (m_isDarkMode && m_pdfDarkModeEnabled)
+            ? DarkModeUtils::invertColorLightness(QColor(Qt::white))
+            : QColor(Qt::white);
     }
 
     return page->backgroundColor;
