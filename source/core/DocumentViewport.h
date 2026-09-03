@@ -4659,9 +4659,22 @@ private:
     void snapSelectionToWords();
 
     /**
-     * @brief Update cursor based on Highlighter tool availability.
-     * Sets IBeamCursor on PDF pages, ForbiddenCursor on non-PDF pages,
-     * and restores ArrowCursor when Highlighter is not active.
+     * @brief Whether a drag starting at this point would be refused.
+     *
+     * True only over an already-selected annotation under ObjectSelect, which
+     * is exactly where a drag would otherwise begin. Pressing an unselected
+     * annotation to select it is a normal thing to do, so this stays false
+     * there rather than advertising a refusal that does not apply.
+     */
+    bool pointerOverUndraggableAnnotation(const QPointF& viewportPos) const;
+
+    /**
+     * @brief Update the cursor for the active tool.
+     *
+     * Named for the Highlighter, whose I-beam / hand / forbidden states it was
+     * written for, but it owns every tool's cursor: the Pan hand, the
+     * ObjectSelect refusal over an undraggable annotation, and the plain arrow
+     * everywhere else.
      */
     void updateHighlighterCursor();
     

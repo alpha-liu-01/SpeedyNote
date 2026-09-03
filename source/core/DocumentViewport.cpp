@@ -109,6 +109,19 @@ static void initEraserJni()
 static constexpr qreal PDF_TO_PAGE_SCALE = 96.0 / 72.0;  // PDF coords → Page coords
 static constexpr qreal PAGE_TO_PDF_SCALE = 72.0 / 96.0;  // Page coords → PDF coords
 
+/**
+ * @brief Whether an object is an annotation: a link that marks text.
+ *
+ * Its geometry belongs to the text it marks, which is why it refuses to be
+ * dragged, resized or rotated. A link with an empty region is a standalone
+ * icon rather than an annotation, and moves as freely as any other object.
+ */
+static bool isAnnotation(const InsertedObject* obj)
+{
+    const auto* link = dynamic_cast<const LinkObject*>(obj);
+    return link && !link->region.isEmpty();
+}
+
 // Note: eventMatchesAction() helper was removed - all keyboard shortcuts
 // are now handled by MainWindow's QShortcut system for focus-independent operation.
 
@@ -3799,6 +3812,13 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
         if (!offPageHover && m_currentTool == ToolType::Highlighter) {
             updateLinkCursor(m_lastPointerPos);
         }
+        
+        // ObjectSelect needs the same per-move refresh: whether a drag would be
+        // refused depends on which object is under the pointer, so the
+        // transition above is too coarse to catch it.
+        if (!offPageHover && m_currentTool == ToolType::ObjectSelect) {
+            updateHighlighterCursor();
+        }
     }
     event->accept();
 }
@@ -7444,23 +7464,34 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
         
         // Start dragging if we have a selection
         if (!m_selectedObjects.isEmpty()) {
-            m_isDraggingObjects = true;
-            m_objectDragStartViewport = pe.viewportPos;
-            m_objectDragStartDoc = docPoint;
-            m_pointerActive = true;
-            
             // O2.3.2: Store original positions for undo, and so every move can
-            // be recomputed from the start position instead of accumulated
+            // be recomputed from the start position instead of accumulated.
+            // Annotations are left out: dragging one off its words leaves a
+            // mark that means nothing and exports to the PDF in the wrong
+            // place, which is the same reason resize and rotation refuse them.
+            // Every loop that moves an object keys off this map, so omitting
+            // one here is what refuses it.
             m_objectOriginalPositions.clear();
             for (InsertedObject* obj : m_selectedObjects) {
-                if (obj) {
+                if (obj && !isAnnotation(obj)) {
                     m_objectOriginalPositions[obj->id] = obj->position;
                 }
             }
-            captureObjectDragOriginPages();
             
-            // Phase O4.1: Capture background for fast drag rendering
-            captureObjectDragBackground();
+            // Nothing movable in the selection, so there is no gesture to run.
+            // Returning here also skips the drag snapshot an annotation would
+            // never use.
+            if (!m_objectOriginalPositions.isEmpty()) {
+                m_isDraggingObjects = true;
+                m_objectDragStartViewport = pe.viewportPos;
+                m_objectDragStartDoc = docPoint;
+                m_pointerActive = true;
+                
+                captureObjectDragOriginPages();
+                
+                // Phase O4.1: Capture background for fast drag rendering
+                captureObjectDragBackground();
+            }
         }
     } else {
         // Clicked on empty space
@@ -7657,6 +7688,10 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
                             // Multi-selection: need to search for each object's tile
                             for (InsertedObject* obj : m_selectedObjects) {
                                 if (!obj) continue;
+                                // Only what this drag moved; the map is the
+                                // record of that, so a refused annotation in
+                                // the selection dirties nothing.
+                                if (!m_objectOriginalPositions.contains(obj->id)) continue;
                                 for (const auto& coord : m_document->allLoadedTileCoords()) {
                                     Page* tile = m_document->getTile(coord.first, coord.second);
                                     if (tile && tile->objectById(obj->id)) {
@@ -7677,6 +7712,10 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
                     // entries below so the repair is undoable.
                     for (InsertedObject* obj : m_selectedObjects) {
                         if (!obj) continue;
+                        // Restricted to what this drag moved. In a mixed
+                        // selection an image moving is not licence to nudge a
+                        // refused annotation off the text it marks.
+                        if (!m_objectOriginalPositions.contains(obj->id)) continue;
                         clampObjectToPage(obj, pageIndexForObject(obj));
                     }
                     
@@ -8228,6 +8267,10 @@ void DocumentViewport::moveSelectedObjects(const QPointF& delta)
     
     for (InsertedObject* obj : m_selectedObjects) {
         if (!obj) continue;
+        // An annotation's geometry belongs to the text it marks, the same
+        // reason the drag path refuses it. Unused today, but this is where a
+        // keyboard nudge would land and would otherwise reopen the hole.
+        if (isAnnotation(obj)) continue;
         obj->position += delta;
         clampObjectToPage(obj, pageIndexForObject(obj));
     }
@@ -14773,10 +14816,45 @@ void DocumentViewport::setHighlighterColor(const QColor& color)
     m_highlighterColor = color;
 }
 
+bool DocumentViewport::pointerOverUndraggableAnnotation(const QPointF& viewportPos) const
+{
+    if (m_currentTool != ToolType::ObjectSelect) return false;
+    // Mid-gesture the cursor belongs to whatever is being dragged.
+    if (m_isDraggingObjects || m_isResizingObject) return false;
+    if (m_selectedObjects.isEmpty()) return false;
+
+    InsertedObject* under = objectAtPoint(viewportToDocument(viewportPos));
+    if (!under || !isAnnotation(under)) return false;
+
+    // Selected ones only, which is where a drag would otherwise begin. Pressing
+    // an unselected annotation to select it works fine, so refusing there would
+    // be a lie about what the click does.
+    if (!m_selectedObjects.contains(under)) return false;
+
+    // And only when the whole selection is refused. In a mixed selection a
+    // press here still drags the movable members, so the gesture is not refused
+    // and advertising it as such would be the same kind of lie.
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (obj && !isAnnotation(obj)) return false;
+    }
+    return true;
+}
+
 void DocumentViewport::updateHighlighterCursor()
 {
     if (m_currentTool == ToolType::Pan) {
         setCursor(m_isPanToolDragging ? Qt::ClosedHandCursor : Qt::OpenHandCursor);
+        return;
+    }
+    
+    if (m_currentTool == ToolType::ObjectSelect) {
+        // The tool's only cursor distinction: annotations refuse to be dragged,
+        // and with no move cursor to withhold, saying so needs a cursor of its
+        // own. Reaches mouse users only - a pen or a finger shows no cursor -
+        // so the refusal itself is what carries the behaviour.
+        const QPointF pos = mapFromGlobal(QCursor::pos());
+        setCursor(pointerOverUndraggableAnnotation(pos) ? Qt::ForbiddenCursor
+                                                        : Qt::ArrowCursor);
         return;
     }
     

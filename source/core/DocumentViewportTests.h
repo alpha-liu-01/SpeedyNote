@@ -3239,6 +3239,188 @@ public:
     }
 
     /**
+     * @brief An annotation refuses to be dragged off the text it marks.
+     *
+     * The mark's geometry belongs to its words, which is why resize and
+     * rotation are already refused. Translation detaches it just as thoroughly:
+     * the mark would mean nothing where it landed, and would export into the
+     * PDF over whatever text now sits under it.
+     *
+     * The refusal is a single omission from m_objectOriginalPositions at drag
+     * start, since every loop that moves an object keys off that map. So the
+     * cases worth pinning are the ones that could slip past it: a link with an
+     * empty region, which is a free-floating icon rather than an annotation,
+     * and a mixed selection, where a moving image must not drag a refused
+     * annotation along or nudge it through the release-time page clamp.
+     */
+    static bool testAnnotationDragRefused() {
+        printf("  testAnnotationDragRefused... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto doc = Document::createNew("Annotation drag");
+        DocumentViewport viewport;
+        viewport.resize(1100, 820);
+        viewport.setDocument(doc.get());
+        viewport.setZoomLevel(1.0);
+        viewport.setPanOffset(QPointF(0, 0));
+        Page* page = doc->page(0);
+        if (!page)
+            return fail("missing test page");
+
+        auto makeEvent = [&](PointerEvent::Type type, QPointF pos) {
+            PointerEvent pe;
+            pe.type = type;
+            pe.source = PointerEvent::Mouse;
+            pe.viewportPos = pos;
+            pe.button = Qt::LeftButton;
+            pe.pressure = 1.0;
+            pe.pageHit = viewport.viewportToPage(pos);
+            return pe;
+        };
+
+        // Commit a real annotation rather than hand-building one, so position,
+        // size and object-local rects hold the relationship the drag relies on.
+        auto commitMark = [&](const QVector<QRectF>& rects,
+                              const QString& text) -> LinkObject* {
+            viewport.setCurrentTool(ToolType::Highlighter);
+            viewport.m_autoHighlightStyle =
+                DocumentViewport::HighlightStyle::Underline;
+            viewport.m_textSelection.clear();
+            viewport.m_textSelection.source =
+                DocumentViewport::TextSelection::Source::Ocr;
+            viewport.m_textSelection.pageIndex = 0;
+            viewport.m_textSelection.startBoxIndex = 0;
+            viewport.m_textSelection.startCharIndex = 0;
+            viewport.m_textSelection.endBoxIndex = 0;
+            viewport.m_textSelection.endCharIndex = text.size();
+            viewport.m_textSelection.selectedText = text;
+            viewport.m_textSelection.highlightRects = rects;
+            return viewport.commitHighlightAnnotation();
+        };
+
+        // Drag a selected object from the centre of the given page-space rect,
+        // by a delta that is also a viewport-pixel delta at zoom 1.0.
+        auto dragFrom = [&](const QPointF& pageStart, const QPointF& delta) {
+            const QPointF from = viewport.documentToViewport(pageStart);
+            viewport.handlePointerEvent(makeEvent(PointerEvent::Press, from));
+            viewport.handlePointerEvent(
+                makeEvent(PointerEvent::Move, from + delta));
+            viewport.handlePointerEvent(
+                makeEvent(PointerEvent::Release, from + delta));
+        };
+
+        const QPointF delta(140.0, 90.0);
+
+        // ----- A selected annotation starts no drag and does not move -----
+        LinkObject* mark = commitMark({QRectF(120.0, 200.0, 280.0, 16.0)},
+                                      QStringLiteral("marked words"));
+        if (!mark)
+            return fail("the annotation did not commit");
+        const QPointF markOrigin = mark->position;
+        const QVector<QRectF> markRects = mark->region.rects;
+
+        viewport.setCurrentTool(ToolType::ObjectSelect);
+        viewport.selectObject(mark, false);
+        viewport.m_undoStack.clear();
+
+        const QPointF markCentre(mark->position.x() + mark->size.width() / 2.0,
+                                 mark->position.y() + mark->size.height() / 2.0);
+        const QPointF pressAt = viewport.documentToViewport(markCentre);
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Press, pressAt));
+        if (viewport.m_isDraggingObjects)
+            return fail("pressing an annotation started a drag");
+        if (!viewport.m_objectOriginalPositions.isEmpty())
+            return fail("a refused annotation was recorded as movable");
+
+        viewport.handlePointerEvent(
+            makeEvent(PointerEvent::Move, pressAt + delta));
+        viewport.handlePointerEvent(
+            makeEvent(PointerEvent::Release, pressAt + delta));
+        if (mark->position != markOrigin)
+            return fail("the annotation moved off its text");
+        if (mark->region.rects != markRects)
+            return fail("the drag rewrote the annotation's rects");
+        if (!viewport.m_undoStack.isEmpty())
+            return fail("a refused drag pushed an undo entry");
+        // Refusing the drag must not cost the selection: delete, recolour,
+        // copy-text and Adjust all still act on it.
+        if (!viewport.m_selectedObjects.contains(mark))
+            return fail("the refused press dropped the selection");
+
+        // ----- An empty-region link is an icon, and still drags -----
+        auto icon = std::make_unique<LinkObject>();
+        icon->position = QPointF(500.0, 400.0);
+        icon->size = QSizeF(24.0, 24.0);
+        LinkObject* iconRaw = icon.get();
+        page->addObject(std::move(icon));
+        if (!iconRaw->region.isEmpty())
+            return fail("the standalone icon was built with a region");
+
+        viewport.selectObject(iconRaw, false);
+        const QPointF iconOrigin = iconRaw->position;
+        dragFrom(iconOrigin + QPointF(12.0, 12.0), delta);
+        if (iconRaw->position == iconOrigin)
+            return fail("a standalone link icon was refused along with marks");
+
+        // ----- Mixed selection: the image moves alone -----
+        auto image = std::make_unique<ImageObject>();
+        image->position = QPointF(120.0, 500.0);
+        image->size = QSizeF(160.0, 120.0);
+        ImageObject* imageRaw = image.get();
+        page->addObject(std::move(image));
+
+        viewport.deselectAllObjects();
+        viewport.selectObject(imageRaw, false);
+        viewport.selectObject(mark, true);
+        if (viewport.m_selectedObjects.size() != 2)
+            return fail("the mixed selection did not take");
+        viewport.m_undoStack.clear();
+
+        const QPointF imageOrigin = imageRaw->position;
+        const QPointF small(40.0, 30.0);
+        dragFrom(imageOrigin + QPointF(80.0, 60.0), small);
+
+        if (imageRaw->position != imageOrigin + small)
+            return fail("the image did not move by the full delta");
+        if (mark->position != markOrigin)
+            return fail("a moving image dragged the annotation along");
+        if (viewport.m_undoStack.size() != 1
+            || viewport.m_undoStack.last().objectId != imageRaw->id)
+            return fail("the mixed drag did not push exactly the image's undo");
+
+        // ----- The refusal cursor -----
+        // Still the mixed selection here, where a press on the annotation does
+        // drag the image, so the gesture is not refused and must not say it is.
+        if (viewport.pointerOverUndraggableAnnotation(pressAt))
+            return fail("a mixed selection advertised a refusal it does not honour");
+
+        // Selected annotations only. Refusing over an unselected one would lie:
+        // pressing it to select it works perfectly well.
+        viewport.deselectAllObjects();
+        viewport.selectObject(mark, false);
+        if (!viewport.pointerOverUndraggableAnnotation(pressAt))
+            return fail("a selected annotation advertised no refusal");
+        viewport.deselectAllObjects();
+        if (viewport.pointerOverUndraggableAnnotation(pressAt))
+            return fail("an unselected annotation advertised a refusal");
+        viewport.selectObject(mark, false);
+        const QPointF bareCanvas =
+            viewport.documentToViewport(QPointF(700.0, 700.0));
+        if (viewport.pointerOverUndraggableAnnotation(bareCanvas))
+            return fail("bare canvas advertised a refusal");
+        viewport.setCurrentTool(ToolType::Highlighter);
+        if (viewport.pointerOverUndraggableAnnotation(pressAt))
+            return fail("the refusal leaked outside ObjectSelect");
+
+        printf("PASSED\n");
+        return true;
+    }
+
+    /**
      * @brief Adjust mode: re-ranging an existing highlight's covered text.
      *
      * The load-bearing decisions here are that endpoints come from the region
@@ -5374,6 +5556,8 @@ public:
                 "testLinkObjectBar");
         runTest(testHighlightAnnotationGeometry,
                 "testHighlightAnnotationGeometry");
+        runTest(testAnnotationDragRefused,
+                "testAnnotationDragRefused");
         runTest(testHighlightAdjustMode,
                 "testHighlightAdjustMode");
         runTest(testHighlightAppearanceEdit,
