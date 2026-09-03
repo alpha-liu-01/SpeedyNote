@@ -10,10 +10,21 @@ on:
 permissions:
   contents: write
 
+env:
+  QT_VERSION: 6.9.3
+  MUPDF_VERSION: 1.24.10
+  # Homebrew's auto-update is what used to pull openssl@3 and pcre2 into
+  # from-source rebuilds on the Intel runner. Nothing here needs a fresh index.
+  HOMEBREW_NO_AUTO_UPDATE: 1
+
 jobs:
   build-macos:
     name: Build macOS (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    # The old Homebrew-Qt build could not finish inside the 6-hour default.
+    # An hour is generous for the intended path (cached Qt + cached MuPDF),
+    # and anything slower is a regression worth failing on.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -31,55 +42,285 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      # -----------------------------------------------------------------------
+      # Qt from aqtinstall rather than Homebrew.
+      #
+      # `brew install qt@6` resolves to the umbrella `qt` formula: 61
+      # dependencies including QtWebEngine and Node.js. Homebrew stopped
+      # building Intel x86_64 bottles in September 2026, so on macos-15-intel
+      # all of that compiles from source and cannot finish inside the job
+      # limit. SpeedyNote needs only Core, Gui, Widgets, Concurrent, Xml,
+      # Network and Svg.
+      #
+      # No `modules:` is requested. Qt Svg, Qt Tools and Qt Translations are
+      # essentials bundled in the Qt 6 desktop base archives, and naming a
+      # module aqtinstall does not recognise is a hard error. The verification
+      # step below asserts they actually arrived instead of assuming it.
+      #
+      # The default mac desktop arch (clang_64) is universal, so the same
+      # archive serves both runners.
+      # -----------------------------------------------------------------------
+      - name: Install Qt ${{ env.QT_VERSION }}
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: mac
+          target: desktop
+          cache: true
+          cache-key-prefix: qt-macos-${{ env.QT_VERSION }}-${{ matrix.arch }}
+
+      - name: Verify Qt layout matches what the build needs
         run: |
-          echo "Installing dependencies for ${{ matrix.arch }}..."
-          
-          # Update Homebrew
-          brew update
-          
-          # Install required packages
-          # Qt6 for GUI framework
-          brew install qt@6
-          
-          # MuPDF for PDF rendering and export (no Poppler needed)
-          brew install mupdf
-          
-          # Build tools
-          brew install cmake pkg-config
-          
-          # SVG to PNG conversion for app icon
+          set -euo pipefail
+          echo "QT_ROOT_DIR=${QT_ROOT_DIR}"
+
+          if [ ! -x "${QT_ROOT_DIR}/bin/lrelease" ]; then
+            echo "ERROR: lrelease not found at ${QT_ROOT_DIR}/bin/lrelease"
+            echo "compile-mac.sh compiles the .ts catalogs with it."
+            ls -la "${QT_ROOT_DIR}/bin" 2>/dev/null || echo "  (no bin directory)"
+            exit 1
+          fi
+          echo "OK: lrelease present"
+
+          # macdeployqt does the entire Qt framework bundling in
+          # compile-mac.sh's bundle_qt_frameworks(). Without it the DMG ships
+          # an app that needs Qt preinstalled.
+          if [ ! -x "${QT_ROOT_DIR}/bin/macdeployqt" ] && [ ! -x "${QT_ROOT_DIR}/bin/macdeployqt6" ]; then
+            echo "ERROR: macdeployqt not found in ${QT_ROOT_DIR}/bin"
+            exit 1
+          fi
+          echo "OK: macdeployqt present"
+
+          # Qt Svg is a hard requirement: CMakeLists.txt does
+          #   find_package(Qt6 REQUIRED COMPONENTS ... Svg)
+          # so a missing module must fail loudly here rather than during
+          # configure after MuPDF has already been built.
+          if [ ! -d "${QT_ROOT_DIR}/lib/cmake/Qt6Svg" ]; then
+            echo "ERROR: Qt6Svg not found in the Qt install."
+            echo "Add 'modules: qtsvg' to the install-qt-action step."
+            exit 1
+          fi
+          echo "OK: Qt6Svg present"
+
+          # Qt's own catalogs supply the standard dialog button strings.
+          # Missing ones only degrade the UI, so warn rather than fail.
+          QM_COUNT=$(find "${QT_ROOT_DIR}/translations" -name 'qtbase_*.qm' 2>/dev/null | wc -l | tr -d ' ')
+          echo "Qt base translation catalogs: ${QM_COUNT}"
+          if [ "${QM_COUNT}" -eq 0 ]; then
+            echo "::warning::No qtbase_*.qm in the Qt install; standard dialog buttons will render in English"
+          fi
+
+      # -----------------------------------------------------------------------
+      # Homebrew is now down to one formula. librsvg supplies rsvg-convert,
+      # which renders the SVG app icon to PNG so `sips`/`iconutil` can build
+      # AppIcon.icns. It is never linked into the binary.
+      #
+      # Everything MuPDF used to need from Homebrew (harfbuzz, freetype,
+      # jpeg-turbo, openjpeg, jbig2dec, gumbo-parser, brotli, zlib) is now
+      # compiled into libmupdf-third.a by macos/build-mupdf.sh.
+      # -----------------------------------------------------------------------
+      - name: Install build tooling
+        run: |
+          set -euo pipefail
           brew install librsvg
-          
-          # MuPDF dependencies (some may already be installed)
-          brew install harfbuzz freetype jpeg-turbo openjpeg jbig2dec gumbo-parser || true
-          brew install brotli zlib || true
-          
-          echo "Dependencies installed successfully"
+
+          echo "=== Tool versions ==="
+          echo "rsvg:  $(rsvg-convert --version)"
+          echo "cmake: $(cmake --version | head -1)"
 
       - name: Setup Qt environment
         run: |
-          # Detect Homebrew prefix based on architecture
-          if [[ "${{ matrix.arch }}" == "arm64" ]]; then
-            HOMEBREW_PREFIX="/opt/homebrew"
-          else
-            HOMEBREW_PREFIX="/usr/local"
+          set -euo pipefail
+          # compile-mac.sh reads SPEEDYNOTE_QT_PREFIX for lrelease, macdeployqt
+          # and -DCMAKE_PREFIX_PATH. With it set, the script also stops asking
+          # Homebrew for qt@6.
+          echo "SPEEDYNOTE_QT_PREFIX=${QT_ROOT_DIR}" >> $GITHUB_ENV
+          echo "${QT_ROOT_DIR}/bin" >> $GITHUB_PATH
+
+      - name: Record toolchain identity
+        id: toolchain
+        run: |
+          set -euo pipefail
+          # Do NOT pipe xcodebuild into head. xcodebuild writes its output
+          # through NSFileHandle, which raises an uncaught
+          # NSFileHandleOperationException ("Broken pipe") on EPIPE instead of
+          # dying quietly on SIGPIPE the way an ordinary tool would. `head -1`
+          # closes the pipe after the first line, so xcodebuild aborts with
+          # exit 134 and pipefail turns that into a failed step.
+          # Capture the whole output instead, then split it in the shell.
+          XCODE_RAW=$(xcodebuild -version)
+          XCODE_LINE=${XCODE_RAW%%$'\n'*}   # "Xcode 26.0"
+          XCODE=${XCODE_LINE##* }           # "26.0"
+          SDK=$(xcrun --sdk macosx --show-sdk-version)
+
+          if [ -z "${XCODE}" ] || [ -z "${SDK}" ]; then
+            echo "ERROR: could not determine toolchain version."
+            echo "xcodebuild said: ${XCODE_RAW}"
+            exit 1
           fi
-          
-          # Add Qt to PATH for lrelease
-          echo "${HOMEBREW_PREFIX}/opt/qt@6/bin" >> $GITHUB_PATH
-          echo "PKG_CONFIG_PATH=${HOMEBREW_PREFIX}/lib/pkgconfig:${HOMEBREW_PREFIX}/opt/qt@6/lib/pkgconfig" >> $GITHUB_ENV
-          echo "HOMEBREW_PREFIX=${HOMEBREW_PREFIX}" >> $GITHUB_ENV
+          echo "xcode=${XCODE}" >> "$GITHUB_OUTPUT"
+          echo "sdk=${SDK}" >> "$GITHUB_OUTPUT"
+          echo "Xcode ${XCODE}, macosx SDK ${SDK}"
+
+      # ccache is a nice-to-have, not a requirement: it shaves time off the
+      # C++ compile between tags, where most sources are unchanged.
+      #
+      # It is deliberately non-fatal and time-boxed. The action installs ccache
+      # through Homebrew, and on the Intel runner a missing bottle would mean a
+      # from-source build - the same trap this workflow exists to escape. If
+      # that happens, the step is abandoned and the build proceeds without it.
+      - name: Setup ccache
+        id: ccache
+        uses: hendrikmuhs/ccache-action@v1
+        continue-on-error: true
+        timeout-minutes: 10
+        with:
+          key: macos-${{ matrix.arch }}-xcode${{ steps.toolchain.outputs.xcode }}
+
+      - name: Use ccache if it is available
+        run: |
+          set -euo pipefail
+          # Setting the launcher unconditionally would break every compile
+          # command if the step above bailed out, so probe for it. CMake reads
+          # CMAKE_CXX_COMPILER_LAUNCHER from the environment, which means
+          # compile-mac.sh needs no changes either way.
+          if command -v ccache >/dev/null 2>&1; then
+            echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
+            echo "ccache: $(ccache --version | head -1)"
+          else
+            echo "ccache unavailable; building without a compiler cache"
+          fi
+
+      # -----------------------------------------------------------------------
+      # MuPDF static libraries.
+      #
+      # Only the installed output (macos/mupdf-build) is cached, not
+      # macos/mupdf-src, whose objects build-mupdf.sh discards with
+      # `make clean` on every run anyway.
+      #
+      # The key covers the MuPDF version, the arch, the deployment floor, the
+      # build script and the Xcode version, so a toolchain bump rebuilds rather
+      # than silently reusing static libs from a different SDK.
+      # -----------------------------------------------------------------------
+      - name: Restore MuPDF cache
+        id: cache-mupdf
+        uses: actions/cache@v4
+        with:
+          path: macos/mupdf-build
+          key: macos-mupdf-${{ env.MUPDF_VERSION }}-${{ matrix.arch }}-min12-xcode${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('macos/build-mupdf.sh') }}
+
+      - name: Build MuPDF (skipped on cache hit)
+        if: steps.cache-mupdf.outputs.cache-hit != 'true'
+        run: ./macos/build-mupdf.sh
 
       - name: Build SpeedyNote
         run: |
           echo "Building SpeedyNote for ${{ matrix.arch }}..."
-          
-          # Make script executable
           chmod +x compile-mac.sh
-          
-          # Run build with auto-DMG, skip CLI installation
-          ./compile-mac.sh -d --no-cli
+          # --strict makes bundle verification fatal: an app that still
+          # references /opt/homebrew, /usr/local or /Users runs on the runner
+          # and nowhere else.
+          ./compile-mac.sh -d --no-cli --strict
+
+      # -----------------------------------------------------------------------
+      # Deployment target and linkage audit.
+      #
+      # There is no macOS 12 runner to test on, so the claim that this build
+      # runs on macOS 12 has to be proven mechanically. A single Homebrew dylib
+      # sneaking back into Contents/Frameworks would silently raise the floor
+      # to whatever release its bottle was built for, and the only symptom
+      # would be users on older systems unable to launch the app.
+      # -----------------------------------------------------------------------
+      - name: Verify deployment target and linkage
+        run: |
+          set -euo pipefail
+
+          APP="SpeedyNote.app"
+          EXE="${APP}/Contents/MacOS/speedynote"
+          EXPECTED_MINOS="12.0"
+          FAILED=0
+
+          if [ ! -x "${EXE}" ]; then
+            echo "ERROR: ${EXE} not found"
+            exit 1
+          fi
+
+          # vtool reports LC_BUILD_VERSION as "minos <ver>" and the older
+          # LC_VERSION_MIN_MACOSX as "version <ver>"; accept either.
+          minos_of() {
+            vtool -show-build "$1" 2>/dev/null \
+              | awk '$1 == "minos" || $1 == "version" { print $2; exit }'
+          }
+
+          # true when $1 <= $2
+          version_le() {
+            [ "$1" = "$2" ] || [ "$1" = "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" ]
+          }
+
+          echo "=== Executable deployment target ==="
+          EXE_MINOS=$(minos_of "${EXE}")
+          echo "  speedynote: minos ${EXE_MINOS:-<unreadable>}"
+          if [ "${EXE_MINOS}" != "${EXPECTED_MINOS}" ]; then
+            echo "::error::speedynote reports minos ${EXE_MINOS}, expected ${EXPECTED_MINOS}"
+            FAILED=1
+          fi
+
+          echo ""
+          echo "=== Bundled Mach-O deployment targets ==="
+          CHECKED=0
+          while IFS= read -r -d '' f; do
+            file -b "$f" | grep -q "Mach-O" || continue
+            CHECKED=$((CHECKED + 1))
+            M=$(minos_of "$f")
+            if [ -z "${M}" ]; then
+              echo "::warning::no deployment target readable from ${f#${APP}/}"
+              continue
+            fi
+            if ! version_le "${M}" "${EXPECTED_MINOS}"; then
+              echo "::error::${f#${APP}/} requires macOS ${M} (> ${EXPECTED_MINOS})"
+              FAILED=1
+            fi
+          done < <(find "${APP}/Contents/Frameworks" "${APP}/Contents/PlugIns" \
+                     -type f -print0 2>/dev/null)
+          echo "  Mach-O files checked: ${CHECKED}"
+
+          echo ""
+          echo "=== Executable linkage ==="
+          otool -L "${EXE}"
+          STRAY=$(otool -L "${EXE}" | tail -n +2 | awk '{print $1}' \
+            | grep -E '^(/usr/local|/opt/homebrew|/Users)' || true)
+          if [ -n "${STRAY}" ]; then
+            echo "::error::executable links against paths that do not exist on a user's machine:"
+            echo "${STRAY}"
+            FAILED=1
+          fi
+
+          echo ""
+          echo "=== App icon ==="
+          # create_app_bundle() degrades to copying the raw SVG when
+          # rsvg-convert is missing, which produces an icon-less DMG.
+          if [ -f "${APP}/Contents/Resources/AppIcon.icns" ]; then
+            echo "  AppIcon.icns present ($(du -h "${APP}/Contents/Resources/AppIcon.icns" | cut -f1))"
+          else
+            echo "::error::AppIcon.icns missing - rsvg-convert probably was not available"
+            FAILED=1
+          fi
+
+          echo ""
+          echo "=== Architecture ==="
+          lipo -info "${EXE}"
+          if ! lipo -info "${EXE}" | grep -q "${{ matrix.arch }}"; then
+            echo "::error::executable is not ${{ matrix.arch }}"
+            FAILED=1
+          fi
+
+          if [ "${FAILED}" -ne 0 ]; then
+            echo ""
+            echo "Bundle is not safe to ship on macOS ${EXPECTED_MINOS}."
+            exit 1
+          fi
+          echo ""
+          echo "All checks passed: bundle runs on macOS ${EXPECTED_MINOS}+"
 
       - name: Verify code signature
         run: |
@@ -105,6 +346,22 @@ jobs:
             done
           fi
 
+      - name: Summarise build
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### macOS ${{ matrix.arch }}"
+            echo ""
+            echo "| Property | Value |"
+            echo "|---|---|"
+            echo "| Qt | ${QT_VERSION} (aqtinstall) |"
+            echo "| MuPDF | ${MUPDF_VERSION} (static, minos 12.0) |"
+            echo "| MuPDF cache | ${{ steps.cache-mupdf.outputs.cache-hit == 'true' && 'hit' || 'miss (rebuilt)' }} |"
+            echo "| Xcode | ${{ steps.toolchain.outputs.xcode }} (SDK ${{ steps.toolchain.outputs.sdk }}) |"
+            echo "| Minimum macOS | 12.0 |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
@@ -112,9 +369,11 @@ jobs:
           path: "*.dmg"
           if-no-files-found: error
 
+      # softprops/action-gh-release@v2, not @v1: v1 runs on node16, which
+      # GitHub Actions no longer provides.
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: "*.dmg"
         env:

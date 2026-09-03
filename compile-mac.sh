@@ -17,7 +17,10 @@ NC='\033[0m' # No Color
 # Configuration
 PKGNAME="SpeedyNote"
 APP_BUNDLE="${PKGNAME}.app"
-MIN_MACOS_VERSION="14.0"
+# Single source of truth for the deployment target: feeds both
+# -DCMAKE_OSX_DEPLOYMENT_TARGET and LSMinimumSystemVersion in Info.plist.
+# Must match CMakeLists.txt and macos/build-mupdf.sh.
+MIN_MACOS_VERSION="12.0"
 
 # Command line options
 PACKAGE_ONLY=false
@@ -25,6 +28,7 @@ FORCE_REBUILD=false
 AUTO_DMG=false
 INSTALL_CLI=false
 SKIP_CLI=false
+STRICT=false
 
 # ============================================================================
 # Usage and Argument Parsing
@@ -39,13 +43,19 @@ show_usage() {
     echo "  -d, --dmg            Automatically create DMG without prompting"
     echo "  -c, --cli            Install 'speedynote' CLI command without prompting"
     echo "  --no-cli             Skip CLI installation prompt"
+    echo "  --strict             Fail the build if bundle verification finds problems"
     echo "  -h, --help           Show this help message"
+    echo
+    echo "Environment:"
+    echo "  SPEEDYNOTE_QT_PREFIX  Qt installation to build against"
+    echo "                        (default: <brew prefix>/opt/qt@6)"
     echo
     echo "Examples:"
     echo "  $0                   # Full build + package (interactive)"
     echo "  $0 -p                # Package only (skip build if speedynote exists)"
     echo "  $0 -p -d -c          # Package + DMG + CLI (no prompts)"
     echo "  $0 -f                # Force full rebuild"
+    echo "  $0 -d --no-cli --strict   # What CI runs"
 }
 
 parse_arguments() {
@@ -71,6 +81,10 @@ parse_arguments() {
                 SKIP_CLI=true
                 shift
                 ;;
+            --strict)
+                STRICT=true
+                shift
+                ;;
             -h|--help)
                 show_usage
                 exit 0
@@ -90,6 +104,19 @@ parse_arguments() {
 
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+# The command that proves a formula's tooling is already usable, whatever
+# installed it. CI runners ship cmake and pkg-config outside Homebrew, and on
+# Intel (where Homebrew no longer publishes bottles) an unnecessary
+# `brew install cmake` means building it from source for an hour.
+package_command() {
+    case "$1" in
+        cmake)      echo "cmake" ;;
+        pkg-config) echo "pkg-config" ;;
+        librsvg)    echo "rsvg-convert" ;;
+        *)          echo "" ;;
+    esac
 }
 
 check_project_directory() {
@@ -124,6 +151,29 @@ get_homebrew_prefix() {
     fi
 }
 
+# Deployment target recorded in a Mach-O file. vtool reports LC_BUILD_VERSION
+# as "minos <ver>" and the older LC_VERSION_MIN_MACOSX as "version <ver>".
+macho_minos() {
+    vtool -show-build "$1" 2>/dev/null \
+        | awk '$1 == "minos" || $1 == "version" { print $2; exit }'
+}
+
+# True when version $1 is less than or equal to version $2.
+version_le() {
+    [[ "$1" == "$2" ]] || [[ "$1" == "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" ]]
+}
+
+# Qt to build against. CI sets SPEEDYNOTE_QT_PREFIX to a version-pinned Qt
+# installed by aqtinstall; with the variable unset this returns the Homebrew
+# path the script has always used.
+get_qt_prefix() {
+    if [[ -n "${SPEEDYNOTE_QT_PREFIX:-}" ]]; then
+        echo "${SPEEDYNOTE_QT_PREFIX}"
+    else
+        echo "$(get_homebrew_prefix)/opt/qt@6"
+    fi
+}
+
 # ============================================================================
 # Dependency Management
 # ============================================================================
@@ -145,17 +195,32 @@ check_and_install_dependencies() {
     
     local missing_deps=()
     
-    # Required packages for MuPDF-only build
+    # Deliberately short. Notably absent:
+    #   gcc     - nothing here or in CMake ever used it, and on Intel (where
+    #             Homebrew no longer ships bottles) installing it means a
+    #             multi-hour source build.
+    #   mupdf   - macos/build-mupdf.sh produces a static build instead; a
+    #             Homebrew bottle would drag the deployment floor up to the
+    #             OS release it was built on.
+    #   qt@6    - only when SPEEDYNOTE_QT_PREFIX points at a Qt already
+    #             installed some other way (aqtinstall in CI).
     local required_packages=(
-        "gcc"
-        "qt@6"
-        "mupdf"
         "cmake"
         "pkg-config"
         "librsvg"
     )
     
+    if [[ -z "${SPEEDYNOTE_QT_PREFIX:-}" ]]; then
+        required_packages+=("qt@6")
+    else
+        echo -e "${CYAN}  Qt supplied via SPEEDYNOTE_QT_PREFIX: ${SPEEDYNOTE_QT_PREFIX}${NC}"
+    fi
+    
     for pkg in "${required_packages[@]}"; do
+        local probe=$(package_command "$pkg")
+        if [[ -n "$probe" ]] && command_exists "$probe"; then
+            continue
+        fi
         if ! brew list "$pkg" &>/dev/null; then
             missing_deps+=("$pkg")
         fi
@@ -173,12 +238,40 @@ check_and_install_dependencies() {
 
 setup_environment() {
     local prefix=$(get_homebrew_prefix)
+    local qt_prefix=$(get_qt_prefix)
     
     # Add Qt binaries to PATH for lrelease
-    export PATH="${prefix}/opt/qt@6/bin:$PATH"
-    export PKG_CONFIG_PATH="${prefix}/lib/pkgconfig:${prefix}/opt/qt@6/lib/pkgconfig:$PKG_CONFIG_PATH"
+    export PATH="${qt_prefix}/bin:$PATH"
+    export PKG_CONFIG_PATH="${prefix}/lib/pkgconfig:${qt_prefix}/lib/pkgconfig:$PKG_CONFIG_PATH"
     
     echo -e "${CYAN}Using Homebrew prefix: ${prefix}${NC}"
+    echo -e "${CYAN}Using Qt prefix: ${qt_prefix}${NC}"
+}
+
+# ============================================================================
+# MuPDF (self-contained static build)
+# ============================================================================
+
+ensure_mupdf() {
+    local static_lib="macos/mupdf-build/lib/libmupdf.a"
+    
+    if [[ -f "$static_lib" ]]; then
+        echo -e "${GREEN}✓ Static MuPDF present: ${static_lib}${NC}"
+        return
+    fi
+    
+    echo -e "${YELLOW}Static MuPDF not found — building it now...${NC}"
+    echo -e "${CYAN}  This takes ~10-20 minutes the first time, then it is cached on disk.${NC}"
+    echo -e "${CYAN}  It is what keeps the bundle free of Homebrew dylibs so the app${NC}"
+    echo -e "${CYAN}  can run on macOS ${MIN_MACOS_VERSION}.${NC}"
+    
+    chmod +x ./macos/build-mupdf.sh
+    ./macos/build-mupdf.sh
+    
+    if [[ ! -f "$static_lib" ]]; then
+        echo -e "${RED}Error: macos/build-mupdf.sh did not produce ${static_lib}${NC}"
+        exit 1
+    fi
 }
 
 # ============================================================================
@@ -217,11 +310,19 @@ build_project() {
     
     cd build
     
-    # Configure with CMake
+    # Configure with CMake.
+    # CMAKE_PREFIX_PATH is passed explicitly when SPEEDYNOTE_QT_PREFIX is set
+    # so the choice of Qt is unambiguous on the command line, rather than
+    # depending on which environment variables CMake happens to consult.
     echo -e "${YELLOW}Configuring build...${NC}"
-    cmake -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_OSX_DEPLOYMENT_TARGET=${MIN_MACOS_VERSION} \
-          ..
+    local cmake_args=(
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_OSX_DEPLOYMENT_TARGET=${MIN_MACOS_VERSION}
+    )
+    if [[ -n "${SPEEDYNOTE_QT_PREFIX:-}" ]]; then
+        cmake_args+=(-DCMAKE_PREFIX_PATH="${SPEEDYNOTE_QT_PREFIX}")
+    fi
+    cmake "${cmake_args[@]}" ..
     
     # Build with parallel jobs
     local cpu_count=$(sysctl -n hw.ncpu)
@@ -600,8 +701,7 @@ fix_library_paths() {
 
 bundle_qt_frameworks() {
     local app_path="$1"
-    local prefix=$(get_homebrew_prefix)
-    local qt_path="${prefix}/opt/qt@6"
+    local qt_path=$(get_qt_prefix)
     
     echo -e "${YELLOW}Bundling Qt frameworks...${NC}"
     
@@ -820,10 +920,82 @@ verify_bundle() {
         fi
     done
     
+    # A bundle that still references /opt/homebrew, /usr/local or /Users
+    # launches fine on the build machine and fails on everyone else's.
+    local strict_failed=false
+    
     if [[ "$has_issues" == "false" ]]; then
         echo -e "${GREEN}  ✓ All dependencies appear to be properly bundled${NC}"
     else
         echo -e "${YELLOW}  ⚠ Some dependencies need attention (app may still work)${NC}"
+        strict_failed=true
+    fi
+    
+    # ------------------------------------------------------------------------
+    # Deployment targets.
+    #
+    # The path check above cannot catch this: macdeployqt rewrites Homebrew Qt
+    # to @executable_path, so a framework built for macOS 14 (or 26) looks
+    # perfectly clean while making the bundle unloadable on anything older.
+    # dyld refuses to load a dylib whose own minimum is newer than the running
+    # system, and Info.plist claims ${MIN_MACOS_VERSION}, so affected users
+    # get to launch the app and then watch it fail rather than being told up
+    # front that their macOS is too old.
+    # ------------------------------------------------------------------------
+    echo -e "${CYAN}  → Checking deployment targets...${NC}"
+    
+    local macho_files=("$executable")
+    local f
+    while IFS= read -r -d '' f; do
+        if file -b "$f" 2>/dev/null | grep -q "Mach-O"; then
+            macho_files+=("$f")
+        fi
+    done < <(find "${frameworks_dir}" "${app_path}/Contents/PlugIns" \
+               -type f -print0 2>/dev/null)
+    
+    local highest="${MIN_MACOS_VERSION}"
+    local offenders=()
+    for f in "${macho_files[@]}"; do
+        local m=$(macho_minos "$f")
+        if [[ -z "$m" ]]; then
+            continue
+        fi
+        version_le "$m" "$highest" || highest="$m"
+        if ! version_le "$m" "${MIN_MACOS_VERSION}"; then
+            offenders+=("$(basename "$f") needs macOS ${m}")
+        fi
+    done
+    
+    echo -e "${CYAN}    Mach-O files checked: ${#macho_files[@]}${NC}"
+    
+    if [[ ${#offenders[@]} -eq 0 ]]; then
+        echo -e "${GREEN}  ✓ Bundle runs on macOS ${MIN_MACOS_VERSION} and newer${NC}"
+    else
+        echo -e "${YELLOW}  ⚠ Bundle actually requires macOS ${highest}, not ${MIN_MACOS_VERSION}:${NC}"
+        local shown=0
+        local o
+        for o in "${offenders[@]}"; do
+            if [[ $shown -lt 8 ]]; then
+                echo -e "${RED}      ${o}${NC}"
+                shown=$((shown + 1))
+            fi
+        done
+        if [[ ${#offenders[@]} -gt 8 ]]; then
+            echo -e "${RED}      ... and $(( ${#offenders[@]} - 8 )) more${NC}"
+        fi
+        echo -e "${YELLOW}    This is almost always Qt: Homebrew's frameworks are built for${NC}"
+        echo -e "${YELLOW}    whatever macOS the bottle was made on. Build against a Qt that${NC}"
+        echo -e "${YELLOW}    targets macOS ${MIN_MACOS_VERSION}, for example:${NC}"
+        echo -e "${YELLOW}      SPEEDYNOTE_QT_PREFIX=~/Qt/6.9.3/macos $0${NC}"
+        strict_failed=true
+    fi
+    
+    if [[ "$strict_failed" == "true" ]]; then
+        if [[ "$STRICT" == "true" ]]; then
+            echo -e "${RED}  ✗ Bundle is not safe to distribute (--strict)${NC}"
+            exit 1
+        fi
+        echo -e "${YELLOW}    Re-run with --strict to make the problems above fatal${NC}"
     fi
     
     # Count bundled libraries
@@ -970,6 +1142,9 @@ main() {
     fi
     
     if [[ "$skip_build" == "false" ]]; then
+        # Static MuPDF must exist before CMake configures, since that is what
+        # it looks for first (falling back to Homebrew otherwise).
+        ensure_mupdf
         build_project
     fi
     
