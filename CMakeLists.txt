@@ -332,7 +332,10 @@ elseif(APPLE)
     # =========================================================================
     message(STATUS "🍎 Configuring for macOS")
     
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version")
+    # macOS 12 is the floor: it is Qt 6.9's documented minimum target, and it
+    # is only reachable because the MuPDF static build below replaces the
+    # Homebrew dylibs that used to pin the app to macOS 14.
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
     
     # Homebrew paths
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
@@ -343,12 +346,30 @@ elseif(APPLE)
         message(STATUS "Detected Intel Mac - using ${HOMEBREW_PREFIX}")
     endif()
     
-    if(USE_QT5)
-        set(CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}/opt/qt@5")
+    # Only point at Homebrew's Qt when no Qt was supplied externally. CI
+    # installs a version-pinned Qt via aqtinstall and passes it in through
+    # CMAKE_PREFIX_PATH / QT_ROOT_DIR; overwriting that here would silently
+    # drag in whatever Homebrew happens to have. A bare local `cmake ..` still
+    # lands on the Homebrew Qt exactly as before.
+    # ENV{CMAKE_PREFIX_PATH} matters as much as the CMake variable: CMake reads
+    # the environment one during find_package, but it does not populate the
+    # variable from it, so a naive `if(NOT CMAKE_PREFIX_PATH)` would look empty
+    # and then overwrite it with Homebrew's path -- which does take precedence.
+    # install-qt-action sets both QT_ROOT_DIR and CMAKE_PREFIX_PATH this way.
+    if(NOT CMAKE_PREFIX_PATH
+       AND NOT QT_ROOT_DIR
+       AND NOT DEFINED ENV{QT_ROOT_DIR}
+       AND NOT DEFINED ENV{CMAKE_PREFIX_PATH})
+        if(USE_QT5)
+            set(CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}/opt/qt@5")
+        else()
+            set(CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}/opt/qt@6")
+        endif()
+        message(STATUS "Qt prefix: ${CMAKE_PREFIX_PATH} (Homebrew default)")
     else()
-        set(CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}/opt/qt@6")
+        message(STATUS "Qt prefix: supplied externally (CMAKE_PREFIX_PATH / QT_ROOT_DIR)")
     endif()
-    include_directories(${CMAKE_CURRENT_BINARY_DIR} "${HOMEBREW_PREFIX}/include")
+    include_directories(${CMAKE_CURRENT_BINARY_DIR})
     
     # Find dependencies
     if(ENABLE_DEBUG_OUTPUT)
@@ -356,12 +377,51 @@ elseif(APPLE)
     else()
         find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg)
     endif()
-    find_package(PkgConfig REQUIRED)
     # macOS uses MuPDF exclusively for PDF rendering and export (no Poppler)
     
-    # MuPDF for PDF rendering and export (via Homebrew)
-    # Homebrew may install MuPDF in different locations depending on version/linking
+    # -------------------------------------------------------------------------
+    # MuPDF: self-contained static build (preferred)
+    # -------------------------------------------------------------------------
+    # macos/build-mupdf.sh compiles freetype, harfbuzz, libjpeg, openjpeg,
+    # jbig2dec, lcms2, mujs and gumbo into libmupdf-third.a at
+    # -mmacosx-version-min=12.0. Nothing from Homebrew ends up in the bundle,
+    # which is what allows the deployment target above to be 12.0 -- Homebrew
+    # bottles are built for the host OS release and carry minos 14.0.
     set(MUPDF_FOUND FALSE)
+    set(MUPDF_STATIC_DIR "${CMAKE_SOURCE_DIR}/macos/mupdf-build")
+    
+    if(EXISTS "${MUPDF_STATIC_DIR}/lib/libmupdf.a"
+       AND EXISTS "${MUPDF_STATIC_DIR}/lib/libmupdf-third.a")
+        set(MUPDF_INCLUDE_DIR "${MUPDF_STATIC_DIR}/include")
+        # libz stays a system dependency (build-mupdf.sh passes
+        # USE_SYSTEM_ZLIB=yes): it ships in the macOS SDK on every supported
+        # release, so there is nothing to bundle and no floor to raise.
+        set(MUPDF_LIBRARIES
+            "${MUPDF_STATIC_DIR}/lib/libmupdf.a"
+            "${MUPDF_STATIC_DIR}/lib/libmupdf-third.a"
+            z
+        )
+        set(MUPDF_FOUND TRUE)
+        add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+        message(STATUS "✅ MuPDF: self-contained static build")
+        message(STATUS "   ${MUPDF_STATIC_DIR}/lib/libmupdf.a")
+        message(STATUS "   No Homebrew dylibs will be bundled")
+    else()
+    
+    # -------------------------------------------------------------------------
+    # MuPDF: Homebrew fallback
+    # -------------------------------------------------------------------------
+    # Kept for local development on a machine that already has `brew install
+    # mupdf`. A bundle produced this way inherits the Homebrew bottles'
+    # deployment target, so it is NOT safe to ship -- run
+    # macos/build-mupdf.sh for release builds.
+    message(STATUS "MuPDF: no static build at ${MUPDF_STATIC_DIR}")
+    message(STATUS "   Falling back to Homebrew (not distributable - run ./macos/build-mupdf.sh)")
+    
+    find_package(PkgConfig REQUIRED)
+    include_directories("${HOMEBREW_PREFIX}/include")
+    
+    # Homebrew may install MuPDF in different locations depending on version/linking
     set(MUPDF_SEARCH_PATHS
         "${HOMEBREW_PREFIX}/opt/mupdf"      # Homebrew keg-only location (most common)
         "${HOMEBREW_PREFIX}"                 # Direct Homebrew prefix
@@ -449,8 +509,11 @@ elseif(APPLE)
             message(STATUS "     - ${MUPDF_PATH}/lib/libmupdf.a")
             message(STATUS "     - ${MUPDF_PATH}/lib/libmupdf.dylib")
         endforeach()
-        message(STATUS "   Install with: brew install mupdf")
+        message(STATUS "   Build it with: ./macos/build-mupdf.sh (recommended)")
+        message(STATUS "   Or install with: brew install mupdf")
     endif()
+    
+    endif()  # end of MuPDF static-vs-Homebrew selection
 
     # Add MuPDF include directory if found
     if(MUPDF_FOUND)
@@ -817,8 +880,15 @@ endif()
 if(SPEEDYNOTE_ENABLE_VISION_OCR)
     # Apple Vision backend (macOS); shares the 4A RasterOcrEngine base above.
     list(APPEND OCR_SOURCES source/ocr/engines/VisionOcrEngine_macos.mm)
+    # -Werror=unguarded-availability turns "this API is newer than the
+    # deployment target" into a compile error. The VNRecognizeTextRequest use
+    # here is macOS 10.15+ and already guarded at runtime via NSClassFromString,
+    # but with the deployment target at 12.0 any newly-adopted Vision API would
+    # otherwise compile quietly and crash on an older Mac.
     set_source_files_properties(source/ocr/engines/VisionOcrEngine_macos.mm
-        PROPERTIES LANGUAGE OBJCXX)
+        PROPERTIES
+            LANGUAGE OBJCXX
+            COMPILE_OPTIONS "-Werror=unguarded-availability")
 endif()
 if(SPEEDYNOTE_ENABLE_PADDLE_OCR)
     # PaddleOCR backend (Linux); shares the 4A RasterOcrEngine base above.

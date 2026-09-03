@@ -98,7 +98,7 @@
 | 平台          | 最低要求                     | 推荐配置             |
 | ----------- | ------------------------ | ---------------- |
 | **Windows** | Windows 7 SP1         | Windows 11       |
-| **macOS**   | macOS 14                | macOS 15+        |
+| **macOS**   | macOS 12                | macOS 15+        |
 | **Linux**   | Ubuntu 22.04 / Fedora 38 | 任何支持 Qt 6.4+ 的系统 |
 | **Android** | Android 9 (API 28)       | Android 13+      |
 | **iPadOS**  | iPadOS 16.0              | iPadOS 17+       |

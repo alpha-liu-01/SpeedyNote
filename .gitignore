@@ -89,6 +89,8 @@ ios/build-sim/
 ios/dist/
 ios/Assets.xcassets/
 ios/mlkit-build/
+macos/mupdf-src/
+macos/mupdf-build/
 .aur-work/
 win32/
 scripts/
