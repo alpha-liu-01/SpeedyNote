@@ -95,6 +95,12 @@ done
 SOURCE_DIR="$(cd "${SOURCE_DIR}" && pwd)"
 NAME="$(basename "${SOURCE_DIR}")"
 BUILD_DIR="${BUILD_DIR:-${SCRIPT_DIR}/build-${NAME}}"
+# Absolute, because the deploy step below runs from inside the build directory
+# and passes paths discovered here -- a relative --build-dir would resolve
+# against the wrong directory there and harmondeployqt would report only
+# "Failed to open input file".
+mkdir -p "${BUILD_DIR}"
+BUILD_DIR="$(cd "${BUILD_DIR}" && pwd)"
 
 # ---------- Preflight checks ----------
 echo "=== SpeedyNote HarmonyOS Build (arm64-v8a, ${BUILD_TYPE}) ==="

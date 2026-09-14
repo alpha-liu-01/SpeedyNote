@@ -17,8 +17,10 @@
 #include "ui/launcher/Launcher.h"
 #include "platform/SystemNotification.h"
 #include "core/DocumentViewport.h"
-// CLI support (Desktop only)
-#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+// CLI support (Desktop only). Excluded on HarmonyOS as well: Qt builds the app
+// as a shared module loaded by an ArkTS host there, so there is no argv-taking
+// executable for a command line to attach to.
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && !defined(Q_OS_HARMONY)
 #include <QGuiApplication>
 #include "cli/CliParser.h"
 #endif
@@ -883,7 +885,7 @@ int main(int argc, char* argv[])
     // In release builds, enableDebugConsole() calls FreeConsole() to hide the
     // console window in GUI mode, but that would also disconnect stdout/stderr
     // for CLI mode, causing all terminal output to be silently lost.
-#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && !defined(Q_OS_HARMONY)
     if (Cli::isCliMode(argc, argv)) {
         QGuiApplication app(argc, argv);
         app.setOrganizationName("SpeedyNote");

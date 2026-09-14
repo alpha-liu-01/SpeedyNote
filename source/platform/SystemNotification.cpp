@@ -8,12 +8,18 @@
 #include <QCoreApplication>
 #endif
 
-#ifdef Q_OS_LINUX
-#ifndef Q_OS_ANDROID
+// Qt defines Q_OS_LINUX on Android and HarmonyOS as well, since both run a Linux
+// kernel, so the XDG portal backend below needs a narrower condition than that.
+// Android has its own JNI backend; HarmonyOS will eventually use Notification
+// Kit, and until then it falls through to the "not implemented" branches.
+#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID) && !defined(Q_OS_HARMONY)
+#  define SPEEDYNOTE_XDG_PORTAL
+#endif
+
+#ifdef SPEEDYNOTE_XDG_PORTAL
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusReply>
-#endif
 #endif
 
 namespace SystemNotification {
@@ -25,8 +31,7 @@ static const int NOTIFICATION_ID_GENERAL = 1003;
 
 static bool s_initialized = false;
 
-#ifdef Q_OS_LINUX
-#ifndef Q_OS_ANDROID
+#ifdef SPEEDYNOTE_XDG_PORTAL
 // Desktop Linux: XDG Desktop Portal notification support
 // Uses org.freedesktop.portal.Notification (works in Flatpak and on modern desktops)
 static bool s_portalAvailable = false;
@@ -104,8 +109,7 @@ static void removePortalNotification(const QString& id)
         iface.call("RemoveNotification", id);
     }
 }
-#endif // not Q_OS_ANDROID
-#endif // Q_OS_LINUX
+#endif // SPEEDYNOTE_XDG_PORTAL
 
 // ============================================================================
 // Public API Implementation
@@ -133,7 +137,7 @@ bool initialize()
 #elif defined(Q_OS_IOS)
     // TODO Phase 4: iOS UNUserNotificationCenter initialization
     s_initialized = true;
-#elif defined(Q_OS_LINUX)
+#elif defined(SPEEDYNOTE_XDG_PORTAL)
     s_initialized = initPortal();
 #else
     // Windows/macOS: System notifications not implemented
@@ -151,7 +155,7 @@ bool isAvailable()
 #elif defined(Q_OS_IOS)
     // TODO Phase 4: Check UNUserNotificationCenter availability
     return false;
-#elif defined(Q_OS_LINUX)
+#elif defined(SPEEDYNOTE_XDG_PORTAL)
     return s_portalAvailable;
 #else
     // Windows/macOS: not yet implemented
@@ -304,7 +308,7 @@ void show(Type type, const QString& title, const QString& message, bool success)
     Q_UNUSED(message);
     Q_UNUSED(success);
     
-#elif defined(Q_OS_LINUX)
+#elif defined(SPEEDYNOTE_XDG_PORTAL)
     // Desktop Linux: Use XDG Desktop Portal notifications
     QString priority = success ? "normal" : "urgent";
     
@@ -342,7 +346,7 @@ void dismissExportNotification()
     }
 #elif defined(Q_OS_IOS)
     // TODO Phase 4: Dismiss iOS export notification
-#elif defined(Q_OS_LINUX)
+#elif defined(SPEEDYNOTE_XDG_PORTAL)
     removePortalNotification(PORTAL_ID_EXPORT);
 #endif
 }
@@ -362,7 +366,7 @@ void dismissImportNotification()
     }
 #elif defined(Q_OS_IOS)
     // TODO Phase 4: Dismiss iOS import notification
-#elif defined(Q_OS_LINUX)
+#elif defined(SPEEDYNOTE_XDG_PORTAL)
     removePortalNotification(PORTAL_ID_IMPORT);
 #endif
 }
