@@ -148,7 +148,10 @@ QSharedMemory *MainWindow::sharedMemory = nullptr;
 // Always using new architecture now
 // bool MainWindow::s_useNewViewport = false;
 
-#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
+// Desktop Linux only. Q_OS_LINUX is also defined on Android and HarmonyOS, and
+// neither wants this: the _exit(0) below would bypass the platform's own
+// shutdown, and there is no shared memory or peer socket to release there.
+#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID) && !defined(Q_OS_HARMONY)
 // Linux-specific signal handler for cleanup (not used on Android)
 void linuxSignalHandler(int signal) {
     Q_UNUSED(signal);
@@ -185,7 +188,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     // Phase 3.1: Always using new DocumentViewport architecture
 
-#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
+#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID) && !defined(Q_OS_HARMONY)
     // Setup signal handlers for proper cleanup on Linux (not Android)
     setupLinuxSignalHandlers();
 #endif
@@ -9448,8 +9451,28 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 
 bool MainWindow::isInstanceRunning()
 {
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
-    // Android/iOS handle app lifecycle differently - always return false
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
+    // Android/iOS/HarmonyOS handle app lifecycle differently - always return false.
+    //
+    // On HarmonyOS this is not merely unnecessary but actively fatal, and it must
+    // stay that way. The ability framework already guarantees one instance per
+    // bundle, while the desktop mechanism below locks the app out permanently
+    // after its first run:
+    //
+    //   - Qt for HarmonyOS backs QSharedMemory with POSIX shm, not System V
+    //     (nativeIpcKey reads "posix:/qipc_sharedmemory_SpeedyNoteSingleInstance...").
+    //   - A POSIX shm object outlives its creator until someone calls shm_unlink.
+    //     When the ability framework tears the process down, nothing does, so the
+    //     object leaks and every later create() returns AlreadyExists.
+    //   - The stale-segment recovery below cannot clear it: attach()/detach() only
+    //     unlinks in the creating process, and the last-resort cleanup shells out
+    //     to ipcs/ipcrm, which do not exist on HarmonyOS and are System V tools
+    //     that could not touch a POSIX object anyway.
+    //   - Unlike the macOS path, the Linux path has no "assume we are alone"
+    //     fallback, so it falls through to return true. main() then exits 0 before
+    //     the event loop, the ability is destroyed, and because it is a clean exit
+    //     there is no crash and no faultlog -- just an app that silently refuses
+    //     to start until the device reboots.
     return false;
 #else
     if (!sharedMemory) {
@@ -9571,7 +9594,9 @@ bool MainWindow::sendToExistingInstance(const QString &filePath)
 
 void MainWindow::setupSingleInstanceServer()
 {
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
+    // No counterpart to isInstanceRunning() on these platforms, so there is
+    // nothing for the peer socket to serve.
     return;
 #else
     localServer = new QLocalServer(this);
@@ -9667,7 +9692,9 @@ void MainWindow::cleanupSharedResources()
     QLocalServer::removeServer("SpeedyNote_SingleInstance");
 #endif
     
-#ifdef Q_OS_LINUX
+// Not on HarmonyOS: ipcs/ipcrm are absent there, and its QSharedMemory is POSIX
+// rather than System V, so this would be a pointless subprocess at every exit.
+#if defined(Q_OS_LINUX) && !defined(Q_OS_HARMONY)
     // On Linux, try to clean up stale shared memory segments
     // Use system() instead of QProcess to avoid Qt dependencies in cleanup
     int ret = system("ipcs -m | grep $(whoami) | awk '/SpeedyNote/{print $2}' | xargs -r ipcrm -m 2>/dev/null");
