@@ -110,7 +110,10 @@ protected:
 #ifdef Q_OS_HARMONY
 #include <QDialog>
 #include <QEvent>
+#include <QMouseEvent>
+#include <QPointer>
 #include <QScreen>
+#include <QTimer>
 #include <QWindow>
 
 // The window a dialog should be centred on: the one that raised it, whose
@@ -166,27 +169,22 @@ static void centreHarmonyDialog(QDialog* dialog)
         // Nothing to submit a position to yet, so WA_Moved is what carries it:
         // QWidget::create() sends a position for a moved widget and only a size for any
         // other. This is the path the dialogs that place themselves take, and the reason
-        // they are the ones that already come up centred.
+        // they are the ones that already came up centred.
         dialog->move(target.topLeft());
         return;
     }
 
-    // The platform reads a submitted geometry as a frame rect where Qt means a client
-    // rect, and reports the result back the same way round, so both ends of the trip
-    // are off by the frame margins and in opposite directions: the window lands one
-    // margin above the position asked for, and one margin taller. Undoing both is what
-    // makes the dialog land where the arithmetic above puts it.
+    // Through the window, because QWidget::move() and QWidget::resize() do not carry a
+    // position here at all: the platform applies the size in a widget-level geometry and
+    // leaves the window where it was, whatever the timing. Only QWindow::setGeometry()
+    // moves a dialog.
     //
-    // Getting this wrong is not a near miss. A size that comes back a margin larger
-    // than requested is a resize, a resize brings us back here, and the dialog walks
-    // down the screen growing by the height of its title bar until it fills it.
-    const QMargins frame = handle->frameMargins();
-    const QRect request(target.topLeft() + QPoint(frame.left(), frame.top()),
-                        target.size() - QSize(frame.left() + frame.right(),
-                                              frame.top() + frame.bottom()));
-
-    if (handle->geometry() != request) {
-        handle->setGeometry(request);
+    // This is exact only because the window is frameless. With a frame the platform
+    // places the window a frame margin away from the rect submitted, and -- the part
+    // that actually hurts -- the QPA keeps mapping touches from the rect it was given,
+    // so the dialog draws in one place and answers taps a title bar lower.
+    if (handle->geometry() != target) {
+        handle->setGeometry(target);
     }
 }
 
@@ -217,20 +215,66 @@ public:
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override
     {
+        if (auto* widget = qobject_cast<QWidget*>(obj); widget != nullptr) {
+            if (event->type() == QEvent::MouseButtonPress) {
+                auto* mouse = static_cast<QMouseEvent*>(event);
+                const QWidget* win = widget->window();
+                qWarning("PROBE press on=%s global=%.0f,%.0f local=%.0f,%.0f"
+                         "  win=%s %d,%d %dx%d",
+                         widget->metaObject()->className(),
+                         mouse->globalPosition().x(), mouse->globalPosition().y(),
+                         mouse->position().x(), mouse->position().y(),
+                         win->metaObject()->className(),
+                         win->geometry().x(), win->geometry().y(),
+                         win->geometry().width(), win->geometry().height());
+            }
+
+            if (widget->isWindow()) {
+                switch (event->type()) {
+                case QEvent::WindowActivate:
+                case QEvent::WindowDeactivate:
+                case QEvent::ActivationChange: {
+                    QWidget* modal = QApplication::activeModalWidget();
+                    qWarning("PROBE ev=%d on=%s active=%s modal=%s",
+                             int(event->type()), widget->metaObject()->className(),
+                             QApplication::activeWindow() != nullptr
+                                 ? QApplication::activeWindow()->metaObject()->className() : "none",
+                             modal != nullptr ? modal->metaObject()->className() : "none");
+                    break;
+                }
+                default:
+                    break;
+                }
+            }
+        }
+
         auto* dialog = qobject_cast<QDialog*>(obj);
         if (dialog == nullptr || !dialog->isWindow()) {
             return QObject::eventFilter(obj, event);
         }
 
         switch (event->type()) {
+        case QEvent::ChildAdded:
+            // The window has to be frameless for the placement below to be exact, and a
+            // frame can only be dropped before the platform window exists. ChildAdded is
+            // the last event that arrives that early -- it comes from the constructor,
+            // while QDialog creates its window later, inside setVisible(). Re-applied on
+            // every child so a constructor that assigns its own flags after adding a
+            // widget does not silently take the frame back.
+            //
+            // Nothing is lost: the platform draws no decoration on these sub-windows, so
+            // the frame this gives up was only ever a margin in the geometry arithmetic.
+            if (dialog->windowHandle() == nullptr) {
+                dialog->setWindowFlag(Qt::FramelessWindowHint, true);
+            }
+            break;
         case QEvent::Show:
         case QEvent::Move:
         case QEvent::Resize:
             // Move and Resize as well as Show, because the show is not the end of it: a
             // dialog that asked for less room than its layout needs is resized on the
-            // first layout pass afterwards, and the platform returns the window to the
-            // origin as it applies that size. The position has to be reasserted once the
-            // size it was computed for has settled.
+            // first layout pass afterwards, and the position has to be reasserted for the
+            // size it ends up with.
             //
             // WA_Moved means something placed this window deliberately, which covers the
             // dialogs that position themselves and, if this filter is ever widened past
@@ -244,6 +288,62 @@ protected:
         default:
             break;
         }
+
+        return QObject::eventFilter(obj, event);
+    }
+};
+
+/**
+ * @brief Event filter that keeps a modal dialog in front of the windows it blocks.
+ *
+ * The platform does not enforce modality in the z-order. A tap outside an open dialog
+ * raises the window under it -- the dialog drops from ZOrd 104 to 103 and the fullscreen
+ * MainWindow it blocks takes 104 -- so the dialog is buried while keeping its geometry
+ * and its modality. Qt's modal event loop then discards every press that lands on the
+ * window now in front, and with the dialog out of sight the app reads as frozen.
+ *
+ * Almost none of that is reported to Qt. The only events that arrive are
+ * WindowDeactivate on the dialog and a focus window of nullptr; the window that came
+ * forward is never activated, because Qt's own modality is what blocks it. So the
+ * dialog's own deactivation, with no successor taking activation, is the whole signal,
+ * and putting it back in front is the response.
+ */
+class HarmonyModalKeeper : public QObject {
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override
+    {
+        if (event->type() != QEvent::WindowDeactivate) {
+            return QObject::eventFilter(obj, event);
+        }
+
+        auto* widget = qobject_cast<QWidget*>(obj);
+        // Only for the topmost modal. A dialog that is losing activation to a modal of
+        // its own -- the colour picker inside the settings dialog -- is no longer the
+        // active modal by this point and is meant to stay where it is, behind the one
+        // that now is.
+        if (widget == nullptr || !widget->isWindow()
+            || widget != QApplication::activeModalWidget()) {
+            return QObject::eventFilter(obj, event);
+        }
+
+        // Queued, because raising a window while its own deactivation is still being
+        // delivered asks the platform to undo what it is in the middle of doing, and
+        // because it gives the conditions a second reading: a dialog deactivated on its
+        // way out is already hidden by the time this runs, and must not be resurrected.
+        QPointer<QWidget> modal(widget);
+        QTimer::singleShot(0, widget, [modal]() {
+            if (modal && modal->isVisible() && modal == QApplication::activeModalWidget()
+                // Not while the app is in the background: the dialog losing activation
+                // to another app is not the bug this is here for, and raise() on a
+                // sub-window goes to the top of the app, which would drag it forward.
+                && QGuiApplication::applicationState() == Qt::ApplicationActive) {
+                modal->raise();
+                modal->activateWindow();
+            }
+        });
 
         return QObject::eventFilter(obj, event);
     }
@@ -1098,6 +1198,12 @@ int main(int argc, char* argv[])
 
 #ifdef Q_OS_HARMONY
     app.installEventFilter(new HarmonyDialogCentring(&app));
+    app.installEventFilter(new HarmonyModalKeeper(&app));
+    QObject::connect(&app, &QGuiApplication::focusWindowChanged, &app, [](QWindow* window) {
+        qWarning("PROBE focusWindowChanged -> %s state=%d",
+                 window != nullptr ? qUtf8Printable(window->objectName()) : "none",
+                 int(QGuiApplication::applicationState()));
+    });
 #endif
 
     QTranslator translator;
