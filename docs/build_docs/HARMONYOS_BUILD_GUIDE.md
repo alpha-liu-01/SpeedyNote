@@ -233,6 +233,8 @@ libraries to match.
 | Fullscreen | Not honoured | The platform ignores `showFullScreen()` for the ability's main window and its sub-windows alike. The nav-bar button changes Qt's window state and nothing on screen. |
 | Dialog placement | Worked around | Dialogs used to open in the top-left corner with their titles behind the status bar. `HarmonyDialogCentring` in `Main.cpp` now centres them; see below before touching window geometry. |
 | Modal z-order | Worked around | The platform lets a tap outside a modal dialog raise the window the dialog blocks over it, leaving the app unresponsive with the dialog buried. `HarmonyModalKeeper` in `Main.cpp` raises it back; see below. |
+| Menu placement | Worked around | A menu opened as a sliver in the top-left corner and dismissed itself, unless the same `QMenu` object had been opened once before. Call sites use `execMenuAt()` from `source/ui/MenuPopup.cpp` instead of `QMenu::exec()`; see below. |
+| Submenus | Not available | The platform closes the whole menu chain as soon as a second popup window opens, so the launcher's Export and Move to Folder submenus cannot be opened. Keep menus flat; see below. |
 | Stylus pressure/tilt | Untested | The emulator has no pen device; `uinput -S` injects generic touch events. Needs hardware. |
 
 ### Q_OS_LINUX is defined
@@ -319,7 +321,10 @@ before touching it:
   `QWidget::setGeometry()` all arrive as a size alone: the window is resized and left exactly
   where it was, whatever the timing — before the show, immediately after it, or a frame later
   from a queued call. A MainWindow looks like a counter-example, but `HarmonyWindowSwitch` only
-  ever asks one to sit at the position it already has.
+  ever asks one to sit at the position it already has. The QPA sources give the rule behind this:
+  `QOhosFloatingWindow::setGeometry()` submits the size unconditionally but guards the position
+  with `if (!qt_window_private(window())->positionAutomatic)`, and that flag is only cleared by
+  `QWindow::setPosition()`/`setGeometry()`. A position Qt considers automatic is never sent.
 - **The dialog window has to be frameless.** With a frame the platform places the window one
   frame margin (37px, the title bar height) away from the rect submitted and — the part that
   actually hurts — the QPA goes on mapping touches from the rect it was given, so the dialog
@@ -334,8 +339,42 @@ before touching it:
   `Show` for that reason, and converges because it only ever submits a geometry the window does
   not already have.
 
-Menus and tooltips are unaffected by any of this — they are given an explicit position when they
-open, and the filter skips anything with `WA_Moved` set in any case.
+The filter leaves menus and tooltips alone — they are given an explicit position when they open,
+and it skips anything with `WA_Moved` set in any case — but menus turn out to have a related
+problem of their own, below.
+
+### Menus open in the corner and dismiss themselves
+
+`QMenuPrivate::popup()` creates the menu's window before it has worked out where the menu goes,
+and this platform keeps a window at the rect it was created with: a geometry submitted between
+`create()` and `show()` is dropped. A menu built where it is used is created with `QWidget`'s
+default rect for a widget that has a parent, so what appears is a 100x30 sliver at 0,0.
+
+It then closes within a tenth of a second, and the QPA sources say why: a node reporting
+`externalContentClickDetected` runs `QOhosPlatformWindow::closeAllActivePopups()`, which sends a
+close event to *every* visible `Qt::Popup` window in the app. A menu stranded in the corner is
+nowhere near the tap that opened it, so that tap counts as content outside it and takes it
+straight back down.
+
+Only the *first* popup of a given `QMenu` object is affected. The second lands correctly, the
+window existing by then and being moved rather than shown. That asymmetry is the whole reason the
+overflow menu behind the nav bar's ⋮ button looked like it worked: it is kept in a member
+variable, so only its first use in a run is lost, while the ＋ button's menu is rebuilt on every
+click and so never worked at all.
+
+`execMenuAt()` in `source/ui/MenuPopup.cpp` replaces `QMenu::exec()` at every call site. It
+submits the geometry again through `QWindow::setGeometry()` from a queued call, once
+`QMenu::popup()` has created the window, and holds the menu at zero opacity until then so the
+corner is never where it first appears. The position has to be handed in from the call site,
+because by the time the menu is visible nothing remembers where it was meant to go: Qt's own rect
+and the platform's have both been overwritten with the creation rect.
+
+Submenus are beyond this. They can be placed the same way — their position is derivable from the
+parent menu's active item — but opening the second popup window is itself an outside interaction,
+and `closeAllActivePopups()` closes every popup rather than the one that lost the interaction, so
+parent and child go down together. Nothing in the app can prevent that: the Export and Move to
+Folder submenus in the launcher's notebook menus cannot be opened at all, and anything that has to
+work here belongs in a flat menu.
 
 ### Modal dialogs are not kept in front
 

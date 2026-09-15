@@ -47,15 +47,14 @@ static QRect harmonyMenuRect(const QMenu& menu, const QPoint& globalPos, const Q
     }
     return rect;
 }
-#endif
 
-#ifdef Q_OS_HARMONY
 // QMenuPrivate::popup() creates the platform window before it has worked out where the
 // menu goes, and on HarmonyOS a geometry submitted between create() and show() is dropped:
 // the window appears at the rect it was created with. For a menu built where it is used
 // that rect is QWidget's default for a widget with a parent, 0,0 100x30, so what shows up
-// is a sliver in the top-left corner -- and it dismisses itself at once, the tap that
-// opened it being nowhere near where it landed.
+// is a sliver in the top-left corner. It does not stay either: the QPA closes every visible
+// popup as soon as a node reports a click on content outside one, and the tap that opened
+// this menu is outside a menu stranded in the corner.
 //
 // Only the first popup of a given QMenu is affected. The second lands correctly, because by
 // then the window exists and is being moved rather than shown, which is why the one menu
@@ -63,10 +62,16 @@ static QRect harmonyMenuRect(const QMenu& menu, const QPoint& globalPos, const Q
 // use never did.
 //
 // So the position is submitted again through the window once the menu is up, the same way a
-// dialog is placed on this platform. It has to be handed in from outside, because by the
-// time the menu is visible nothing remembers where it was meant to go: Qt's own rect and
-// the platform's have both been overwritten with the creation rect.
-void placeHarmonyMenu(QMenu& menu, const QPoint& globalPos)
+// dialog is placed on this platform -- through QWindow, which is the only route that reaches
+// it, the QPA dropping any position Qt still considers automatic. It has to be worked out
+// here, before the menu is shown, because afterwards nothing remembers where it was meant to
+// go: Qt's own rect and the platform's have both been overwritten with the creation rect.
+//
+// A submenu is beyond this. It can be placed the same way, but opening its window counts as
+// an interaction outside the parent menu, and the QPA answers that by closing every popup
+// rather than the one that lost it, so the submenus in the launcher's notebook menus stay
+// unusable on HarmonyOS.
+static void placeHarmonyMenu(QMenu& menu, const QPoint& globalPos)
 {
     menu.ensurePolished();
     const QRect target = harmonyMenuRect(menu, globalPos, menu.sizeHint());

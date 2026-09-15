@@ -1,7 +1,5 @@
 #pragma once
 
-#include <QtGlobal>
-
 class QAction;
 class QMenu;
 class QPoint;
@@ -19,14 +17,3 @@ class QPoint;
  * time it opens, but that is still once per run.
  */
 QAction* execMenuAt(QMenu& menu, const QPoint& globalPos);
-
-#ifdef Q_OS_HARMONY
-/**
- * @brief Submits a menu's geometry again once its window is up, as HarmonyOS needs.
- *
- * This is what execMenuAt() does before showing a menu, exposed for submenus: those are
- * opened by QMenu itself rather than by any call site, so they are placed from the event
- * filter in Main.cpp instead.
- */
-void placeHarmonyMenu(QMenu& menu, const QPoint& globalPos);
-#endif
