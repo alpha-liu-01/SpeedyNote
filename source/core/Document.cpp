@@ -13,7 +13,7 @@
 #include <QCryptographicHash>
 #include <QImageReader>
 #include <QRegularExpression>
-#include <QSaveFile>
+#include "../platform/BundleFile.h"
 #include <QSettings>
 #include <QtConcurrent>
 #include <cmath>
@@ -1636,7 +1636,7 @@ bool Document::savePage(int index)
     }
     
     QString pagePath = m_bundlePath + "/pages/" + uuid + ".json";
-    QSaveFile file(pagePath);
+    BundleFile file(pagePath);
     file.setDirectWriteFallback(false);
     if (!file.open(QIODevice::WriteOnly)) {
         qWarning() << "Cannot save page:" << pagePath;
@@ -3379,7 +3379,7 @@ bool Document::saveTile(TileCoord coord)
     QString tilePath = tilesDir + "/" + 
                        QString("%1,%2.json").arg(coord.first).arg(coord.second);
     
-    QSaveFile file(tilePath);
+    BundleFile file(tilePath);
     file.setDirectWriteFallback(false);
     if (!file.open(QIODevice::WriteOnly)) {
         qWarning() << "Cannot save tile: failed to open file" << tilePath;
@@ -3765,7 +3765,7 @@ bool Document::enqueueImageAssetWrite(ImageObject* imageObject, const QImage& so
             return true;
         }
 
-        QSaveFile output(fullPath);
+        BundleFile output(fullPath);
         output.setDirectWriteFallback(false);
         return output.open(QIODevice::WriteOnly)
             && output.write(bytes) == bytes.size()
@@ -4508,7 +4508,7 @@ bool Document::saveBundle(const QString& path, bool finalize)
         if (!source.open(QIODevice::ReadOnly)) return false;
         if (!QDir().mkpath(QFileInfo(destPath).absolutePath())) return false;
 
-        QSaveFile dest(destPath);
+        BundleFile dest(destPath);
         dest.setDirectWriteFallback(false);
         if (!dest.open(QIODevice::WriteOnly)) return false;
         constexpr qint64 chunkSize = 1024 * 1024;
@@ -4530,7 +4530,19 @@ bool Document::saveBundle(const QString& path, bool finalize)
     // and before any page/tile JSON is serialized.
     flushPendingImageWrites();
     m_bundlePath = path;
-    
+
+#ifdef Q_OS_HARMONY
+    // A regular file can be sitting where the bundle directory needs to go: the
+    // system save picker creates an empty file at the chosen path before handing
+    // it back, and builds before the picker was bypassed left those behind.
+    // Without clearing it, every later save to that name fails on mkpath. The
+    // save dialog has already confirmed the overwrite by this point, and the
+    // emptiness check keeps this from touching anything that holds data.
+    if (QFileInfo(path).isFile() && QFileInfo(path).size() == 0) {
+        QFile::remove(path);
+    }
+#endif
+
     // Phase P.1.1: Write .snb_marker file to identify this as a SpeedyNote bundle
     QString markerPath = path + "/.snb_marker";
     if (!QFile::exists(markerPath)) {
@@ -4738,7 +4750,7 @@ bool Document::saveBundle(const QString& path, bool finalize)
     
     // Write manifest
     QString manifestPath = path + "/document.json";
-    QSaveFile manifestFile(manifestPath);
+    BundleFile manifestFile(manifestPath);
     manifestFile.setDirectWriteFallback(false);
     if (!manifestFile.open(QIODevice::WriteOnly)) {
         qWarning() << "Cannot write manifest" << manifestPath;
@@ -4913,7 +4925,7 @@ bool Document::saveBundle(const QString& path, bool finalize)
             bool needsSave = savingToNewLocation || m_dirtyPages.count(uuid) > 0;
             if (needsSave) {
                 QString pagePath = path + "/pages/" + uuid + ".json";
-                QSaveFile file(pagePath);
+                BundleFile file(pagePath);
                 file.setDirectWriteFallback(false);
                 QJsonDocument doc(pagePtr->toJson());
                 const QByteArray pageData = doc.toJson(QJsonDocument::Compact);

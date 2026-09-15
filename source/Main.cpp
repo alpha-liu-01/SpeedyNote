@@ -111,6 +111,10 @@ protected:
 #include "macos/MacMenuBar.h"
 #endif
 
+#ifdef Q_OS_HARMONY
+#include "harmony/HarmonyEnvironment.h"
+#endif
+
 #ifdef Q_OS_ANDROID
 
 static void logAndroidPaths()
@@ -926,6 +930,14 @@ int main(int argc, char* argv[])
     IOSPlatformHelper::applyFonts(app);
     IOSPlatformHelper::installKeyboardFilter(app);
     IOSTouchTracker::install();
+#elif defined(Q_OS_HARMONY)
+    // Probe user-folder access once, up front. Whether this succeeds decides
+    // where file dialogs open and whether saving outside the sandbox works at
+    // all, and it is the platform's most common failure mode, so the result is
+    // worth having in the log of every run rather than only after a failed save.
+    // HarmonyEnvironment caches it, so this also keeps the dialogs snappy.
+    qInfo() << "HarmonyOS: documents root =" << HarmonyEnvironment::writableDocumentsRoot()
+            << "(user folder access:" << HarmonyEnvironment::hasUserDocumentsAccess() << ")";
 #endif
 
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)

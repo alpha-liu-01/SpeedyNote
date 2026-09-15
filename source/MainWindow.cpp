@@ -120,6 +120,33 @@
 
 #endif // Q_OS_ANDROID / Q_OS_IOS
 
+#ifdef Q_OS_HARMONY
+#include "harmony/HarmonyEnvironment.h"
+#endif
+
+// ============================================================================
+// Dialog options for .snb bundles
+// ============================================================================
+// HarmonyOS routes native file dialogs to the system DocumentViewPicker, which
+// is file-oriented: asked to save, it creates an empty regular file at the
+// chosen path and grants "secure access" to that one file. A .snb bundle is a
+// directory, so the save then fails on the very file the picker just created,
+// and Open cannot select a bundle at all. Qt's own widget dialog sidesteps both,
+// and ohos.permission.READ_WRITE_DOCUMENTS_DIRECTORY lets us create the
+// directory ourselves -- the arrangement HarmonyEnvironment probes for.
+//
+// Only bundle dialogs opt out. The PDF and plain-folder dialogs keep the native
+// picker, since those really do operate on one file or one folder, which is what
+// it is good at, and it grants access without needing any permission.
+static QFileDialog::Options bundleDialogOptions()
+{
+#ifdef Q_OS_HARMONY
+    return QFileDialog::DontUseNativeDialog;
+#else
+    return QFileDialog::Options();
+#endif
+}
+
 #ifdef Q_OS_MACOS
 #include "macos/MacPlatformHelper.h"
 #endif
@@ -3745,7 +3772,15 @@ bool MainWindow::saveNewDocumentWithDialog(Document* doc)
     QSettings saveSettings("SpeedyNote", "App");
     QString lastSaveDir = saveSettings.value("FileDialogs/lastSaveDirectory").toString();
     if (lastSaveDir.isEmpty() || !QDir(lastSaveDir).exists()) {
+#ifdef Q_OS_HARMONY
+        // Not QDir::homePath(): see HarmonyEnvironment::writableDocumentsRoot().
+        // It resolves to /storage/Users/<user> here, which is listable but not
+        // writable unless the user granted the Documents permission, so it would
+        // offer a default path that then fails to save.
+        lastSaveDir = HarmonyEnvironment::writableDocumentsRoot();
+#else
         lastSaveDir = QDir::homePath();
+#endif
     }
     QString defaultPath = lastSaveDir + "/" + defaultName + ".snb";
     
@@ -3753,7 +3788,9 @@ bool MainWindow::saveNewDocumentWithDialog(Document* doc)
         this,
         isEdgeless ? tr("Save Canvas") : tr("Save Document"),
         defaultPath,
-        tr("SpeedyNote Bundle (*.snb)")
+        tr("SpeedyNote Bundle (*.snb)"),
+        nullptr,
+        bundleDialogOptions()
     );
     
     if (filePath.isEmpty()) {
@@ -4012,7 +4049,11 @@ void MainWindow::loadDocument()
     QSettings openSettings("SpeedyNote", "App");
     QString lastOpenDir = openSettings.value("FileDialogs/lastOpenDirectory").toString();
     if (lastOpenDir.isEmpty() || !QDir(lastOpenDir).exists()) {
+#ifdef Q_OS_HARMONY
+        lastOpenDir = HarmonyEnvironment::writableDocumentsRoot();
+#else
         lastOpenDir = QDir::homePath();
+#endif
     }
     
     QString filter = tr("SpeedyNote Files (*.snb *.pdf);;SpeedyNote Bundle (*.snb);;PDF Documents (*.pdf);;All Files (*)");
@@ -4020,7 +4061,9 @@ void MainWindow::loadDocument()
         this,
         tr("Open Document"),
         lastOpenDir,
-        filter
+        filter,
+        nullptr,
+        bundleDialogOptions()
     );
     
     if (filePath.isEmpty()) {

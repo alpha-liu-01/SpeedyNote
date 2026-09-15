@@ -193,12 +193,26 @@ echo ""
 echo "=== Fixing ICU sonames ==="
 "${SCRIPT_DIR}/fix-icu-sonames.py" "${HARMONY_PROJECT}/entry/libs/arm64-v8a"
 
+# ---------- Request user-granted permissions from the generated ability ----------
+echo ""
+echo "=== Injecting permission request ==="
+"${SCRIPT_DIR}/inject-permission-request.py" "${HARMONY_PROJECT}"
+
 # ---------- Package ----------
-# harmonydeployqt already ran assembleHap once, but that was before the ICU fix,
-# so the HAP has to be rebuilt. hvigor is incremental, so this is cheap.
+# harmonydeployqt already ran assembleHap once, but that was before the two fixes
+# above, so the HAP has to be rebuilt. hvigor is incremental, so this is cheap.
 echo ""
 echo "=== Packaging HAP ==="
-(cd "${HARMONY_PROJECT}" && hvigorw assembleHap --no-daemon 2>&1 | grep -E 'BUILD|ERROR|WARN: Will skip sign' || true)
+# Redirect to a file rather than piping into grep: a pipe hands us grep's exit
+# status, so an hvigor failure would slip through and the stale HAP left behind
+# by harmonydeployqt's own assembleHap would be installed as if it were fresh --
+# a patched .ets that fails to compile would then look like it had no effect.
+HVIGOR_LOG="${BUILD_DIR}/hvigor-assembleHap.log"
+if ! (cd "${HARMONY_PROJECT}" && hvigorw assembleHap --no-daemon) > "${HVIGOR_LOG}" 2>&1; then
+    grep -E 'ERROR|Error Message' "${HVIGOR_LOG}" | head -20
+    fail "hvigor failed to package the HAP. Full log: ${HVIGOR_LOG}"
+fi
+grep -E 'BUILD SUCCESSFUL|WARN: Will skip sign' "${HVIGOR_LOG}" || true
 
 HAP="$(find "${HARMONY_PROJECT}/entry/build" -name '*.hap' | head -1)"
 [ -n "${HAP}" ] || fail "no .hap produced under ${HARMONY_PROJECT}/entry/build"

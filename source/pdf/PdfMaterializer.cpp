@@ -14,7 +14,7 @@
 #include <QDebug>
 #include <QFile>
 #include <QFileInfo>
-#include <QSaveFile>
+#include "../platform/BundleFile.h"
 
 #include <algorithm>
 
@@ -157,10 +157,12 @@ bool PdfMaterializer::materialize(const QString& originPath,
         return false;
     }
 
-    // Commit through QSaveFile so a failed replacement cannot destroy the
-    // previously valid mini-PDF. MuPDF must write its own temporary path first.
+    // Commit through BundleFile so a failed replacement cannot destroy the
+    // previously valid mini-PDF -- except on HarmonyOS, where the filesystem
+    // denies the rename that guarantee needs (see platform/BundleFile.h).
+    // MuPDF must write its own temporary path first.
     QFile generated(tmpPath);
-    QSaveFile target(bundledAbsPath);
+    BundleFile target(bundledAbsPath);
     target.setDirectWriteFallback(false);
     if (!generated.open(QIODevice::ReadOnly) || !target.open(QIODevice::WriteOnly)) {
         const QString detail = !generated.isOpen()

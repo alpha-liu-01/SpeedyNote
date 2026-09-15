@@ -1131,6 +1131,7 @@ endif()
 set(HARMONY_PLATFORM_SOURCES "")
 if(OHOS)
     set(HARMONY_PLATFORM_SOURCES
+        source/harmony/HarmonyEnvironment.cpp
         source/ui/dialogs/SaveDocumentDialog.cpp
     )
 endif()
@@ -1281,6 +1282,25 @@ elseif(OHOS)
     # ever loads, and harmony/build-hap.sh would fail to find its settings file.
     qt_add_executable(speedynote ${APP_SOURCES})
     qt_policy(SET QTP0002 NEW)
+
+    # module.json5 permissions. Qt builds that list from this target's own
+    # _qt_harmonyos_permissions property first, then from the linked Qt modules'
+    # (the target's entries win on duplicate names). harmonydeployqt turns a
+    # literal "reason" into the $string: resource that module.json5 requires.
+    #
+    # READ_WRITE_DOCUMENTS_DIRECTORY is what makes saving work at all: the
+    # sandbox otherwise refuses writes to the user's Documents folder, and
+    # QFileDialog will happily return a path there that QFile then cannot open.
+    set_property(TARGET speedynote APPEND PROPERTY _qt_harmonyos_permissions
+"{
+  \"name\" : \"ohos.permission.READ_WRITE_DOCUMENTS_DIRECTORY\",
+  \"reason\" : \"Lets SpeedyNote open and save notebooks in your Documents folder.\",
+  \"usedScene\" :
+  {
+    \"abilities\" : [ \"QAbility\" ],
+    \"when\" : \"always\"
+  }
+}")
 
     target_include_directories(speedynote PRIVATE
         ${CMAKE_SOURCE_DIR}
@@ -1433,6 +1453,11 @@ elseif(OHOS)
     target_link_libraries(speedynote PRIVATE
         Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent Qt${QT_VERSION_MAJOR}::Xml Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Svg
         ${MUPDF_LIBRARIES}
+        # Core File Kit: OH_Environment_GetUserDocumentDir() and friends, used by
+        # source/harmony/HarmonyEnvironment.cpp to find the user's real Documents
+        # folder on 2-in-1 devices. Named without a path because it resolves out
+        # of the OHOS sysroot the toolchain file already points at.
+        libohenvironment.so
     )
 
 elseif(UNIX)
