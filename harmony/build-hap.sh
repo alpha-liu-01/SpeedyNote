@@ -220,6 +220,11 @@ echo ""
 echo "=== Injecting permission request ==="
 "${SCRIPT_DIR}/inject-permission-request.py" "${HARMONY_PROJECT}"
 
+# ---------- Localized app labels ----------
+echo ""
+echo "=== Adding localized labels ==="
+"${SCRIPT_DIR}/add-localized-labels.py" "${HARMONY_PROJECT}"
+
 # ---------- Package ----------
 # harmonydeployqt already ran assembleHap once, but that was before the two fixes
 # above, so the HAP has to be rebuilt. hvigor is incremental, so this is cheap.

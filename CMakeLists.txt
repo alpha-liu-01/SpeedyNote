@@ -1296,6 +1296,41 @@ elseif(OHOS)
     set_property(TARGET speedynote PROPERTY
         QT_HARMONYOS_MODULE_DEVICE_TYPES "tablet;2in1")
 
+    # App identity. Without these the HAP ships as Qt's template
+    # (org.qtproject.example.speedynote, vendor "example", label "speedynote"),
+    # which is fine for a toolchain smoke test and not for handing builds to
+    # testers: the bundle name is the app's permanent identity -- it fixes the
+    # sandbox data path and is what AppGallery ties updates to.
+    #
+    # Deliberately the same identifier as the Apple platforms use above, rather
+    # than the AppStream one (org.speedynote.SpeedyNote): all-lowercase matches
+    # HarmonyOS convention and sidesteps any doubt about case handling.
+    #
+    # APP_NAME is left at its default (the target name). It is not user-visible;
+    # harmonydeployqt derives the generated DevEco project directory from it,
+    # which harmony/build-hap.sh locates by the lib*-harmonyos glob.
+
+    # One integer that must increase with every release. Same scheme as the
+    # template's 1.0.0 -> 1000000, so 1.6.3 -> 1006003. Computed rather than
+    # concatenated: pasting the components together would make 1.10.0 sort below
+    # 1.6.3 and the platform would refuse the update as a downgrade.
+    math(EXPR SPEEDYNOTE_HARMONY_VERSION_CODE
+        "${PROJECT_VERSION_MAJOR} * 1000000 + ${PROJECT_VERSION_MINOR} * 1000 + ${PROJECT_VERSION_PATCH}")
+
+    set_target_properties(speedynote PROPERTIES
+        QT_HARMONYOS_APP_BUNDLE_NAME "org.speedynote.speedynote"
+        QT_HARMONYOS_APP_LABEL "SpeedyNote"
+        QT_HARMONYOS_APP_VENDOR "SpeedyNote"
+        QT_HARMONYOS_APP_VERSION_NAME "${PROJECT_VERSION}"
+        QT_HARMONYOS_MODULE_DESCRIPTION "Fast note-taking and PDF annotation"
+        QT_HARMONYOS_APP_VERSION_CODE "${SPEEDYNOTE_HARMONY_VERSION_CODE}"
+        # A single PNG is enough: harmonydeployqt copies it into both the
+        # AppScope and entry media directories and repoints the ability's
+        # "$media:layered_image" at it, so the launcher icon comes from here too
+        # rather than from the template's foreground/background pair.
+        QT_HARMONYOS_APP_ICON "${CMAKE_SOURCE_DIR}/harmony/app-resources/app_icon.png"
+    )
+
     # module.json5 permissions. Qt builds that list from this target's own
     # _qt_harmonyos_permissions property first, then from the linked Qt modules'
     # (the target's entries win on duplicate names). harmonydeployqt turns a
