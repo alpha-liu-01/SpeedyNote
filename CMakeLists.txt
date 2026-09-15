@@ -582,9 +582,12 @@ elseif(OHOS)
     # org.freedesktop.Notifications. No Test either — the golden-image tests are
     # desktop-only.
     #
-    # HarmonyExtrasPrivate has no public counterpart -- Qt ships the whole module
-    # as private API. HarmonyWindowSwitch needs its startAbility() to foreground
-    # the Launcher's ability instance; see the comment in HarmonyWindowSwitch.cpp.
+    # The three private modules are all for HarmonyWindowSwitch: GuiPrivate for
+    # qpa/qplatformnativeinterface.h, which is how it reaches the QPA function that
+    # makes a MainWindow a sub-window; HarmonyExtrasPrivate for the startAbility()
+    # fallback, Qt shipping that whole module as private API with no public
+    # counterpart; and CorePrivate because HarmonyExtras' private headers include
+    # QtCore private ones and do not pull them in themselves.
     find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg CorePrivate GuiPrivate HarmonyExtrasPrivate)
 
     # MuPDF is cross-compiled separately by harmony/build-mupdf.sh. Only

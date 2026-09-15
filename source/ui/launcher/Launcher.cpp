@@ -720,8 +720,10 @@ void Launcher::closeEvent(QCloseEvent* event)
 {
     MainWindow* mw = MainWindow::findExistingMainWindow();
     if (mw && mw->tabCount() > 0) {
-        mw->show();
-        mw->raise();
+        // bringToFront() rather than show()/raise() so that the switch direction is
+        // recorded: if the MainWindow refuses to close below, this window stays open
+        // with the MainWindow in front of it, and the next toggle has to know that.
+        mw->bringToFront();
         if (!mw->close()) {
             event->ignore();
             return;

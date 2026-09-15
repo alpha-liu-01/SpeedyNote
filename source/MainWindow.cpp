@@ -8174,9 +8174,10 @@ void MainWindow::preserveWindowState(QWidget* sourceWindow, bool isExistingWindo
         }
     } else {
         // For new windows, apply source window's state
-        if (sourceWindow->isMaximized()) {
+        const bool copyState = HarmonyWindowSwitch::copiesWindowState();
+        if (copyState && sourceWindow->isMaximized()) {
             showMaximized();
-        } else if (sourceWindow->isFullScreen()) {
+        } else if (copyState && sourceWindow->isFullScreen()) {
             showFullScreen();
         } else {
             const QRect target = HarmonyWindowSwitch::targetGeometry(this, sourceWindow);

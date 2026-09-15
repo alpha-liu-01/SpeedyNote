@@ -61,13 +61,23 @@ void switchTo(QWidget* incoming, QWidget* outgoing,
               OutgoingPolicy policy = OutgoingPolicy::Hide, int fadeDurationMs = 150);
 
 // The geometry `incoming` should take on so that a switch does not move the app
-// around the screen: normally `reference`'s, `reference` being the window being
-// switched away from. On HarmonyOS a MainWindow is a sub-window and gets the
-// screen's safe area instead, because only the Launcher's own window has the
-// platform's status-bar insets applied to its content -- copying the Launcher's
-// geometry would slide a MainWindow's toolbar up underneath the status bar.
-// Returns an invalid rect when there is nothing to go on, meaning "leave as is".
+// around the screen: `reference`'s, `reference` being the window being switched
+// away from. On HarmonyOS it has to be `reference`'s *client* rect rather than
+// its frame, because a MainWindow there is a sub-window: the platform puts it
+// exactly where asked and applies no status-bar inset of its own, so the
+// Launcher's laid-out rect is the only thing that knows where the status bar
+// ends. Returns an invalid rect when there is nothing to go on, meaning "leave
+// as is".
 QRect targetGeometry(const QWidget* incoming, const QWidget* reference);
+
+// True when the window coming forward should take on the maximised/fullscreen
+// state of the one it replaces. False on HarmonyOS, where the platform ignores
+// both requests for the ability's main window and for its sub-windows alike:
+// Qt's idea of the state drifts from what is on screen, and copying it only lets
+// a state nobody can see bounce between the two windows -- and a window shown
+// "fullscreen" skips the geometry targetGeometry() worked out, which is what
+// keeps a MainWindow out from under the status bar.
+bool copiesWindowState();
 
 // HarmonyOS: make `window` a sub-window of the Launcher's ability instead of
 // letting it become an ability instance of its own. Call it on every MainWindow

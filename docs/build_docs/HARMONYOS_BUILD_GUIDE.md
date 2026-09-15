@@ -177,20 +177,25 @@ loads.
 Linked platform library: `libohenvironment.so` (Core File Kit), for
 `OH_Environment_GetUserDocumentDir()`.
 
-### Device types must exclude phone
+### Device types stay at Qt's default
+
+`module.json5`'s `deviceTypes` is deliberately left as Qt generates it — `phone`, `tablet`,
+`2in1`. Restricting it,
 
 ```cmake
+# Don't: crashes on a tablet, and fixes nothing
 set_property(TARGET speedynote PROPERTY
     QT_HARMONYOS_MODULE_DEVICE_TYPES "tablet;2in1")
 ```
 
-A bundle that lists `phone` in `module.json5`'s `deviceTypes` is treated as a
-phone-app-on-PC compatibility case, and in that mode the platform's `window.restore()` fails
-([QTBUG-148467](https://bugreports.qt.io/browse/QTBUG-148467)). That call is not incidental:
-Qt implements `hide()`/`show()` of a top-level window as the platform's
-`minimize()`/`restore()`, and SpeedyNote switches between the Launcher and a MainWindow by
-hiding one and showing the other. With `phone` present the hide succeeds and the show does
-not, so both windows end up minimised and the app looks like it vanished.
+was an attempt to work around the platform's `window.restore()` failing for a bundle that
+declares `phone` ([QTBUG-148467](https://bugreports.qt.io/browse/QTBUG-148467)), which matters
+because Qt implements `hide()`/`show()` of a top-level window as the platform's
+`minimize()`/`restore()`. It does not help: `deviceTypes` is an install-time filter and does not
+change how the platform classifies the hardware, and on a tablet `restore()` is refused for a
+different reason anyway (`WMSLayoutPc: Restore: This is not PC or PcAppInPad, not supported`).
+The window switch avoids `restore()` altogether instead — see
+[Windows and ability instances](#windows-and-ability-instances).
 
 ### Permissions
 
@@ -225,6 +230,8 @@ libraries to match.
 | System notifications | Not implemented | Falls through to the no-op branch. Would need Notification Kit rather than `org.freedesktop.Notifications`. |
 | Single-instance | Deliberately disabled | See below. |
 | Atomic file writes | Weakened | See below. |
+| Fullscreen | Not honoured | The platform ignores `showFullScreen()` for the ability's main window and its sub-windows alike. The nav-bar button changes Qt's window state and nothing on screen. |
+| Dialog placement | Top-left corner | `QOhosView` submits a position only for a window something has called `move()` on, so a dialog nobody positioned lands at the origin, with its top edge behind the status bar. Android and iOS maximise dialogs instead (`MobileDialogFilter` in `Main.cpp`); that is not applied here yet. |
 | Stylus pressure/tilt | Untested | The emulator has no pen device; `uinput -S` injects generic touch events. Needs hardware. |
 
 ### Q_OS_LINUX is defined
@@ -262,6 +269,33 @@ be in the foreground. If the app ever becomes window-less it leaves the foregrou
 next attempt to open a window fails and takes the process down. A `QMessageBox` shown before
 any other window does exactly that, which is why the session-restore prompt is parented to an
 already-visible Launcher (the same treatment macOS needs).
+
+That backing is also why Qt cannot switch between two top-level windows here the way it does
+elsewhere. `hide()` reaches the platform's `minimize()`, which works, while `show()` reaches
+`restore()`, which a tablet refuses; `hideAbility()`/`showAbility()` fail too (error
+`16000067`); and `raise()` only orders windows *within* whichever instance is already in the
+foreground, so it cannot bring a backgrounded one forward. Any switch that hid a window lost it
+for good, and the app looked like it had vanished.
+
+So the app keeps a single ability instance. The Launcher owns it — it is the first window and
+outlives every MainWindow — and each MainWindow is tagged as a **sub-window** of it before its
+first show, which keeps it inside the Launcher's stage rather than letting it become an instance
+of its own. Both directions of the switch are then ordinary z-order changes, and the task
+switcher shows one entry. `source/harmony/HarmonyWindowSwitch.{h,cpp}` holds all of it; the
+header comment is the long-form explanation. It is compiled on every platform, because the
+show/raise/geometry sequence is shared and only the hide is platform-dependent.
+
+Three things to know before touching window code on this platform:
+
+- The Launcher must never be hidden (`mustStayResident()`) — hiding it minimises the instance,
+  and nothing can restore it.
+- A MainWindow must be tagged before it is first shown, since Qt decides the view type when it
+  creates the platform window. `MainWindow`'s constructor calls `adoptAsLauncherSubWindow()` so
+  that no construction site can forget.
+- A sub-window gets no status-bar inset of its own, and `availableGeometry()` reports the whole
+  display, so a MainWindow is positioned from the Launcher's client rect (`targetGeometry()`).
+  Maximise and fullscreen state is not copied between windows (`copiesWindowState()`) because
+  the platform ignores both.
 
 ---
 

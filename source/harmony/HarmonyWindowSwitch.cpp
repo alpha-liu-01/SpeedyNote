@@ -2,7 +2,6 @@
 
 #include <QEasingCurve>
 #include <QPropertyAnimation>
-#include <QScreen>
 #include <QWidget>
 #include <QWindow>
 
@@ -31,6 +30,11 @@ bool isLauncher(const QWidget* widget)
 }
 
 #ifdef Q_OS_HARMONY
+// Cleared by adoptAsLauncherSubWindow() the first time it cannot tag a window,
+// which is the only way a MainWindow ends up an ability instance of its own and
+// so the only reason to ask the ability manager for anything during a switch.
+bool s_launcherOwnsEveryWindow = true;
+
 QWidget* findLauncherOrNull()
 {
     const QList<QWidget*> topLevels = QApplication::topLevelWidgets();
@@ -40,6 +44,50 @@ QWidget* findLauncherOrNull()
         }
     }
     return nullptr;
+}
+
+// Returns false if `window` was left to become an ability instance of its own,
+// the case requestLauncherAbilityForeground() below exists to rescue.
+bool tagAsLauncherSubWindow(QWidget* window)
+{
+    if (window->windowHandle() != nullptr) {
+        // Qt decides the view type when it creates the platform window and reads
+        // the tag as part of that, so tagging afterwards would not take effect.
+        qWarning("HarmonyWindowSwitch: too late to adopt an already-realised window");
+        return false;
+    }
+
+    QWidget* launcher = findLauncherOrNull();
+    if (launcher == nullptr) {
+        return false;
+    }
+
+    // The tag holds a QWindow, so the Launcher has to be realised before we can
+    // point at it -- it is shown during cold start, ahead of any MainWindow, so it
+    // always is. The pointer does not have to outlive the call by much: Qt reads
+    // the tag once, while it creates `window`'s platform window, which is the same
+    // reason this has to run before the first show().
+    launcher->createWinId();
+    QWindow* launcherWindow = launcher->windowHandle();
+    if (launcherWindow == nullptr) {
+        return false;
+    }
+
+    QPlatformNativeInterface* nativeInterface = QGuiApplication::platformNativeInterface();
+    using TagAsSubWindowOf = void (*)(QObject*, QWindow*);
+    auto tagAsSubWindowOf = nativeInterface != nullptr
+        ? reinterpret_cast<TagAsSubWindowOf>(
+              nativeInterface->platformFunction("tagWindowOrWidgetAsSubWindowOf"))
+        : nullptr;
+    if (tagAsSubWindowOf == nullptr) {
+        qWarning("HarmonyWindowSwitch: no tagWindowOrWidgetAsSubWindowOf in this Qt");
+        return false;
+    }
+
+    // Tagging the widget rather than its QWindow is what lets this run before the
+    // window exists: Qt carries the property over when it creates it.
+    tagAsSubWindowOf(window, launcherWindow);
+    return true;
 }
 
 // Raising a window cannot move an ability instance from the background to the
@@ -121,45 +169,20 @@ void adoptAsLauncherSubWindow(QWidget* window)
         return;
     }
 
-    if (window->windowHandle() != nullptr) {
-        // Qt decides the view type when it creates the platform window and reads
-        // the tag as part of that, so tagging afterwards would not take effect.
-        qWarning("HarmonyWindowSwitch: too late to adopt an already-realised window");
-        return;
+    if (!tagAsLauncherSubWindow(window)) {
+        s_launcherOwnsEveryWindow = false;
     }
-
-    QWidget* launcher = findLauncherOrNull();
-    if (launcher == nullptr) {
-        return;
-    }
-
-    // The tag holds a QWindow, so the Launcher has to be realised before we can
-    // point at it. It is shown during cold start, ahead of any MainWindow, and it
-    // outlives them all, so the pointer stays good for as long as the tag is read.
-    launcher->createWinId();
-    QWindow* launcherWindow = launcher->windowHandle();
-    if (launcherWindow == nullptr) {
-        return;
-    }
-
-    QPlatformNativeInterface* nativeInterface = QGuiApplication::platformNativeInterface();
-    using TagAsSubWindowOf = void (*)(QObject*, QWindow*);
-    auto tagAsSubWindowOf = nativeInterface != nullptr
-        ? reinterpret_cast<TagAsSubWindowOf>(
-              nativeInterface->platformFunction("tagWindowOrWidgetAsSubWindowOf"))
-        : nullptr;
-    if (tagAsSubWindowOf == nullptr) {
-        // Leaves `window` to become an ability instance of its own, which still
-        // switches one way -- see requestLauncherAbilityForeground().
-        qWarning("HarmonyWindowSwitch: no tagWindowOrWidgetAsSubWindowOf in this Qt");
-        return;
-    }
-
-    // Tagging the widget rather than its QWindow is what lets this run before the
-    // window exists: Qt carries the property over when it creates it.
-    tagAsSubWindowOf(window, launcherWindow);
 #else
     Q_UNUSED(window);
+#endif
+}
+
+bool copiesWindowState()
+{
+#ifdef Q_OS_HARMONY
+    return false;
+#else
+    return true;
 #endif
 }
 
@@ -182,8 +205,9 @@ void switchTo(QWidget* incoming, QWidget* outgoing, OutgoingPolicy policy, int f
     }
 
     // Read the outgoing window's state before anything below resets it.
-    const bool outgoingMaximized  = outgoing && outgoing->isMaximized();
-    const bool outgoingFullScreen = outgoing && outgoing->isFullScreen();
+    const bool copyState = copiesWindowState();
+    const bool outgoingMaximized  = copyState && outgoing && outgoing->isMaximized();
+    const bool outgoingFullScreen = copyState && outgoing && outgoing->isFullScreen();
     const QRect incomingGeometry = targetGeometry(incoming, outgoing);
 
     clearStaleWindowState(incoming);
@@ -211,12 +235,15 @@ void switchTo(QWidget* incoming, QWidget* outgoing, OutgoingPolicy policy, int f
     const bool incomingIsLauncher = isLauncher(incoming);
 
 #ifdef Q_OS_HARMONY
-    // Normally redundant: with the Launcher owning the only ability instance, that
-    // instance is always foreground and the raise above is the whole switch. It
-    // matters when adoptAsLauncherSubWindow() could not tag a MainWindow and the
-    // MainWindow became an instance of its own, in which case showing it pushed
-    // the Launcher's instance to the background and only this can bring it back.
-    if (incomingIsLauncher && !requestLauncherAbilityForeground()) {
+    // Only for the switch the raise above cannot make: a MainWindow that
+    // adoptAsLauncherSubWindow() could not tag became an ability instance of its
+    // own, and showing it pushed the Launcher's instance into the background,
+    // where nothing but the ability manager can reach it. While every MainWindow
+    // is a sub-window the instance never leaves the foreground, and asking anyway
+    // would spend an IPC round trip and deliver the ability a spurious new want
+    // on every switch.
+    if (incomingIsLauncher && !s_launcherOwnsEveryWindow
+        && !requestLauncherAbilityForeground()) {
         qWarning("HarmonyWindowSwitch: the system refused to foreground the Launcher's ability");
     }
 #endif
