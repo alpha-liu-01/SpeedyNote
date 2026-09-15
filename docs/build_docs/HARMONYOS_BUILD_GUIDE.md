@@ -231,7 +231,7 @@ libraries to match.
 | Single-instance | Deliberately disabled | See below. |
 | Atomic file writes | Weakened | See below. |
 | Fullscreen | Not honoured | The platform ignores `showFullScreen()` for the ability's main window and its sub-windows alike. The nav-bar button changes Qt's window state and nothing on screen. |
-| Dialog placement | Top-left corner | `QOhosView` submits a position only for a window something has called `move()` on, so a dialog nobody positioned lands at the origin, with its top edge behind the status bar. Android and iOS maximise dialogs instead (`MobileDialogFilter` in `Main.cpp`); that is not applied here yet. |
+| Dialog placement | Worked around | Dialogs used to open in the top-left corner with their titles behind the status bar. `HarmonyDialogCentring` in `Main.cpp` now centres them; see below before touching window geometry. |
 | Stylus pressure/tilt | Untested | The emulator has no pen device; `uinput -S` injects generic touch events. Needs hardware. |
 
 ### Q_OS_LINUX is defined
@@ -296,6 +296,39 @@ Three things to know before touching window code on this platform:
   display, so a MainWindow is positioned from the Launcher's client rect (`targetGeometry()`).
   Maximise and fullscreen state is not copied between windows (`copiesWindowState()`) because
   the platform ignores both.
+
+### Dialog placement
+
+Every dialog used to open in the top-left corner with its title bar behind the status bar. Qt
+believed they were centred, so nothing in the app could tell.
+
+A position reaches this platform only for a window Qt considers deliberately placed — one with
+`Qt::WA_Moved` set, which is what `QWidget::create()` checks before sending a position rather
+than only a size. `QDialog` does centre itself, in `adjustPosition()`, but clears `WA_Moved`
+afterwards ("not really an explicit position"), so nothing is ever submitted and the window
+stays where the platform put it. `BatchExportDialog` was the one dialog that came up centred,
+because it moves itself in its constructor and so still has `WA_Moved` set when the window is
+created.
+
+`HarmonyDialogCentring` in `source/Main.cpp` centres the rest. Placing a window that already
+exists is harder than it sounds, and the two things it has to get right are worth knowing before
+touching it:
+
+- **The platform reads a submitted geometry as a frame rect where Qt means a client rect**, and
+  reports the result back the same way round. A window therefore lands one frame margin above the
+  position asked for and one margin taller than the size asked for, and the filter subtracts both
+  in advance. Submitting the client rect unchanged is not a near miss: the size comes back a
+  margin larger, that is a resize, the resize triggers another placement, and the dialog walks
+  down the screen growing by the height of its title bar until it fills it.
+- **The position has to be re-stated after the show.** A dialog that asked for less room than its
+  layout needs is resized on the first layout pass afterwards, and the platform returns the
+  window to the origin as it applies that size. The filter runs on `Move` and `Resize` as well as
+  `Show` for that reason, and converges because it only ever submits a geometry the window does
+  not already have.
+
+`QWidget::move()` on a realised window is silently ignored here, so it is only useful before the
+platform window exists. Menus and tooltips are unaffected by any of this — they are given an
+explicit position when they open, and the filter skips anything with `WA_Moved` set in any case.
 
 ---
 

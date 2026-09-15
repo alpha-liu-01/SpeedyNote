@@ -107,6 +107,149 @@ protected:
 };
 #endif
 
+#ifdef Q_OS_HARMONY
+#include <QDialog>
+#include <QEvent>
+#include <QScreen>
+#include <QWindow>
+
+// The window a dialog should be centred on: the one that raised it, whose
+// geometry is also the only rect that knows where the status bar ends. Falls
+// back to the screen, which reports no safe-area margins here and so sits half a
+// status bar high -- still close enough to read as centred.
+static QRect harmonyDialogReference(const QDialog* dialog)
+{
+    const QWidget* reference = dialog->parentWidget() != nullptr
+        ? dialog->parentWidget()->window()
+        : QApplication::activeWindow();
+
+    // activeWindow() is the dialog itself once it has been shown, and centring it
+    // on itself would leave it wherever it already is.
+    if (reference != nullptr && reference != dialog && reference->geometry().isValid()) {
+        return reference->geometry();
+    }
+    if (const QScreen* screen = dialog->screen()) {
+        return screen->availableGeometry();
+    }
+    return QRect();
+}
+
+static void centreHarmonyDialog(QDialog* dialog)
+{
+    const QRect reference = harmonyDialogReference(dialog);
+    if (!reference.isValid()) {
+        return;
+    }
+
+    // Where the dialog should end up, in the coordinates the dialog is drawn in.
+    QRect target(QPoint(), dialog->size());
+    target.moveCenter(reference.center());
+
+    // A dialog taller or wider than the window it is centred on has to keep its
+    // top-left corner reachable -- that is where the title and the buttons are --
+    // so those two edges are clamped last and win.
+    if (target.right() > reference.right()) {
+        target.moveRight(reference.right());
+    }
+    if (target.bottom() > reference.bottom()) {
+        target.moveBottom(reference.bottom());
+    }
+    if (target.left() < reference.left()) {
+        target.moveLeft(reference.left());
+    }
+    if (target.top() < reference.top()) {
+        target.moveTop(reference.top());
+    }
+
+    QWindow* handle = dialog->windowHandle();
+    if (handle == nullptr) {
+        // Nothing to submit a position to yet, so WA_Moved is what carries it:
+        // QWidget::create() sends a position for a moved widget and only a size for any
+        // other. This is the path the dialogs that place themselves take, and the reason
+        // they are the ones that already come up centred.
+        dialog->move(target.topLeft());
+        return;
+    }
+
+    // The platform reads a submitted geometry as a frame rect where Qt means a client
+    // rect, and reports the result back the same way round, so both ends of the trip
+    // are off by the frame margins and in opposite directions: the window lands one
+    // margin above the position asked for, and one margin taller. Undoing both is what
+    // makes the dialog land where the arithmetic above puts it.
+    //
+    // Getting this wrong is not a near miss. A size that comes back a margin larger
+    // than requested is a resize, a resize brings us back here, and the dialog walks
+    // down the screen growing by the height of its title bar until it fills it.
+    const QMargins frame = handle->frameMargins();
+    const QRect request(target.topLeft() + QPoint(frame.left(), frame.top()),
+                        target.size() - QSize(frame.left() + frame.right(),
+                                              frame.top() + frame.bottom()));
+
+    if (handle->geometry() != request) {
+        handle->setGeometry(request);
+    }
+}
+
+/**
+ * @brief Event filter that centres top-level QDialog windows on HarmonyOS.
+ *
+ * The platform is only told where to put a window when Qt's
+ * QWindowPrivate::positionAutomatic is false, and only an explicit move() or
+ * setGeometry() clears that: QWidget::create() positions the native window if
+ * Qt::WA_Moved is set and merely resizes it otherwise. QDialog does centre
+ * itself, through adjustPosition() in QDialog::setVisible(), but then clears
+ * WA_Moved again -- "not really an explicit position" -- so no position is ever
+ * submitted and every dialog lands in the top-left corner with its title behind
+ * the status bar. Qt believes it is centred all the while, so nothing in the app
+ * can notice.
+ *
+ * BatchExportDialog is the exception that gives the game away: it moves itself in
+ * its constructor, before the native window exists, so WA_Moved is still set when
+ * create() runs and the position goes out with the window. That is the easy half
+ * of what this filter does. The hard half is that a position submitted after the
+ * window exists has to survive the platform's own idea of the geometry, which
+ * centreHarmonyDialog() describes.
+ */
+class HarmonyDialogCentring : public QObject {
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override
+    {
+        auto* dialog = qobject_cast<QDialog*>(obj);
+        if (dialog == nullptr || !dialog->isWindow()) {
+            return QObject::eventFilter(obj, event);
+        }
+
+        switch (event->type()) {
+        case QEvent::Show:
+        case QEvent::Move:
+        case QEvent::Resize:
+            // Move and Resize as well as Show, because the show is not the end of it: a
+            // dialog that asked for less room than its layout needs is resized on the
+            // first layout pass afterwards, and the platform returns the window to the
+            // origin as it applies that size. The position has to be reasserted once the
+            // size it was computed for has settled.
+            //
+            // WA_Moved means something placed this window deliberately, which covers the
+            // dialogs that position themselves and, if this filter is ever widened past
+            // QDialog, every menu and tooltip -- they are all given a point to open at.
+            // Only Qt's own centring leaves it clear, and QDialog clears it again on the
+            // way out, so this reads the same on the first show and every later one.
+            if (!dialog->testAttribute(Qt::WA_Moved)) {
+                centreHarmonyDialog(dialog);
+            }
+            break;
+        default:
+            break;
+        }
+
+        return QObject::eventFilter(obj, event);
+    }
+};
+#endif
+
 #ifdef Q_OS_MACOS
 #include "macos/MacMenuBar.h"
 #endif
@@ -951,6 +1094,10 @@ int main(int argc, char* argv[])
 
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     app.installEventFilter(new MobileDialogFilter(&app));
+#endif
+
+#ifdef Q_OS_HARMONY
+    app.installEventFilter(new HarmonyDialogCentring(&app));
 #endif
 
     QTranslator translator;
