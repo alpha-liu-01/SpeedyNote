@@ -1,0 +1,354 @@
+# SpeedyNote HarmonyOS Build Guide
+
+**Document Version:** 1.0
+**Date:** September 2026
+**Status:** ✅ VERIFIED WORKING (2-in-1 emulator, API 23)
+
+---
+
+## Overview
+
+This guide covers building SpeedyNote for HarmonyOS / OpenHarmony. The build produces an
+unsigned `.hap` package that installs on an R&D-mode emulator as-is, and on retail hardware
+once signed with a Huawei-issued certificate.
+
+The whole flow runs from the command line. **DevEco Studio is never opened**: it is an IDE for
+ArkTS projects and cannot build a Qt CMake project. It is installed only for its bundled JDK
+and its Device Manager (emulator images). Qt generates its own DevEco project as a build
+artifact and packaging is driven by the command-line `hvigor`.
+
+### Architecture
+
+- **Target:** HarmonyOS arm64-v8a (the only architecture that exists for this platform)
+- **Form factors:** `tablet` and `2in1` — deliberately *not* `phone`, see [Device types](#device-types-must-exclude-phone)
+- **PDF Backend:** MuPDF 1.24.10 (cross-compiled, statically linked, hidden visibility)
+- **OCR Backend:** none yet — the OCR features are compiled out
+- **CLI:** not available — Qt apps are shared modules here, not executables
+- **UI Framework:** Qt 6.12.0 for HarmonyOS (`harmonyos_arm64_v8a`)
+- **Minimum SDK:** API 23
+
+---
+
+## Prerequisites
+
+### Host System
+
+Verified on macOS (Apple silicon). A Linux host should work with the same layout, but the
+`QT_HOST` and `JAVA_HOME` defaults in `harmony/build-hap.sh` assume macOS and would need
+overriding.
+
+| Requirement | Where it must live | Why the path matters |
+|-------------|--------------------|----------------------|
+| HarmonyOS Command Line Tools | `/opt/harmonyos/command-line-tools` | **Not configurable.** Qt's prebuilt CMake config has this path baked in from Qt's own build machine. |
+| Qt 6.12.0 for HarmonyOS | `~/Qt/6.12.0/harmonyos_arm64_v8a` | Override with `QT_ROOT` / `QT_VERSION`. |
+| Qt 6.12.0 for the host | `~/Qt/6.12.0/macos` | Supplies `harmonydeployqt`, which only ships with the *host* Qt. |
+| `ohos-additional-packages` | `~/.local/opt/ohos/additional-packages` | Override with `OHOS_ADDITIONAL_PACKAGES`. Provides fontconfig, FreeType and ICU. |
+| DevEco Studio | `/Applications/DevEco-Studio.app` | Bundled JDK (`Contents/jbr`) and emulator images. Override with `DEVECO_APP` or set `JAVA_HOME`. |
+
+Qt for HarmonyOS is installed through the Qt Maintenance Tool (the HarmonyOS component under
+Qt 6.12). `ohos-additional-packages` is a separate download referenced from the Qt wiki.
+
+### Device
+
+- A HarmonyOS **2-in-1** or **tablet** emulator created in DevEco Studio's Device Manager, or
+- retail hardware, which additionally requires a signed HAP (see [Signing](#signing-and-sideloading))
+
+Emulators are R&D-mode images, so they install unsigned HAPs without complaint.
+
+---
+
+## Quick Start
+
+```bash
+# One time: cross-compile MuPDF
+./harmony/build-mupdf.sh
+
+# Build, package, install and launch on the running emulator
+./harmony/build-hap.sh --source . --build-dir harmony/build-speedynote --run
+```
+
+Sanity-check the toolchain independently of SpeedyNote by building Qt's own gallery example,
+which is what `build-hap.sh` does when given no `--source`:
+
+```bash
+./harmony/build-hap.sh --run
+```
+
+---
+
+## Detailed Build Instructions
+
+### Phase 1: Cross-compile MuPDF
+
+```bash
+./harmony/build-mupdf.sh            # or --clean to rebuild from scratch
+```
+
+Downloads MuPDF 1.24.10, builds it against the OHOS clang toolchain, and installs to:
+
+- `harmony/mupdf-build/lib/libmupdf.a`
+- `harmony/mupdf-build/lib/libmupdf-third.a`
+- `harmony/mupdf-build/include/mupdf/`
+
+This only needs doing once; CMake fails with a pointed error if the libraries are missing.
+
+Everything is compiled with `-fvisibility=hidden`, and the script patches FreeType's
+`public-macros.h` on the way through. That is not cosmetic. Every Qt HAP bundles a *shared*
+`libfreetype.so` which Qt imports 44 `FT_*` symbols from, and it loads before
+`libspeedynote.so`. Because default-visibility symbols are preemptible even inside their own
+shared object, a bundled MuPDF FreeType compiled normally would export the same names and
+MuPDF's internal calls could bind to Qt's copy — two FreeType builds sharing one symbol set
+and each other's state. FreeType annotates its public API with
+`__attribute__((visibility("default")))` unconditionally on clang, which is why hiding it
+requires the patch rather than just the compiler flag.
+
+Unlike the iOS build, there is no HarfBuzz surgery: `libQt6Gui.so` for HarmonyOS has its
+HarfBuzz statically linked and hidden, exporting and importing zero `hb_*` symbols, so
+MuPDF's copy cannot collide with it.
+
+### Phase 2: Build, package, install
+
+```bash
+./harmony/build-hap.sh --source . --build-dir harmony/build-speedynote --run
+```
+
+The script runs this pipeline:
+
+| Step | Tool | What it does |
+|------|------|--------------|
+| 1 | `qt-cmake` | Configure against the OHOS toolchain (Ninja) |
+| 2 | `cmake --build` | Produce `libspeedynote.so` |
+| 3 | `harmonydeployqt` | Generate a DevEco project and stage Qt + third-party libraries |
+| 4 | `fix-icu-sonames.py` | Patch the ICU soname mismatch (see below) |
+| 5 | `inject-permission-request.py` | Add the runtime permission request to the generated ArkTS ability |
+| 6 | `hvigorw assembleHap` | Package the HAP |
+| 7 | `hdc install` / `aa start` | Install and launch |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--source <dir>` | CMake project to build (default: Qt's `widgets/gallery` example) |
+| `--build-dir <d>` | Build directory (default: `harmony/build-<name>`) |
+| `--release` | Release build (default: Debug) |
+| `--clean` | Remove the build directory first |
+| `--install` | Install the HAP via `hdc` after packaging |
+| `--run` | Install, then launch and tail the log |
+| `--no-package` | Stop after `cmake --build` |
+| `--verbose` | Pass `--verbose` to `harmonydeployqt` |
+
+**Environment overrides:** `QT_VERSION`, `QT_ROOT`, `OHOS_CLT`, `OHOS_ADDITIONAL_PACKAGES`,
+`DEVECO_APP`, `JAVA_HOME`.
+
+The script exports three things that are not on the PATH by default and whose absence produces
+unhelpful errors: `ninja` and `cmake` from inside the SDK, `node` bundled with the command line
+tools, and `JAVA_HOME` (missing Java reports only *"Unable to locate a Java Runtime"*).
+
+It also exports `QT_ADDITIONAL_PACKAGES_PREFIX_PATH`. Passing only `CMAKE_FIND_ROOT_PATH`, as
+the Qt wiki suggests, satisfies the compiler but silently leaves fontconfig, FreeType and ICU
+out of the package: Qt's toolchain file seeds that variable from the paths its own CI used and
+then filters to the ones that exist locally, so the local prefix drops out and nothing is
+staged.
+
+### Phase 3: Install manually (optional)
+
+```bash
+hdc install -r <path>/entry-default-unsigned.hap
+hdc shell aa start -a QAbility -b org.qtproject.example.speedynote
+hdc shell hilog -x | grep -i speedynote        # logs
+```
+
+---
+
+## Platform-Specific Configuration
+
+### CMake
+
+CMake reports `UNIX` for OHOS while `LINUX` is empty, so every "UNIX means Linux desktop"
+branch in `CMakeLists.txt` carries an explicit `AND NOT OHOS`, and each `elseif(OHOS)` branch
+is placed *before* the `UNIX` one. Without that ordering the Linux branch runs and demands Qt
+DBus, pkg-config and a system MuPDF, none of which exist here.
+
+`qt_add_executable()` is mandatory, not merely preferred: on HarmonyOS it emits the shared
+module the generated ArkTS host loads, plus the `*-harmony-deployment-settings.json` that
+`harmonydeployqt` consumes. A plain `add_executable()` would produce an ELF binary nothing ever
+loads.
+
+Linked platform library: `libohenvironment.so` (Core File Kit), for
+`OH_Environment_GetUserDocumentDir()`.
+
+### Device types must exclude phone
+
+```cmake
+set_property(TARGET speedynote PROPERTY
+    QT_HARMONYOS_MODULE_DEVICE_TYPES "tablet;2in1")
+```
+
+A bundle that lists `phone` in `module.json5`'s `deviceTypes` is treated as a
+phone-app-on-PC compatibility case, and in that mode the platform's `window.restore()` fails
+([QTBUG-148467](https://bugreports.qt.io/browse/QTBUG-148467)). That call is not incidental:
+Qt implements `hide()`/`show()` of a top-level window as the platform's
+`minimize()`/`restore()`, and SpeedyNote switches between the Launcher and a MainWindow by
+hiding one and showing the other. With `phone` present the hide succeeds and the show does
+not, so both windows end up minimised and the app looks like it vanished.
+
+### Permissions
+
+`ohos.permission.READ_WRITE_DOCUMENTS_DIRECTORY` is declared via the target's
+`_qt_harmonyos_permissions` property. It is what makes saving work at all — the sandbox
+otherwise refuses writes to the user's Documents folder, and `QFileDialog` will happily return
+a path there that `QFile` then cannot open.
+
+Being a user-granted permission, declaring it is not enough: it must also be requested at
+runtime through `abilityAccessCtrl.requestPermissionsFromUser()`, which is ArkTS-only. That is
+what `harmony/inject-permission-request.py` patches into the generated `QAbility.ets`.
+
+### ICU sonames
+
+Qt's prebuilt `libQt6Core.so` has `DT_NEEDED` entries for versioned ICU libraries
+(`libicuuc.so.78`), while `ohos-additional-packages` ships unversioned ones (`libicuuc.so`).
+The mismatch does not fail the build; it fails at load time, and the symptom is entirely
+misleading: `libqohos.so` never loads, so the ArkTS side reports
+`TypeError: Cannot read property handleAbilityStageOnCreate of undefined`.
+
+`harmony/fix-icu-sonames.py` rewrites the `DT_NEEDED` entries and renames the staged
+libraries to match.
+
+---
+
+## Known Platform Limitations
+
+| Feature | Status | Reason |
+|---------|--------|--------|
+| CLI (`--export`, batch operations) | Not available | Qt apps are shared modules loaded by an ArkTS host, not standalone executables. The CLI sources are excluded from this build. |
+| OCR | Not available | No engine ported yet. PaddleOCR would need cross-compiling; HarmonyOS Core Vision Kit is ArkTS-only and would need a NAPI bridge. |
+| System notifications | Not implemented | Falls through to the no-op branch. Would need Notification Kit rather than `org.freedesktop.Notifications`. |
+| Single-instance | Deliberately disabled | See below. |
+| Atomic file writes | Weakened | See below. |
+| Stylus pressure/tilt | Untested | The emulator has no pen device; `uinput -S` injects generic touch events. Needs hardware. |
+
+### Q_OS_LINUX is defined
+
+Qt defines `Q_OS_LINUX` on HarmonyOS, so desktop-Linux code paths compile in unless explicitly
+excluded. Guards need `&& !defined(Q_OS_HARMONY)`. This bit `SystemNotification.cpp` (DBus),
+the CLI entry points, `ipcs`/`ipcrm` recovery, and the `SIGTERM`/`SIGINT` handlers.
+
+### Single-instance is disabled
+
+The desktop single-instance mechanism uses `QSharedMemory`, which is POSIX shared memory here.
+When the ability framework kills the app, the segment is never `shm_unlink`ed, so the next
+launch sees a live instance and exits silently — permanently. The desktop Linux recovery path
+(`ipcs`/`ipcrm`) does not apply to POSIX shm and is unavailable anyway. `isInstanceRunning()`
+and `setupSingleInstanceServer()` therefore treat HarmonyOS like Android and iOS.
+
+### `.snb` bundles: pickers and `rename()`
+
+Two separate problems, both about `.snb` being a *directory* bundle:
+
+1. The native file picker creates a zero-byte *file* at the chosen path, so `mkpath()` then
+   fails. `.snb` dialogs pass `QFileDialog::DontUseNativeDialog` on HarmonyOS to get Qt's
+   widget dialog instead, and `Document::saveBundle()` removes a zero-byte regular file if it
+   finds one.
+2. The `sharefs` layer backing the user's folders denies `rename(2)`. `QSaveFile` commits by
+   writing a temporary file and renaming it, so `commit()` fails and it deletes its temporary —
+   leaving an empty bundle. `source/platform/BundleFile.h` is a shim that is `QSaveFile`
+   everywhere else and a direct-writing `QFile` subclass on HarmonyOS. Crash-atomicity is lost
+   on this platform.
+
+### Windows and ability instances
+
+Each top-level Qt window is backed by an ability instance, and starting one requires the app to
+be in the foreground. If the app ever becomes window-less it leaves the foreground, and the
+next attempt to open a window fails and takes the process down. A `QMessageBox` shown before
+any other window does exactly that, which is why the session-restore prompt is parented to an
+already-visible Launcher (the same treatment macOS needs).
+
+---
+
+## Signing and Sideloading
+
+The HAP produced here is **unsigned**. R&D-mode emulators install it as-is.
+
+Retail HarmonyOS NEXT hardware requires a Huawei-issued debug certificate bound to the target
+device's UDID, obtained through a Huawei developer account. Once installed, sideloaded apps are
+permanent — unlike iOS, there is no seven-day expiry. Community tooling exists to automate the
+per-device certificate dance.
+
+---
+
+## Troubleshooting
+
+### `TypeError: Cannot read property handleAbilityStageOnCreate of undefined`
+
+`libqohos.so` failed to load, almost always the ICU soname mismatch. Confirm
+`fix-icu-sonames.py` ran, and check `hdc shell hilog -x | grep -i "dlopen\|cannot find"`.
+
+### `Unable to locate a Java Runtime`
+
+`JAVA_HOME` is not set and DevEco Studio is not where the script expects. Set `JAVA_HOME` or
+`DEVECO_APP`.
+
+### `harmonydeployqt: Failed to open input file`
+
+A relative `--build-dir`. The deploy step runs from inside the build directory, so relative
+paths resolve against the wrong place. The script converts it to an absolute path; if invoking
+`harmonydeployqt` by hand, do the same.
+
+### `no *-harmony-deployment-settings.json`
+
+The project used `add_executable()` instead of `qt_add_executable()`.
+
+### MuPDF not found
+
+```
+MuPDF for HarmonyOS not found. Build it with ./harmony/build-mupdf.sh
+```
+
+### App launches once, then never again
+
+The single-instance lockout described above. Should not occur in current builds; if it
+reappears, the symptom is `main()` returning 0 within milliseconds and no faultlog at all.
+
+### Nothing installs: `no device connected`
+
+Boot an emulator from DevEco's Device Manager. If `hdc list targets` prints `[Empty]` with an
+emulator visibly running, check for a second `hdc` server (`HDC_SERVER_PORT`).
+
+---
+
+## Directory Structure
+
+```
+SpeedyNote/
+├── harmony/
+│   ├── build-hap.sh                # Full pipeline: configure → build → deploy → package → run
+│   ├── build-mupdf.sh              # Cross-compile MuPDF for arm64-v8a
+│   ├── fix-icu-sonames.py          # Patch DT_NEEDED entries + rename staged ICU libraries
+│   ├── inject-permission-request.py# Add requestPermissionsFromUser() to generated QAbility.ets
+│   ├── mupdf-build/                # Built MuPDF (generated)
+│   ├── mupdf-src/                  # MuPDF source (generated)
+│   └── build-speedynote/           # CMake build dir + generated DevEco project (generated)
+├── source/
+│   ├── harmony/
+│   │   ├── HarmonyEnvironment.h    # User Documents directory via Core File Kit
+│   │   └── HarmonyEnvironment.cpp
+│   └── platform/
+│       └── BundleFile.h            # QSaveFile shim (direct write on HarmonyOS)
+└── CMakeLists.txt
+```
+
+---
+
+## Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0 | 2026-09-15 | Initial HarmonyOS port: MuPDF backend, HAP packaging, sandbox/save fixes, window management |
+
+---
+
+## See Also
+
+- [docs/private/HARMONYOS_PORT_FEASIBILITY.md](../private/HARMONYOS_PORT_FEASIBILITY.md) — porting notes, root-cause write-ups and open issues
+- [Qt for HarmonyOS](https://doc.qt.io/qt-6/harmonyos.html)
+- [MuPDF Documentation](https://mupdf.com/docs/)

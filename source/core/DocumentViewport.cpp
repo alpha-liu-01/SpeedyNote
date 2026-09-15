@@ -5003,6 +5003,37 @@ TouchGestureMode DocumentViewport::touchGestureMode() const
     return TouchGestureMode::Disabled;
 }
 
+// ============================================================================
+// Trackpad pinch: turning QNativeGestureEvent::value() into a scale factor
+// ============================================================================
+// value() for Qt::ZoomNativeGesture is not defined consistently across
+// platforms, so it has to be interpreted rather than trusted. Cocoa reports an
+// incremental *delta* (0.02 meaning "zoom in by 2%"), which is what Qt
+// documents. Qt's HarmonyOS QPA reports the *ratio* between consecutive scales
+// instead (1.02 for the same gesture), and its BeginNativeGesture carries 1.0.
+//
+// Reading a ratio as a delta is not merely inaccurate, it is destructive:
+// 1.0 + 1.045 multiplies the zoom by more than two on every event, so a pinch
+// reaches MAX_ZOOM within a few ticks, and a pinch the other way (ratio 0.96,
+// read as factor 1.96) also zooms *in*, leaving no way back. That was the
+// HarmonyOS symptom exactly.
+//
+// Sniffing the value beats an #ifdef because Qt is actively changing this: the
+// 6.12.0 beta ships the ratio, while qtbase dev already subtracts 1.0 to
+// produce a delta, so this code has to survive both. The two forms are easy to
+// separate because they cluster around different numbers -- deltas near 0,
+// ratios near 1 -- and no trackpad tick halves or doubles the scale at these
+// event rates, so 0.5 divides them with room to spare.
+static qreal zoomScaleFactorFromNativeGestureValue(qreal value)
+{
+    const qreal factor = (value > 0.5) ? value : 1.0 + value;
+
+    // Defence in depth against a future semantic change: whichever reading is
+    // right, one event may not zoom by more than 2x. Turns any later surprise
+    // into a slow drift instead of an instant jump to a zoom limit.
+    return qBound(0.5, factor, 2.0);
+}
+
 bool DocumentViewport::event(QEvent* event)
 {
     // ===== Tablet Proximity Events =====
@@ -5109,8 +5140,8 @@ bool DocumentViewport::event(QEvent* event)
         }
     }
     
-    // Handle native gesture events (macOS trackpad pinch-to-zoom).
-    // On macOS the trackpad delivers pinch as QNativeGestureEvent with
+    // Handle native gesture events (trackpad pinch-to-zoom on macOS and
+    // HarmonyOS). Both deliver pinch as QNativeGestureEvent with
     // Qt::ZoomNativeGesture, bypassing the touch handler entirely.
     // This works regardless of the TouchGestureMode setting, so trackpad
     // pinch-to-zoom is always available.
@@ -5118,8 +5149,7 @@ bool DocumentViewport::event(QEvent* event)
         auto* nge = static_cast<QNativeGestureEvent*>(event);
         
         if (nge->gestureType() == Qt::ZoomNativeGesture) {
-            // value() is the incremental scale delta (e.g. 0.02 = 2% zoom in)
-            qreal scaleFactor = 1.0 + nge->value();
+            qreal scaleFactor = zoomScaleFactorFromNativeGestureValue(nge->value());
             if (!qFuzzyCompare(scaleFactor, 1.0)) {
                 updateZoomGesture(scaleFactor, SN_NGE_POS(nge));
             }

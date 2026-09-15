@@ -55,7 +55,19 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 QT_VERSION="${QT_VERSION:-6.12.0}"
 QT_ROOT="${QT_ROOT:-${HOME}/Qt/${QT_VERSION}}"
 QT_HARMONY="${QT_ROOT}/harmonyos_arm64_v8a"
-QT_HOST="${QT_ROOT}/macos"
+
+# The host Qt supplies harmonydeployqt, and its directory is named after the host
+# platform. Probed rather than assumed so this runs on a Linux CI runner as well
+# as on a developer's Mac; override QT_HOST to skip the guessing.
+if [ -z "${QT_HOST:-}" ]; then
+    for candidate in macos gcc_64 linux_gcc_64; do
+        if [ -x "${QT_ROOT}/${candidate}/bin/harmonydeployqt" ]; then
+            QT_HOST="${QT_ROOT}/${candidate}"
+            break
+        fi
+    done
+    QT_HOST="${QT_HOST:-${QT_ROOT}/macos}"
+fi
 
 OHOS_CLT="${OHOS_CLT:-/opt/harmonyos/command-line-tools}"
 OHOS_SDK="${OHOS_CLT}/sdk/default/openharmony"
@@ -128,7 +140,17 @@ Download it from the Qt wiki and extract it there."
 # tools, and hvigor's PackageHap task shells out to a JAR. None of the three is
 # exported by default, and each failure mode is obscure -- the Java one reports
 # only "Unable to locate a Java Runtime".
-export JAVA_HOME="${JAVA_HOME:-${DEVECO_APP}/Contents/jbr/Contents/Home}"
+# DevEco's bundled JBR is the convenient JDK on a developer machine; anywhere it
+# is absent (CI, Linux) any JDK on PATH will do, so fall back to that rather than
+# insisting on DevEco Studio.
+if [ -z "${JAVA_HOME:-}" ]; then
+    if [ -d "${DEVECO_APP}/Contents/jbr/Contents/Home" ]; then
+        JAVA_HOME="${DEVECO_APP}/Contents/jbr/Contents/Home"
+    elif command -v javac >/dev/null; then
+        JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
+    fi
+fi
+export JAVA_HOME
 export PATH="${OHOS_SDK}/native/build-tools/cmake/bin:${OHOS_CLT}/tool/node/bin:${OHOS_CLT}/bin:${OHOS_SDK}/toolchains:${JAVA_HOME}/bin:${PATH}"
 
 # Drives extra-libs-dirs in the deployment settings, which is what makes
