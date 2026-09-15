@@ -1283,6 +1283,19 @@ elseif(OHOS)
     qt_add_executable(speedynote ${APP_SOURCES})
     qt_policy(SET QTP0002 NEW)
 
+    # Exclude "phone" from module.json5's deviceTypes. A bundle that lists it is
+    # treated as a phone-app-on-PC compatibility case, and in that mode the
+    # platform's window.restore() fails (QTBUG-148467). That call is not
+    # incidental to us: Qt backs hide()/show() of a top-level window with the
+    # platform's minimize()/restore(), and SpeedyNote switches between the
+    # Launcher and a MainWindow by hiding one and showing the other. With "phone"
+    # present the hide succeeds and the show does not, so both windows end up
+    # minimised and the app looks like it has vanished. Qt's own window-state
+    # tests exclude it for exactly this reason. SpeedyNote is a tablet/laptop app
+    # either way -- phones are not a supported target on any platform.
+    set_property(TARGET speedynote PROPERTY
+        QT_HARMONYOS_MODULE_DEVICE_TYPES "tablet;2in1")
+
     # module.json5 permissions. Qt builds that list from this target's own
     # _qt_harmonyos_permissions property first, then from the linked Qt modules'
     # (the target's entries win on duplicate names). harmonydeployqt turns a
