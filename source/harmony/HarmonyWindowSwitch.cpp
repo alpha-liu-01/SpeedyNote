@@ -211,26 +211,6 @@ void switchTo(QWidget* incoming, QWidget* outgoing, OutgoingPolicy policy, int f
     const bool incomingIsLauncher = isLauncher(incoming);
 
 #ifdef Q_OS_HARMONY
-    if (const QScreen* screen = incoming->screen()) {
-        const QMargins launcherSafe = outgoing && outgoing->windowHandle()
-            ? outgoing->windowHandle()->safeAreaMargins() : QMargins();
-        const QMargins incomingSafe = incoming->windowHandle()
-            ? incoming->windowHandle()->safeAreaMargins() : QMargins();
-        auto fmt = [](const QRect& r) {
-            return QString("%1x%2+%3+%4").arg(r.width()).arg(r.height()).arg(r.x()).arg(r.y());
-        };
-        qWarning("PROBE incomingIsLauncher=%d outGeom=%s outFrame=%s inGeom=%s inFrame=%s outSafe=%d,%d,%d,%d inSafe=%d,%d,%d,%d",
-                 int(incomingIsLauncher),
-                 qPrintable(outgoing ? fmt(outgoing->geometry()) : QString("none")),
-                 qPrintable(outgoing ? fmt(outgoing->frameGeometry()) : QString("none")),
-                 qPrintable(fmt(incoming->geometry())),
-                 qPrintable(fmt(incoming->frameGeometry())),
-                 launcherSafe.left(), launcherSafe.top(), launcherSafe.right(), launcherSafe.bottom(),
-                 incomingSafe.left(), incomingSafe.top(), incomingSafe.right(), incomingSafe.bottom());
-    }
-#endif
-
-#ifdef Q_OS_HARMONY
     // Normally redundant: with the Launcher owning the only ability instance, that
     // instance is always foreground and the raise above is the whole switch. It
     // matters when adoptAsLauncherSubWindow() could not tag a MainWindow and the
