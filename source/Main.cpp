@@ -590,12 +590,12 @@ static Launcher* createLauncherForColdStart()
     auto* launcher = new Launcher();
     launcher->setAttribute(Qt::WA_DeleteOnClose);
     connectLauncherSignals(launcher);
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_HARMONY)
     launcher->show();
-    // Exclude user-input events: at this point in main() the only events
-    // we want to process are the ones that realize the NSWindow / activate
-    // NSApp. We don't want the launcher to spuriously react to a stray
-    // mouse or key event delivered during the priming tick.
+    // Exclude user-input events: at this point in main() the only events we
+    // want to process are the ones that realize the native window (and on
+    // macOS activate NSApp). We don't want the launcher to spuriously react
+    // to a stray mouse or key event delivered during the priming tick.
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 #endif
     return launcher;
@@ -612,6 +612,12 @@ static void showMainWindowAtColdStart(MainWindow* w, Launcher* launcher)
     w->preserveWindowState(launcher, /*existing*/false);
     w->bringToFront();
     launcher->hide();
+#elif defined(Q_OS_HARMONY)
+    // The launcher is already visible here, so it has to be dismissed once the
+    // MainWindow takes over. Order matters: show first, hide second, so the app
+    // is never left without a window. See createLauncherForColdStart.
+    w->show();
+    launcher->hide();
 #else
     (void)launcher;
     w->show();
@@ -619,11 +625,11 @@ static void showMainWindowAtColdStart(MainWindow* w, Launcher* launcher)
 }
 
 // Make Launcher visible at cold start for branches that want to land on
-// the Launcher. On macOS the Launcher is already visible from
+// the Launcher. On macOS and HarmonyOS the Launcher is already visible from
 // createLauncherForColdStart(), so this is a no-op there.
 static void showLauncherAtColdStart(Launcher* launcher)
 {
-#ifndef Q_OS_MACOS
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_HARMONY)
     launcher->show();
 #else
     (void)launcher;
@@ -1136,7 +1142,18 @@ int main(int argc, char* argv[])
     // sheet/window-modal dialog. On other platforms the launcher is
     // hidden, so a hidden parent would weaken modality - keep nullptr
     // (preserves the original application-modal behavior).
-#ifdef Q_OS_MACOS
+    //
+    // HarmonyOS has no choice in the matter: a parentless prompt here is fatal,
+    // not merely less modal. Every top-level Qt window is backed by an ability
+    // instance, and starting one requires the app to be in the foreground --
+    // which it stops being the moment it has no window at all. So a prompt shown
+    // before any window exists would take the app to the background when it
+    // closed, and the show() immediately after would abort inside libqohos.so
+    // with "Failed to start the Ability with instance id: 1", killing the app
+    // whichever button was pressed. The launcher is therefore shown up front
+    // (see createLauncherForColdStart) and owns this dialog, which also suits a
+    // platform that downgrades Qt::ApplicationModal to WindowModal anyway.
+#if defined(Q_OS_MACOS) || defined(Q_OS_HARMONY)
     QWidget* sessionPromptParent = launcher;
 #else
     QWidget* sessionPromptParent = nullptr;
