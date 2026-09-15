@@ -115,6 +115,8 @@ protected:
 #include "harmony/HarmonyEnvironment.h"
 #endif
 
+#include "harmony/HarmonyWindowSwitch.h"
+
 #ifdef Q_OS_ANDROID
 
 static void logAndroidPaths()
@@ -613,11 +615,12 @@ static void showMainWindowAtColdStart(MainWindow* w, Launcher* launcher)
     w->bringToFront();
     launcher->hide();
 #elif defined(Q_OS_HARMONY)
-    // The launcher is already visible here, so it has to be dismissed once the
-    // MainWindow takes over. Order matters: show first, hide second, so the app
-    // is never left without a window. See createLauncherForColdStart.
-    w->show();
-    launcher->hide();
+    // The launcher is already visible here (see createLauncherForColdStart) and
+    // stays that way: hide() would minimise its ability instance, and the paired
+    // restore() is broken, so the user's first toggle back to the Launcher would
+    // find nothing to restore. Raising the MainWindow over it is the whole
+    // dismissal. See HarmonyWindowSwitch.
+    HarmonyWindowSwitch::switchTo(/*incoming*/w, /*outgoing*/launcher);
 #else
     (void)launcher;
     w->show();

@@ -22,6 +22,7 @@
 #include "../../batch/ExportQueueManager.h"
 #include "../../android/AndroidShareHelper.h"
 #include "../../platform/SystemNotification.h"
+#include "../../harmony/HarmonyWindowSwitch.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -333,28 +334,11 @@ void Launcher::setupNavigation()
         // Find and show the existing MainWindow before hiding the Launcher
         MainWindow* mainWindow = MainWindow::findExistingMainWindow();
         if (mainWindow) {
-            // Clear any stale fullscreen/maximized state on the MainWindow.
-            // QWidget::setWindowState() on a hidden widget only sets the
-            // internal flag; QWindow::setWindowState() also updates the
-            // native window, ensuring decorations are properly restored.
-            mainWindow->setWindowState(Qt::WindowNoState);
-            if (QWindow* win = mainWindow->windowHandle()) {
-                win->setWindowState(Qt::WindowNoState);
-            }
-            
-            if (isMaximized()) {
-                mainWindow->showMaximized();
-            } else if (isFullScreen()) {
-                mainWindow->showFullScreen();
-            } else {
-                const QPoint srcPos  = pos();
-                const QSize  srcSize = size();
-                mainWindow->show();
-                mainWindow->move(srcPos);
-                mainWindow->resize(srcSize);
-            }
-            mainWindow->raise();
-            mainWindow->activateWindow();
+            // hideWithAnimation() below dismisses this window with its own
+            // fade-out, so switchTo() must not hide it.
+            HarmonyWindowSwitch::switchTo(
+                /*incoming*/mainWindow, /*outgoing*/this,
+                HarmonyWindowSwitch::OutgoingPolicy::LeaveToCaller);
         }
         hideWithAnimation();
     });
@@ -693,6 +677,17 @@ void Launcher::showWithAnimation()
 
 void Launcher::hideWithAnimation()
 {
+    HarmonyWindowSwitch::setLauncherInFront(false);
+
+    if (HarmonyWindowSwitch::mustStayResident(this)) {
+        // On HarmonyOS the Launcher owns the app's only ability instance, and
+        // hide() would minimise it with nothing able to restore it, so the
+        // Launcher stays resident behind whichever MainWindow was just raised
+        // over it. Fading it out is skipped too: a resident window left at
+        // opacity 0 would come back invisible on the next switch.
+        return;
+    }
+
     m_fadeAnimation->stop();
     m_fadeAnimation->setStartValue(1.0);
     m_fadeAnimation->setEndValue(0.0);
@@ -759,17 +754,32 @@ void Launcher::resizeEvent(QResizeEvent* event)
     setNavigationCompact(shouldBeCompact);
 }
 
+// A MainWindow may have been created or destroyed since the Launcher was last in
+// front, so the Return button cannot be set once and left alone.
+void Launcher::updateReturnButtonVisibility()
+{
+    if (m_returnBtn) {
+        m_returnBtn->setVisible(MainWindow::findExistingMainWindow() != nullptr);
+    }
+}
+
+void Launcher::changeEvent(QEvent* event)
+{
+    QMainWindow::changeEvent(event);
+
+    // Coming back to the front is not always a show(): on HarmonyOS the Launcher
+    // owns the app's ability instance and is never hidden, so switching to it only
+    // raises it and showEvent() below never runs. Activation covers both.
+    if (event->type() == QEvent::ActivationChange && isActiveWindow()) {
+        updateReturnButtonVisibility();
+    }
+}
+
 void Launcher::showEvent(QShowEvent* event)
 {
     QMainWindow::showEvent(event);
     
-    // Update Return button visibility based on whether MainWindow exists
-    // This must be checked each time the Launcher is shown because MainWindow
-    // may have been created/destroyed since the Launcher was last visible
-    bool hasMainWindow = (MainWindow::findExistingMainWindow() != nullptr);
-    if (m_returnBtn) {
-        m_returnBtn->setVisible(hasMainWindow);
-    }
+    updateReturnButtonVisibility();
     
     // Refresh timeline if date has changed since last shown
     // This handles scenarios like system sleep/hibernate during midnight

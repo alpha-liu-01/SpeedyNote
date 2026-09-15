@@ -124,6 +124,8 @@
 #include "harmony/HarmonyEnvironment.h"
 #endif
 
+#include "harmony/HarmonyWindowSwitch.h"
+
 // ============================================================================
 // Dialog options for .snb bundles
 // ============================================================================
@@ -212,6 +214,13 @@ MainWindow::MainWindow(QWidget *parent)
     // from updateWindowTitle() at the end of the ctor and on every active-
     // viewport / current-tab change thereafter.
     setWindowTitle(QStringLiteral("SpeedyNote"));
+
+    // Before anything can realise this window: on HarmonyOS it has to be a
+    // sub-window of the Launcher rather than an ability instance of its own, or
+    // the switch between the two becomes unrecoverable. Done here rather than at
+    // the four call sites that construct a MainWindow so that none of them can
+    // forget. A no-op off HarmonyOS.
+    HarmonyWindowSwitch::adoptAsLauncherSubWindow(this);
 
     // Phase 3.1: Always using new DocumentViewport architecture
 
@@ -8170,8 +8179,11 @@ void MainWindow::preserveWindowState(QWidget* sourceWindow, bool isExistingWindo
         } else if (sourceWindow->isFullScreen()) {
             showFullScreen();
         } else {
-            resize(sourceWindow->size());
-            move(sourceWindow->pos());
+            const QRect target = HarmonyWindowSwitch::targetGeometry(this, sourceWindow);
+            if (target.isValid()) {
+                resize(target.size());
+                move(target.topLeft());
+            }
             show();
         }
     }
@@ -8566,114 +8578,17 @@ void MainWindow::toggleLauncher() {
         return;
     }
     
-    // Animation duration in milliseconds
-    const int fadeDuration = 150;
-    
-    if (launcher->isVisible()) {
+    if (HarmonyWindowSwitch::launcherInFront(launcher)) {
         // ========== LAUNCHER → MAINWINDOW ==========
-        // Read Launcher state BEFORE we reset it below.
-        const bool launcherMaximized  = launcher->isMaximized();
-        const bool launcherFullScreen = launcher->isFullScreen();
-        const QPoint launcherPos  = launcher->pos();
-        const QSize  launcherSize = launcher->size();
-        
-        // Show MainWindow in the Launcher's window state.
-        // Reset stale native state on the hidden MainWindow (same reasoning
-        // as the Launcher reset in the other branch — QWidget skips the
-        // platform update for hidden widgets, but QWindow does not).
-        setWindowState(Qt::WindowNoState);
-        if (QWindow* win = windowHandle()) {
-            win->setWindowState(Qt::WindowNoState);
-        }
-        setWindowOpacity(0.0);
-        if (launcherMaximized) {
-            showMaximized();
-        } else if (launcherFullScreen) {
-            showFullScreen();
-        } else {
-            showNormal();
-            // Set geometry AFTER show so our move()/resize() has the final
-            // word.  On Windows, ShowWindow(SW_SHOWNORMAL) can adjust the
-            // position using stale placement data; applying geometry after
-            // the show overrides that.  The window is at opacity 0, so the
-            // brief intermediate position is invisible.
-            move(launcherPos);
-            resize(launcherSize);
-        }
-        raise();
-        activateWindow();
+        HarmonyWindowSwitch::switchTo(/*incoming*/this, /*outgoing*/launcher);
         
         // Sync fullscreen button with the actual window state
         if (m_navigationBar) {
             m_navigationBar->setFullscreenChecked(isFullScreen());
         }
-        
-        // Restore Launcher to normal windowed state BEFORE hiding.
-        // On Windows, hide() preserves the native window's fullscreen styling
-        // (no decorations, full-screen geometry).  Qt's setWindowState() on a
-        // *hidden* widget only updates the internal state variable — it skips
-        // the platform-level update because isVisible() is false.  That means
-        // a later showNormal() finds the native window still carrying stale
-        // fullscreen styles, producing a frameless or full-screen window.
-        // Transitioning while visible (behind MainWindow, opacity 0) forces the
-        // window manager to properly restore the window frame.
-        launcher->setWindowOpacity(0.0);
-        if (launcher->windowState() != Qt::WindowNoState) {
-            launcher->setWindowState(Qt::WindowNoState);
-        }
-        launcher->hide();
-        launcher->setWindowOpacity(1.0);  // Reset for next time
-        
-        // Fade MainWindow in
-        auto* fadeIn = new QPropertyAnimation(this, "windowOpacity");
-        fadeIn->setDuration(fadeDuration);
-        fadeIn->setStartValue(0.0);
-        fadeIn->setEndValue(1.0);
-        fadeIn->setEasingCurve(QEasingCurve::OutCubic);
-        fadeIn->start(QAbstractAnimation::DeleteWhenStopped);
-        
     } else {
         // ========== MAINWINDOW → LAUNCHER ==========
-        const bool srcMaximized  = isMaximized();
-        const bool srcFullScreen = isFullScreen();
-        const QPoint srcPos  = pos();
-        const QSize  srcSize = size();
-        
-        // Show Launcher in MainWindow's window state.
-        // Reset stale fullscreen/maximized state at BOTH the QWidget and
-        // QWindow level.  QWidget::setWindowState() on a hidden widget only
-        // updates the internal flag — it skips the platform update because
-        // isVisible() is false.  QWindow::setWindowState() has no such guard,
-        // so calling it on windowHandle() forces the native window to restore
-        // normal styling (decorations, geometry) even while hidden.
-        launcher->setWindowState(Qt::WindowNoState);
-        if (QWindow* win = launcher->windowHandle()) {
-            win->setWindowState(Qt::WindowNoState);
-        }
-        launcher->setWindowOpacity(0.0);
-        if (srcMaximized) {
-            launcher->showMaximized();
-        } else if (srcFullScreen) {
-            launcher->showFullScreen();
-        } else {
-            launcher->show();
-            launcher->move(srcPos);
-            launcher->resize(srcSize);
-        }
-        launcher->raise();
-        launcher->activateWindow();
-        
-        // Hide MainWindow immediately (no flicker since launcher is now on top)
-        hide();
-        setWindowOpacity(1.0);  // Reset for next time
-        
-        // Fade launcher in
-        auto* fadeIn = new QPropertyAnimation(launcher, "windowOpacity");
-        fadeIn->setDuration(fadeDuration);
-        fadeIn->setStartValue(0.0);
-        fadeIn->setEndValue(1.0);
-        fadeIn->setEasingCurve(QEasingCurve::OutCubic);
-        fadeIn->start(QAbstractAnimation::DeleteWhenStopped);
+        HarmonyWindowSwitch::switchTo(/*incoming*/launcher, /*outgoing*/this);
     }
 }
 
@@ -9963,6 +9878,10 @@ bool MainWindow::switchToDocument(const QString& bundlePath)
 
 void MainWindow::bringToFront()
 {
+    // The canonical "MainWindow comes forward" entry point, so it is where the
+    // switch direction is recorded for the paths that do not call switchTo().
+    HarmonyWindowSwitch::setLauncherInFront(false);
+
     // Phase P.4.5: Fade in if window was hidden
     bool wasHidden = !isVisible();
     

@@ -581,7 +581,11 @@ elseif(OHOS)
     # No DBus: notifications go through Notification Kit rather than
     # org.freedesktop.Notifications. No Test either — the golden-image tests are
     # desktop-only.
-    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg)
+    #
+    # HarmonyExtrasPrivate has no public counterpart -- Qt ships the whole module
+    # as private API. HarmonyWindowSwitch needs its startAbility() to foreground
+    # the Launcher's ability instance; see the comment in HarmonyWindowSwitch.cpp.
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg CorePrivate GuiPrivate HarmonyExtrasPrivate)
 
     # MuPDF is cross-compiled separately by harmony/build-mupdf.sh. Only
     # arm64-v8a exists, so unlike Android there is no per-ABI directory.
@@ -1137,8 +1141,12 @@ if(OHOS)
 endif()
 
 # Cross-platform utilities (Step 3.11: System notifications)
+# HarmonyWindowSwitch lives under source/harmony/ because HarmonyOS is the only
+# reason it exists, but it carries the shared Launcher/MainWindow switch for every
+# platform, so it is built unconditionally.
 set(PLATFORM_SOURCES
     source/platform/SystemNotification.cpp
+    source/harmony/HarmonyWindowSwitch.cpp
 )
 
 # Desktop-only sources (tests require Qt::Test, debug builds only)
@@ -1283,18 +1291,13 @@ elseif(OHOS)
     qt_add_executable(speedynote ${APP_SOURCES})
     qt_policy(SET QTP0002 NEW)
 
-    # Exclude "phone" from module.json5's deviceTypes. A bundle that lists it is
-    # treated as a phone-app-on-PC compatibility case, and in that mode the
-    # platform's window.restore() fails (QTBUG-148467). That call is not
-    # incidental to us: Qt backs hide()/show() of a top-level window with the
-    # platform's minimize()/restore(), and SpeedyNote switches between the
-    # Launcher and a MainWindow by hiding one and showing the other. With "phone"
-    # present the hide succeeds and the show does not, so both windows end up
-    # minimised and the app looks like it has vanished. Qt's own window-state
-    # tests exclude it for exactly this reason. SpeedyNote is a tablet/laptop app
-    # either way -- phones are not a supported target on any platform.
-    set_property(TARGET speedynote PROPERTY
-        QT_HARMONYOS_MODULE_DEVICE_TYPES "tablet;2in1")
+    # deviceTypes is deliberately left at Qt's default (phone, tablet, 2in1).
+    # Restricting it to "tablet;2in1" crashed the app on a tablet, and it would not
+    # buy anything: the restriction was meant to make window.restore() work
+    # (QTBUG-148467), but on a tablet that call is refused for being off a PC
+    # ("Restore: This is not PC or PcAppInPad, not supported") no matter what the
+    # manifest declares. The Launcher/MainWindow switch avoids restore() instead,
+    # by never minimising a window. See HarmonyWindowSwitch.
 
     # App identity. Without these the HAP ships as Qt's template
     # (org.qtproject.example.speedynote, vendor "example", label "speedynote"),
@@ -1500,6 +1503,7 @@ elseif(OHOS)
     # there is no system z here -- unlike Android, which links it explicitly.
     target_link_libraries(speedynote PRIVATE
         Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent Qt${QT_VERSION_MAJOR}::Xml Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Svg
+        Qt${QT_VERSION_MAJOR}::CorePrivate Qt${QT_VERSION_MAJOR}::GuiPrivate Qt${QT_VERSION_MAJOR}::HarmonyExtrasPrivate
         ${MUPDF_LIBRARIES}
         # Core File Kit: OH_Environment_GetUserDocumentDir() and friends, used by
         # source/harmony/HarmonyEnvironment.cpp to find the user's real Documents
