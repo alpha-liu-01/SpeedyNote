@@ -4,6 +4,7 @@
 #include "TimelineModel.h"
 #include "TimelineDelegate.h"
 #include "TimelineListView.h"
+#include "../MenuPopup.h"
 #include "NotebookCardDelegate.h"
 #include "StarredView.h"
 #include "SearchView.h"
@@ -1072,7 +1073,7 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
         deleteNotebooks({bundlePath});
     });
     
-    menu.exec(globalPos);
+    execMenuAt(menu, globalPos);
 }
 
 void Launcher::showFolderContextMenu(const QString& folderName, const QPoint& globalPos)
@@ -1119,7 +1120,7 @@ void Launcher::showFolderContextMenu(const QString& folderName, const QPoint& gl
         }
     });
     
-    menu.exec(globalPos);
+    execMenuAt(menu, globalPos);
 }
 
 bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
@@ -1627,7 +1628,7 @@ void Launcher::showTimelineOverflowMenu()
     // Position menu relative to overflow button
     QPoint menuPos = m_timelineOverflowMenuButton->mapToGlobal(
         QPoint(m_timelineOverflowMenuButton->width(), m_timelineOverflowMenuButton->height()));
-    menu.exec(menuPos);
+    execMenuAt(menu, menuPos);
 }
 
 void Launcher::onTimelineSelectModeChanged(bool active)

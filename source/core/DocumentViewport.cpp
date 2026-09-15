@@ -10,6 +10,7 @@
 #include "TouchGestureHandler.h"
 // Note: ShortcutManager.h no longer needed here - all shortcuts handled by MainWindow
 #include "MarkdownNote.h"           // Phase M.2: For markdown note creation
+#include "../ui/MenuPopup.h"
 #include "../layers/VectorLayer.h"
 #include "../pdf/PdfProvider.h"     // Use abstract interface, not concrete impl
 #include "../objects/ImageObject.h"
@@ -3972,7 +3973,7 @@ void DocumentViewport::showObjectContextMenu(const QPoint& globalPos)
     QMenu menu(this);
     ThemeColors::styleMenu(&menu, m_isDarkMode);
     populateObjectContextMenu(menu);
-    menu.exec(globalPos);
+    execMenuAt(menu, globalPos);
 }
 
 void DocumentViewport::populateObjectContextMenu(QMenu& menu)
@@ -4042,7 +4043,7 @@ void DocumentViewport::showTextSelectionContextMenu(const QPoint& globalPos)
     QMenu menu(this);
     ThemeColors::styleMenu(&menu, m_isDarkMode);
     populateTextSelectionContextMenu(menu);
-    menu.exec(globalPos);
+    execMenuAt(menu, globalPos);
 }
 
 void DocumentViewport::populateTextSelectionContextMenu(QMenu& menu)
@@ -11223,7 +11224,7 @@ void DocumentViewport::addLinkToSlot(int slotIndex)
     QAction* urlAction = menu.addAction(tr("Add URL Link"));
     QAction* mdAction = menu.addAction(tr("Add Markdown Note"));
     
-    QAction* selected = menu.exec(QCursor::pos());
+    QAction* selected = execMenuAt(menu, QCursor::pos());
     
     if (selected && selected == startAction) {
         beginPositionLinkPairing(link, slotIndex);

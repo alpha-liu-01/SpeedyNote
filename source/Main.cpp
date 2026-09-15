@@ -108,8 +108,10 @@ protected:
 #endif
 
 #ifdef Q_OS_HARMONY
+#include "ui/MenuPopup.h"
 #include <QDialog>
 #include <QEvent>
+#include <QMenu>
 #include <QScreen>
 #include <QTimer>
 #include <QWindow>
@@ -253,6 +255,63 @@ protected:
         default:
             break;
         }
+
+        return QObject::eventFilter(obj, event);
+    }
+};
+
+/**
+ * @brief Event filter that places submenus on HarmonyOS.
+ *
+ * Menus this app opens itself go through execMenuAt(), which hands the platform the
+ * position again once the window is up -- see MenuPopup.cpp for why that is necessary. A
+ * submenu has no such call site: QMenu opens it, so the position it should get has to be
+ * worked out here, from the item it belongs to. Without this the submenu appears in the
+ * top-left corner and takes the whole menu chain down with it when it closes itself.
+ */
+class HarmonySubmenuPlacement : public QObject {
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override
+    {
+        if (event->type() != QEvent::Show) {
+            return QObject::eventFilter(obj, event);
+        }
+
+        auto* submenu = qobject_cast<QMenu*>(obj);
+        if (submenu == nullptr) {
+            return QObject::eventFilter(obj, event);
+        }
+        qWarning("SPROBE show menu=%p parent=%s(%p) visible=%d active=%p",
+                 (void*)submenu,
+                 submenu->parentWidget() != nullptr
+                     ? submenu->parentWidget()->metaObject()->className() : "none",
+                 (void*)submenu->parentWidget(),
+                 submenu->parentWidget() != nullptr ? int(submenu->parentWidget()->isVisible()) : -1,
+                 (void*)(qobject_cast<QMenu*>(submenu->parentWidget()) != nullptr
+                     ? qobject_cast<QMenu*>(submenu->parentWidget())->activeAction() : nullptr));
+
+        // The parent menu, and only if it is opening this menu for the item the user is on
+        // -- which is both what identifies a submenu and where its position comes from.
+        auto* parentMenu = qobject_cast<QMenu*>(submenu->parentWidget());
+        if (parentMenu == nullptr || !parentMenu->isVisible()) {
+            return QObject::eventFilter(obj, event);
+        }
+        QAction* item = parentMenu->activeAction();
+        if (item == nullptr || item->menu() != submenu) {
+            return QObject::eventFilter(obj, event);
+        }
+
+        // Alongside the item, its top edge level with the item's, which is where QMenu
+        // would have opened it.
+        const QRect itemRect = parentMenu->actionGeometry(item);
+        qWarning("SPROBE placing submenu at %d,%d size %dx%d",
+                 parentMenu->mapToGlobal(itemRect.topRight()).x(),
+                 parentMenu->mapToGlobal(itemRect.topRight()).y(),
+                 submenu->sizeHint().width(), submenu->sizeHint().height());
+        placeHarmonyMenu(*submenu, parentMenu->mapToGlobal(itemRect.topRight()));
 
         return QObject::eventFilter(obj, event);
     }
@@ -1186,6 +1245,7 @@ int main(int argc, char* argv[])
 #ifdef Q_OS_HARMONY
     app.installEventFilter(new HarmonyDialogCentring(&app));
     app.installEventFilter(new HarmonyModalKeeper(&app));
+    app.installEventFilter(new HarmonySubmenuPlacement(&app));
 #endif
 
     QTranslator translator;

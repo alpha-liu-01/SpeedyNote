@@ -56,6 +56,7 @@
 #include "core/ToolType.h" // Include the header file where ToolType is defined
 #include "ui/SplitViewManager.h"
 #include "ui/TabManager.h"
+#include "ui/MenuPopup.h"
 #include "ui/TabBar.h"
 #include <QFileDialog>
 #include <QDateTime>
@@ -8626,12 +8627,10 @@ void MainWindow::showAddMenu() {
     
     // Position menu below the add button
     QWidget* addButton = m_navigationBar->addButton();
-    if (addButton) {
-        QPoint buttonPos = addButton->mapToGlobal(QPoint(0, addButton->height()));
-        menu.exec(buttonPos);
-    } else {
-        menu.exec(QCursor::pos());
-    }
+    const QPoint pos = addButton != nullptr
+        ? addButton->mapToGlobal(QPoint(0, addButton->height()))
+        : QCursor::pos();
+    execMenuAt(menu, pos);
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event) {

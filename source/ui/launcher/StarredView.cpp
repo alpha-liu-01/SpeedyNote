@@ -4,6 +4,7 @@
 #include "NotebookCardDelegate.h"
 #include "FolderHeaderDelegate.h"
 #include "FolderPickerDialog.h"
+#include "../MenuPopup.h"
 #include "../ThemeColors.h"
 #include "../../core/NotebookLibrary.h"
 
@@ -481,7 +482,7 @@ void StarredView::showOverflowMenu()
     // Show menu below the overflow button
     QPoint pos = m_overflowMenuButton->mapToGlobal(
         QPoint(m_overflowMenuButton->width(), m_overflowMenuButton->height()));
-    menu.exec(pos);
+    execMenuAt(menu, pos);
 }
 
 void StarredView::onSelectModeChanged(bool active)
