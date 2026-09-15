@@ -232,6 +232,7 @@ libraries to match.
 | Atomic file writes | Weakened | See below. |
 | Fullscreen | Not honoured | The platform ignores `showFullScreen()` for the ability's main window and its sub-windows alike. The nav-bar button changes Qt's window state and nothing on screen. |
 | Dialog placement | Worked around | Dialogs used to open in the top-left corner with their titles behind the status bar. `HarmonyDialogCentring` in `Main.cpp` now centres them; see below before touching window geometry. |
+| Modal z-order | Worked around | The platform lets a tap outside a modal dialog raise the window the dialog blocks over it, leaving the app unresponsive with the dialog buried. `HarmonyModalKeeper` in `Main.cpp` raises it back; see below. |
 | Stylus pressure/tilt | Untested | The emulator has no pen device; `uinput -S` injects generic touch events. Needs hardware. |
 
 ### Q_OS_LINUX is defined
@@ -311,24 +312,53 @@ because it moves itself in its constructor and so still has `WA_Moved` set when 
 created.
 
 `HarmonyDialogCentring` in `source/Main.cpp` centres the rest. Placing a window that already
-exists is harder than it sounds, and the two things it has to get right are worth knowing before
-touching it:
+exists is harder than it sounds, and the three things it has to get right are worth knowing
+before touching it:
 
-- **The platform reads a submitted geometry as a frame rect where Qt means a client rect**, and
-  reports the result back the same way round. A window therefore lands one frame margin above the
-  position asked for and one margin taller than the size asked for, and the filter subtracts both
-  in advance. Submitting the client rect unchanged is not a near miss: the size comes back a
-  margin larger, that is a resize, the resize triggers another placement, and the dialog walks
-  down the screen growing by the height of its title bar until it fills it.
+- **Only `QWindow::setGeometry()` moves a dialog.** `QWidget::move()`, `QWidget::resize()` and
+  `QWidget::setGeometry()` all arrive as a size alone: the window is resized and left exactly
+  where it was, whatever the timing — before the show, immediately after it, or a frame later
+  from a queued call. A MainWindow looks like a counter-example, but `HarmonyWindowSwitch` only
+  ever asks one to sit at the position it already has.
+- **The dialog window has to be frameless.** With a frame the platform places the window one
+  frame margin (37px, the title bar height) away from the rect submitted and — the part that
+  actually hurts — the QPA goes on mapping touches from the rect it was given, so the dialog
+  draws in one place and answers taps a title bar lower. The filter sets
+  `Qt::FramelessWindowHint` on `QEvent::ChildAdded`, which is the last event to arrive before
+  `QDialog` creates its window and so the last chance to change the flag without recreating it.
+  Nothing is given up: the platform draws no decoration on these sub-windows, and that margin
+  only ever existed in the geometry arithmetic.
 - **The position has to be re-stated after the show.** A dialog that asked for less room than its
-  layout needs is resized on the first layout pass afterwards, and the platform returns the
-  window to the origin as it applies that size. The filter runs on `Move` and `Resize` as well as
+  layout needs is resized on the first layout pass afterwards, and the position has to be
+  reasserted for the size it ends up with. The filter runs on `Move` and `Resize` as well as
   `Show` for that reason, and converges because it only ever submits a geometry the window does
   not already have.
 
-`QWidget::move()` on a realised window is silently ignored here, so it is only useful before the
-platform window exists. Menus and tooltips are unaffected by any of this — they are given an
-explicit position when they open, and the filter skips anything with `WA_Moved` set in any case.
+Menus and tooltips are unaffected by any of this — they are given an explicit position when they
+open, and the filter skips anything with `WA_Moved` set in any case.
+
+### Modal dialogs are not kept in front
+
+The platform does not enforce modality in the z-order — it has already downgraded
+`Qt::ApplicationModal` to `Qt::WindowModal`. A tap outside an open dialog raises the window that
+dialog blocks over the top of it: the dialog drops from `ZOrd` 104 to 103 and the fullscreen
+MainWindow takes 104, keeping its geometry and its modality but disappearing from view. Qt's
+modal event loop then discards every press that lands on the window now in front, so the app
+looks frozen with no dialog to be seen and nothing wrong with either window.
+
+Qt is told almost none of this, which is why `HarmonyModalKeeper` in `source/Main.cpp` works from
+two events rather than one:
+
+- `WindowDeactivate` on the dialog itself. The window that came forward is never activated —
+  Qt's own modality is what blocks it — so the dialog's own deactivation is the whole report.
+- `Hide` on any modal. A dialog closing over another one is reported to neither of them:
+  dismissing the colour picker opened from the settings dialog leaves the settings dialog at
+  whatever z-order a tap outside pushed it down to, without so much as a `WindowActivate`.
+
+Both queue a raise of `QApplication::activeModalWidget()`. That is the *topmost* modal, so a
+nested dialog activating itself is left alone instead of the two fighting over the z-order. The
+raise is skipped while the app is in the background, because `raise()` on a sub-window goes to
+the top of the whole app and would drag it back into view.
 
 ---
 

@@ -110,8 +110,6 @@ protected:
 #ifdef Q_OS_HARMONY
 #include <QDialog>
 #include <QEvent>
-#include <QMouseEvent>
-#include <QPointer>
 #include <QScreen>
 #include <QTimer>
 #include <QWindow>
@@ -195,18 +193,18 @@ static void centreHarmonyDialog(QDialog* dialog)
  * QWindowPrivate::positionAutomatic is false, and only an explicit move() or
  * setGeometry() clears that: QWidget::create() positions the native window if
  * Qt::WA_Moved is set and merely resizes it otherwise. QDialog does centre
- * itself, through adjustPosition() in QDialog::setVisible(), but then clears
- * WA_Moved again -- "not really an explicit position" -- so no position is ever
- * submitted and every dialog lands in the top-left corner with its title behind
- * the status bar. Qt believes it is centred all the while, so nothing in the app
- * can notice.
+ * itself, through adjustPosition() in its showEvent(), but then clears WA_Moved
+ * again -- "not really an explicit position" -- so no position is ever submitted
+ * and every dialog lands in the top-left corner with its title behind the status
+ * bar. Qt believes it is centred all the while, so nothing in the app can notice.
  *
  * BatchExportDialog is the exception that gives the game away: it moves itself in
  * its constructor, before the native window exists, so WA_Moved is still set when
  * create() runs and the position goes out with the window. That is the easy half
- * of what this filter does. The hard half is that a position submitted after the
- * window exists has to survive the platform's own idea of the geometry, which
- * centreHarmonyDialog() describes.
+ * of what this filter does. The hard half is that once the window exists a
+ * position can only be submitted through QWindow, and that only lands where it is
+ * asked to -- and only keeps the dialog clickable where it is drawn -- if the
+ * window has no frame, which is why the flag is dropped before it is created.
  */
 class HarmonyDialogCentring : public QObject {
 public:
@@ -215,39 +213,6 @@ public:
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override
     {
-        if (auto* widget = qobject_cast<QWidget*>(obj); widget != nullptr) {
-            if (event->type() == QEvent::MouseButtonPress) {
-                auto* mouse = static_cast<QMouseEvent*>(event);
-                const QWidget* win = widget->window();
-                qWarning("PROBE press on=%s global=%.0f,%.0f local=%.0f,%.0f"
-                         "  win=%s %d,%d %dx%d",
-                         widget->metaObject()->className(),
-                         mouse->globalPosition().x(), mouse->globalPosition().y(),
-                         mouse->position().x(), mouse->position().y(),
-                         win->metaObject()->className(),
-                         win->geometry().x(), win->geometry().y(),
-                         win->geometry().width(), win->geometry().height());
-            }
-
-            if (widget->isWindow()) {
-                switch (event->type()) {
-                case QEvent::WindowActivate:
-                case QEvent::WindowDeactivate:
-                case QEvent::ActivationChange: {
-                    QWidget* modal = QApplication::activeModalWidget();
-                    qWarning("PROBE ev=%d on=%s active=%s modal=%s",
-                             int(event->type()), widget->metaObject()->className(),
-                             QApplication::activeWindow() != nullptr
-                                 ? QApplication::activeWindow()->metaObject()->className() : "none",
-                             modal != nullptr ? modal->metaObject()->className() : "none");
-                    break;
-                }
-                default:
-                    break;
-                }
-            }
-        }
-
         auto* dialog = qobject_cast<QDialog*>(obj);
         if (dialog == nullptr || !dialog->isWindow()) {
             return QObject::eventFilter(obj, event);
@@ -293,20 +258,47 @@ protected:
     }
 };
 
+// Put the dialog that is currently taking input back in front of everything else.
+// Queued from the filter below rather than run inside event delivery: raising a window
+// while its own deactivation is still being delivered asks the platform to undo what it
+// is in the middle of doing, and waiting also means the modal is read after Qt has
+// finished bookkeeping, so a dialog that was on its way out is gone by now and a dialog
+// that was underneath one has already inherited the role.
+static void restoreHarmonyActiveModal()
+{
+    QWidget* modal = QApplication::activeModalWidget();
+    if (modal == nullptr || !modal->isVisible()) {
+        return;
+    }
+    // Not while the app is in the background: a dialog losing activation because the
+    // user left the app is not the case this is here for, and raise() on a sub-window
+    // goes to the top of the whole app, which would drag it back into view.
+    if (QGuiApplication::applicationState() != Qt::ApplicationActive) {
+        return;
+    }
+    modal->raise();
+    modal->activateWindow();
+}
+
 /**
  * @brief Event filter that keeps a modal dialog in front of the windows it blocks.
  *
  * The platform does not enforce modality in the z-order. A tap outside an open dialog
  * raises the window under it -- the dialog drops from ZOrd 104 to 103 and the fullscreen
- * MainWindow it blocks takes 104 -- so the dialog is buried while keeping its geometry
- * and its modality. Qt's modal event loop then discards every press that lands on the
- * window now in front, and with the dialog out of sight the app reads as frozen.
+ * MainWindow it blocks takes 104 -- so the dialog ends up buried while keeping its
+ * geometry and its modality. Qt's modal event loop then discards every press that lands
+ * on the window now in front, and with the dialog out of sight the app reads as frozen.
  *
- * Almost none of that is reported to Qt. The only events that arrive are
- * WindowDeactivate on the dialog and a focus window of nullptr; the window that came
- * forward is never activated, because Qt's own modality is what blocks it. So the
- * dialog's own deactivation, with no successor taking activation, is the whole signal,
- * and putting it back in front is the response.
+ * Almost none of that is reported to Qt, which is why this has two triggers rather than
+ * one obvious one:
+ *
+ * - A tap outside sends WindowDeactivate to the dialog and sets the focus window to
+ *   nullptr. The window that came forward is never activated, because Qt's own modality
+ *   is what blocks it, so there is nothing to react to on that side.
+ * - A dialog closing over another one is reported to neither. Dismissing the colour
+ *   picker opened from the settings dialog leaves the settings dialog at the z-order it
+ *   was pushed down to, without so much as a WindowActivate, so its own hide is the only
+ *   place the dialog underneath can be rescued from.
  */
 class HarmonyModalKeeper : public QObject {
 public:
@@ -315,35 +307,30 @@ public:
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override
     {
-        if (event->type() != QEvent::WindowDeactivate) {
-            return QObject::eventFilter(obj, event);
-        }
-
         auto* widget = qobject_cast<QWidget*>(obj);
-        // Only for the topmost modal. A dialog that is losing activation to a modal of
-        // its own -- the colour picker inside the settings dialog -- is no longer the
-        // active modal by this point and is meant to stay where it is, behind the one
-        // that now is.
-        if (widget == nullptr || !widget->isWindow()
-            || widget != QApplication::activeModalWidget()) {
+        if (widget == nullptr || !widget->isWindow()) {
             return QObject::eventFilter(obj, event);
         }
 
-        // Queued, because raising a window while its own deactivation is still being
-        // delivered asks the platform to undo what it is in the middle of doing, and
-        // because it gives the conditions a second reading: a dialog deactivated on its
-        // way out is already hidden by the time this runs, and must not be resurrected.
-        QPointer<QWidget> modal(widget);
-        QTimer::singleShot(0, widget, [modal]() {
-            if (modal && modal->isVisible() && modal == QApplication::activeModalWidget()
-                // Not while the app is in the background: the dialog losing activation
-                // to another app is not the bug this is here for, and raise() on a
-                // sub-window goes to the top of the app, which would drag it forward.
-                && QGuiApplication::applicationState() == Qt::ApplicationActive) {
-                modal->raise();
-                modal->activateWindow();
+        switch (event->type()) {
+        case QEvent::WindowDeactivate:
+            // Only for the topmost modal. A dialog losing activation to a modal of its
+            // own is no longer the active modal by this point, and is meant to stay
+            // where it is: behind the one that now is.
+            if (widget == QApplication::activeModalWidget()) {
+                QTimer::singleShot(0, widget, restoreHarmonyActiveModal);
             }
-        });
+            break;
+        case QEvent::Hide:
+            // A modal going away uncovers whichever one it was opened from, which by
+            // then may have been pushed under a window it blocks by a tap outside.
+            if (widget->isModal()) {
+                QTimer::singleShot(0, qApp, restoreHarmonyActiveModal);
+            }
+            break;
+        default:
+            break;
+        }
 
         return QObject::eventFilter(obj, event);
     }
@@ -1199,11 +1186,6 @@ int main(int argc, char* argv[])
 #ifdef Q_OS_HARMONY
     app.installEventFilter(new HarmonyDialogCentring(&app));
     app.installEventFilter(new HarmonyModalKeeper(&app));
-    QObject::connect(&app, &QGuiApplication::focusWindowChanged, &app, [](QWindow* window) {
-        qWarning("PROBE focusWindowChanged -> %s state=%d",
-                 window != nullptr ? qUtf8Printable(window->objectName()) : "none",
-                 int(QGuiApplication::applicationState()));
-    });
 #endif
 
     QTranslator translator;
