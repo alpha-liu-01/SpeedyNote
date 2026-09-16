@@ -1,8 +1,10 @@
 # SpeedyNote HarmonyOS Build Guide
 
-**Document Version:** 1.0
+**Document Version:** 1.1
 **Date:** September 2026
-**Status:** ✅ VERIFIED WORKING (2-in-1 emulator, API 23)
+**Status:** ⚠️ Verified working on a **tablet** emulator (API 23). The **2-in-1** case, which
+1.0 recorded as verified, has since regressed — see
+[The workarounds target one window mode](#the-workarounds-target-one-window-mode).
 
 ---
 
@@ -20,7 +22,7 @@ artifact and packaging is driven by the command-line `hvigor`.
 ### Architecture
 
 - **Target:** HarmonyOS arm64-v8a (the only architecture that exists for this platform)
-- **Form factors:** `tablet` and `2in1` — deliberately *not* `phone`, see [Device types](#device-types-must-exclude-phone)
+- **Form factors:** `phone`, `tablet` and `2in1` — Qt's default, which must not be narrowed, see [Device types](#device-types-stay-at-qts-default)
 - **PDF Backend:** MuPDF 1.24.10 (cross-compiled, statically linked, hidden visibility)
 - **OCR Backend:** none yet — the OCR features are compiled out
 - **CLI:** not available — Qt apps are shared modules here, not executables
@@ -177,6 +179,37 @@ loads.
 Linked platform library: `libohenvironment.so` (Core File Kit), for
 `OH_Environment_GetUserDocumentDir()`.
 
+### The workarounds target one window mode
+
+Almost everything in [Known Platform Limitations](#known-platform-limitations) below is a
+workaround for **one** of the two window managers HarmonyOS can run an app under, and the
+distinction is not the device type:
+
+- **Handheld full screen**, on a tablet or phone that is not in PC mode. One undecorated window
+  fills the screen, `minimize()` works and `restore()` is refused outright, so hiding a
+  top-level window is a one-way door. This is the mode the port is currently built for.
+- **PC-mode windowing**, on a 2-in-1 and on a handheld whose user has switched PC mode on.
+  Windows are decorated, freely placed, resizable and independently minimised, and `restore()`
+  works.
+
+PC mode is a runtime setting, not a property of the hardware, so a tablet can be in either
+mode. Qt reads it separately from the device type — the QPA polls the
+`window_pcmode_switch_status` system parameter — which means the form factor a build installs
+on tells you nothing about which of the two it will get.
+
+Several of the current workarounds are wrong in PC mode rather than merely redundant: a
+MainWindow kept as a sub-window of the Launcher's ability cannot be maximised, because the
+platform's window-state calls address the instance's own main window and skip its sub-windows;
+and a dialog stripped of `Qt::FramelessWindowHint` gives up a real title bar there rather than
+the imaginary margin it gives up on a tablet.
+
+**The state of play, in two commits.** `eb01ea3` is the last build verified on a tablet;
+`f848738` is the last verified on a 2-in-1. Do not treat the second as a base to restore from:
+it predates the revert described below and still restricts `deviceTypes`, so it carries the
+manifest line that crashes tablets. Making one build serve both means branching on the window
+mode at runtime, and nothing in the app does that yet. See the feasibility document's
+"The workarounds are for one window mode" for the full account.
+
 ### Device types stay at Qt's default
 
 `module.json5`'s `deviceTypes` is deliberately left as Qt generates it — `phone`, `tablet`,
@@ -222,6 +255,10 @@ libraries to match.
 ---
 
 ## Known Platform Limitations
+
+Everything below was observed in handheld full-screen mode; read
+[The workarounds target one window mode](#the-workarounds-target-one-window-mode) before
+assuming any of it applies on a 2-in-1 or in PC mode.
 
 | Feature | Status | Reason |
 |---------|--------|--------|
@@ -479,6 +516,7 @@ SpeedyNote/
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1 | 2026-09-15 | Record the handheld/PC-mode split and the 2-in-1 regression; correct the form-factor summary, which still claimed `phone` was excluded |
 | 1.0 | 2026-09-15 | Initial HarmonyOS port: MuPDF backend, HAP packaging, sandbox/save fixes, window management |
 
 ---
