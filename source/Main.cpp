@@ -181,6 +181,12 @@ static void centreHarmonyDialog(QDialog* dialog)
     // places the window a frame margin away from the rect submitted, and -- the part
     // that actually hurts -- the QPA keeps mapping touches from the rect it was given,
     // so the dialog draws in one place and answers taps a title bar lower.
+    // What Qt has cached is not a reliable picture of where this platform put a
+    // sub-window: the position submitted when the window was created is ignored
+    // here, so the two disagree from the start. Asking Qt is worse than useless,
+    // because QWindow::setGeometry() also returns early on a rect it believes is
+    // already current -- so a dialog whose constructor happened to compute the
+    // centred rect, as BatchImportDialog's does, would never have it applied and
     if (handle->geometry() != target) {
         handle->setGeometry(target);
     }
@@ -245,6 +251,31 @@ protected:
             }
             break;
         case QEvent::Show:
+            // Nothing here places itself on purpose. Every QDialog in the app that
+            // moves itself is trying to centre and does it in its constructor --
+            // BatchImportDialog, SaveDocumentDialog and ExportResultsDialog all run
+            // the same move(parent->geometry().center() - rect().center()) -- with a
+            // rect() the layout has not filled in yet and a parent rect that says
+            // nothing about where the status bar ends. So none of those placements is
+            // worth keeping, and WA_Moved is what made them stick: while it is set
+            // this filter stands aside, and QDialog::showEvent() skips its own
+            // adjustPosition() for the same reason, which left all three pinned to
+            // the top-left corner. Dropping it puts them on the path every other
+            // dialog already takes.
+            dialog->setAttribute(Qt::WA_Moved, false);
+
+            // And again once the platform has had the window: a position submitted
+            // from here goes out before the window is on screen, and the platform
+            // answers with its own placement -- the top-left corner -- which lands
+            // back in Qt as the window's geometry and wins. Dialogs that let
+            // QDialog::showEvent() place them recover on their own, because
+            // adjustPosition() moves them afterwards and the Move event brings this
+            // filter back; a dialog that placed itself gets no such second event, so
+            // without this it keeps the corner. exec() is running an event loop by
+            // then, so a queued call gets its turn. Placement is idempotent, so the
+            // dialogs that did not need this are unaffected.
+            QTimer::singleShot(0, dialog, [dialog] { centreHarmonyDialog(dialog); });
+            Q_FALLTHROUGH();
         case QEvent::Move:
         case QEvent::Resize:
             // Move and Resize as well as Show, because the show is not the end of it: a
