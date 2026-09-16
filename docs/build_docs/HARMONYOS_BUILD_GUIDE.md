@@ -447,6 +447,17 @@ device's UDID, obtained through a Huawei developer account. Once installed, side
 permanent — unlike iOS, there is no seven-day expiry. Community tooling exists to automate the
 per-device certificate dance.
 
+Because the certificate is bound to one device, a prebuilt HAP cannot be signed on our side for
+general distribution: each tester signs the same unsigned HAP for their own tablet, using their
+own free developer account. That is the model
+[HARMONYOS_ALPHA_TESTING.md](../HARMONYOS_ALPHA_TESTING.md) documents for testers, and it is also
+what keeps the AGC device quota from becoming the bottleneck — see Q2 in the feasibility notes for
+the quota figures.
+
+Build the artifact testers receive with `--release`, and rename it from
+`entry-default-unsigned.hap`. Note that `hvigorw assembleHap` always packages the `default`
+product, so the filename says `-unsigned` either way; that is not a sign the flag was ignored.
+
 ---
 
 ## Troubleshooting
@@ -523,6 +534,7 @@ SpeedyNote/
 
 ## See Also
 
+- [docs/HARMONYOS_ALPHA_TESTING.md](../HARMONYOS_ALPHA_TESTING.md) — tester-facing install guide: self-signing, the storage permission, test priorities and known gaps
 - [docs/private/HARMONYOS_PORT_FEASIBILITY.md](../private/HARMONYOS_PORT_FEASIBILITY.md) — porting notes, root-cause write-ups and open issues
 - [Qt for HarmonyOS](https://doc.qt.io/qt-6/harmonyos.html)
 - [MuPDF Documentation](https://mupdf.com/docs/)

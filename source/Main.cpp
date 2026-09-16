@@ -229,8 +229,19 @@ protected:
             //
             // Nothing is lost: the platform draws no decoration on these sub-windows, so
             // the frame this gives up was only ever a margin in the geometry arithmetic.
+            //
+            // overrideWindowFlags() and not setWindowFlag(), because this runs inside the
+            // dialog's constructor and setWindowFlag() does not stay inside the flags: it
+            // reparents, the reparent re-inherits the style, and that delivers StyleChange
+            // to an object whose constructor has not finished. QMessageBox answers a style
+            // change by re-applying its icon, through an iconLabel it has not assigned yet,
+            // and the app dies in QLabel::setPixmap() on a garbage pointer -- every message
+            // box in the app, not just this one. The override is a plain assignment to the
+            // same flags create() will read, and it is safe here for precisely the reason
+            // its documented warning exists elsewhere: there is no platform window yet for
+            // it to leave out of sync.
             if (dialog->windowHandle() == nullptr) {
-                dialog->setWindowFlag(Qt::FramelessWindowHint, true);
+                dialog->overrideWindowFlags(dialog->windowFlags() | Qt::FramelessWindowHint);
             }
             break;
         case QEvent::Show:

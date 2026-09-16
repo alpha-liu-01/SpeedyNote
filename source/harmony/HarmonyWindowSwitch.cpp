@@ -218,8 +218,28 @@ void switchTo(QWidget* incoming, QWidget* outgoing, OutgoingPolicy policy, int f
     } else if (outgoingFullScreen) {
         incoming->showFullScreen();
     } else {
+        // On HarmonyOS a window that does not exist yet has to be placed before the
+        // show and then left alone. QWidget::move() after the platform window exists
+        // is re-read against the frame instead of the client area, so the rect comes
+        // back applied twice: a MainWindow asked for the Launcher's client rect at
+        // y=39 landed at y=-37, two 37px title bars higher, with its toolbar under
+        // the status bar. Only the cold-start MainWindow reaches switchTo() without a
+        // window -- everything else already has one, and stays on the path below --
+        // which is why this was the one placement that came out wrong.
+        // preserveWindowState() has always moved before showing, and gets it right.
+        const bool applyBeforeShow =
+#ifdef Q_OS_HARMONY
+            incomingGeometry.isValid() && incoming->windowHandle() == nullptr;
+#else
+            false;
+#endif
+        if (applyBeforeShow) {
+            incoming->resize(incomingGeometry.size());
+            incoming->move(incomingGeometry.topLeft());
+        }
+
         incoming->showNormal();
-        if (incomingGeometry.isValid()) {
+        if (incomingGeometry.isValid() && !applyBeforeShow) {
             // Geometry after show, not before: on Windows ShowWindow() can adjust
             // the position from stale placement data, so a move()/resize() ahead
             // of the show does not survive it. The window is at opacity 0, so the
