@@ -16,6 +16,7 @@
 #include <QFrame>
 #include <QScreen>
 #include <QScrollArea>
+#include <QScroller>
 #include <QSize>
 #include <QWidget>
 
@@ -69,11 +70,17 @@ inline void openAtSize(QDialog* dialog, QSize preferred)
 /// `content`, in a scroll area sized to be shrinkable.
 ///
 /// For content whose height is the sum of a dozen font-dependent widgets and so
-/// cannot be promised to fit any particular screen. The size hint follows the
-/// content, so a dialog built on this still opens at its natural size wherever
-/// there is room; the *minimum* does not follow the content, and that is the
-/// point -- it is what lets the dialog be smaller than its content and scroll
-/// rather than crush it.
+/// cannot be promised to fit any particular screen. What it changes is the
+/// dialog's *minimum*: a scroll area reports a few lines rather than what it
+/// holds, which is what lets the dialog be smaller than its content and scroll
+/// instead of crushing it.
+///
+/// The hint is asked to follow the content, but do not rely on it doing so from a
+/// constructor: a scroll area caches that hint against the size its widget
+/// currently has, and before the first layout that is not the size the widget
+/// wants. Measured on the export dialog, the hint came back 486px against content
+/// that needed 966, so what a dialog built on this opens at is whatever
+/// openAtSize() was given, not its content's height.
 inline QScrollArea* inScrollArea(QWidget* content, QWidget* parent = nullptr)
 {
     auto* area = new QScrollArea(parent);
@@ -85,6 +92,18 @@ inline QScrollArea* inScrollArea(QWidget* content, QWidget* parent = nullptr)
     // given, so a horizontal bar would not be content needing more width, it
     // would be a sign the width was wrong.
     area->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+#ifdef Q_OS_HARMONY
+    // Dragging inside the viewport does not scroll it on this platform -- verified
+    // on the emulator, where a swipe across the export options left the view
+    // exactly where it was -- so without this the only way to reach the content
+    // below the fold is the scrollbar, which is a few pixels wide and no way to
+    // ask anyone to work a tablet. The objection to QScroller elsewhere in this
+    // codebase is that it fights QListView's and QTreeWidget's own touch
+    // handling; a plain QScrollArea has none to fight.
+    QScroller::grabGesture(area->viewport(), QScroller::LeftMouseButtonGesture);
+#endif
+
     return area;
 }
 

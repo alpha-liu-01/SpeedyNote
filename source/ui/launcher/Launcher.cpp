@@ -1024,6 +1024,8 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
             }
         });
         
+        flattenSubmenu(menu, folderMenu);
+        
         menu.addSeparator();
     }
     
@@ -1054,6 +1056,8 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
     connect(exportSnbxAction, &QAction::triggered, this, [this, bundlePath]() {
         showSnbxExportDialog({bundlePath});
     });
+    
+    flattenSubmenu(menu, exportMenu);
     
     menu.addSeparator();
     
@@ -1581,6 +1585,8 @@ void Launcher::showTimelineOverflowMenu()
             m_timelineList->exitSelectMode();
         }
     });
+    
+    flattenSubmenu(menu, exportMenu);
     
     menu.addSeparator();
     

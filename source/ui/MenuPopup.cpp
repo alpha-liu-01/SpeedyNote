@@ -1,5 +1,6 @@
 #include "MenuPopup.h"
 
+#include <QAction>
 #include <QMenu>
 #include <QPoint>
 
@@ -96,4 +97,40 @@ QAction* execMenuAt(QMenu& menu, const QPoint& globalPos)
 #endif
 
     return menu.exec(globalPos);
+}
+
+void flattenSubmenu(QMenu& parent, QMenu* submenu)
+{
+#ifdef Q_OS_HARMONY
+    if (submenu == nullptr) {
+        return;
+    }
+
+    // The action that opens a submenu is the item you see for it in the parent. Everything
+    // here is positioned against it, so the flattened group ends up where the submenu was.
+    QAction* opener = submenu->menuAction();
+
+    QAction* heading = new QAction(opener->text(), &parent);
+    heading->setEnabled(false);
+    parent.insertAction(opener, heading);
+
+    // A submenu can be disabled as a whole -- StarredView disables Export while nothing is
+    // selected -- and the item carrying that is the one about to be removed, so it has to be
+    // handed down to each action before it goes.
+    const bool groupEnabled = opener->isEnabled();
+
+    // The actions stay owned by the submenu, which stays owned by the parent menu, so nothing
+    // here changes what is deleted with what. A QAction is not tied to one menu: listing it in
+    // the parent as well is enough for it to be drawn and triggered there.
+    const QList<QAction*> actions = submenu->actions();
+    for (QAction* action : actions) {
+        action->setEnabled(groupEnabled && action->isEnabled());
+        parent.insertAction(opener, action);
+    }
+
+    parent.removeAction(opener);
+#else
+    Q_UNUSED(parent);
+    Q_UNUSED(submenu);
+#endif
 }

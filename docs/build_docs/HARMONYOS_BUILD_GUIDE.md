@@ -1,9 +1,11 @@
 # SpeedyNote HarmonyOS Build Guide
 
-**Document Version:** 1.2
+**Document Version:** 1.3
 **Date:** September 2026
-**Status:** ⚠️ Verified working on a **tablet** emulator (API 23). The **2-in-1** case, which
-1.0 recorded as verified, has since regressed — see
+**Status:** ⚠️ Verified working on a **tablet** emulator (API 23), and on **retail tablet
+hardware** as of the first alpha: a MatePad Air running HarmonyOS 6 draws with a
+pressure-sensitive M-Pencil. The **2-in-1** case, which 1.0 recorded as verified, has since
+regressed — see
 [The workarounds target one window mode](#the-workarounds-target-one-window-mode).
 
 ---
@@ -271,8 +273,11 @@ assuming any of it applies on a 2-in-1 or in PC mode.
 | Dialog placement | Worked around | Dialogs used to open in the top-left corner with their titles behind the status bar. `HarmonyDialogCentring` in `Main.cpp` now centres them; see below before touching window geometry. |
 | Modal z-order | Worked around | The platform lets a tap outside a modal dialog raise the window the dialog blocks over it, leaving the app unresponsive with the dialog buried. `HarmonyModalKeeper` in `Main.cpp` raises it back; see below. |
 | Menu placement | Worked around | A menu opened as a sliver in the top-left corner and dismissed itself, unless the same `QMenu` object had been opened once before. Call sites use `execMenuAt()` from `source/ui/MenuPopup.cpp` instead of `QMenu::exec()`; see below. |
-| Submenus | Not available | The platform closes the whole menu chain as soon as a second popup window opens, so the launcher's Export and Move to Folder submenus cannot be opened. Keep menus flat; see below. |
-| Stylus pressure/tilt | Untested | The emulator has no pen device; `uinput -S` injects generic touch events. Needs hardware. |
+| Submenus | Not available, worked around | The platform closes the whole menu chain as soon as a second popup window opens, so a submenu cannot be opened at all — it takes its parent down with it, and from the outside the menu just vanishes on the tap. Keep menus flat, or pass the submenu to `flattenSubmenu()` from `source/ui/MenuPopup.cpp`; see below. |
+| Dialog sizing | Worked around | Hardcoded `setMinimumSize()` on a dialog *replaces* the minimum its layout reports rather than raising it, and this platform's default font is 12pt against a desktop 9pt, so desktop-tuned sizes clipped content here. Use `source/ui/dialogs/DialogSizing.h`; see below. |
+| Touch-drag scrolling | Worked around | A drag inside a `QScrollArea` viewport does not scroll it. `QScroller::grabGesture(viewport, QScroller::LeftMouseButtonGesture)` does; the `TouchGesture` variant never fires. Only the export dialog is fixed so far. |
+| Stylus pressure | Works on hardware | Confirmed pressure-sensitive on a retail MatePad Air with an M-Pencil. Not reproducible on the emulator, which has no pen device: `uinput -S` injects generic touch events. |
+| Stylus tilt / eraser end | Untested | Same hardware constraint; the alpha report covers pressure only. |
 
 ### Q_OS_LINUX is defined
 
@@ -415,6 +420,38 @@ before touching it:
 The filter leaves menus and tooltips alone — they are given an explicit position when they open —
 but menus turn out to have a related problem of their own, below.
 
+### Dialog sizes: never hardcode a minimum
+
+Placement was one half of the dialog work; size was the other, and it came back from the first
+alpha tester as two dialogs with their contents crushed. The rule behind it is plain Qt, not a
+platform quirk:
+
+**`setMinimumSize()` on a window replaces the minimum its layout reports. It does not raise it.**
+`QLayout::activate()` installs the layout's own minimum on a window, but only on the axes without
+an explicit one, so a hardcoded pair substitutes constants for the layout's actual requirement.
+When the constants are smaller — and they will be, because they were measured against a 9pt
+desktop font while this platform defaults to 12pt — Qt resolves the shortfall by squeezing widgets
+past their own minimums and clipping whatever is last in the layout. The batch import dialog ran
+170px under its layout's minimum, which cost it its file list and half of a button row.
+
+So, for any dialog that has to work here:
+
+- **Give a preferred size, not a minimum.** `DialogSizing::openAtSize()` in
+  `source/ui/dialogs/DialogSizing.h` takes one, grows it to what the layout asks for, caps it at
+  the screen, and sets no minimum, leaving that to the layout.
+- **Do not assume any size fits.** The export dialog's layout needs 966px on a 960px-tall display,
+  so no window size can show it whole; its tab pages go through `DialogSizing::inScrollArea()`,
+  which leaves the content's height alone but lets the *dialog* be smaller than its contents and
+  scroll instead of crushing them. Wrap every page of a `QTabWidget`, not just the tall one — a
+  stacked layout is as tall as its tallest page.
+- **Do not put font sizes in stylesheets.** `font-size: 13px` is small print at 96dpi and level
+  with the body text on this platform, which reports 72dpi against a 12pt default — that is what
+  "the fonts are too large" turned out to mean. `DialogSizing::scaledFont(font(), 0.9)` stays
+  proportional; the same goes for absolute emphasis like `setPointSize(16)`.
+- **A scroll area needs `QScroller` to answer a drag** (see the limitations table), and its size
+  hint is not a way to ask how tall its content is from a constructor: the hint is cached against
+  the widget's pre-layout size, and came back 486px for content needing 966px.
+
 ### Menus open in the corner and dismiss themselves
 
 `QMenuPrivate::popup()` creates the menu's window before it has worked out where the menu goes,
@@ -444,9 +481,19 @@ and the platform's have both been overwritten with the creation rect.
 Submenus are beyond this. They can be placed the same way — their position is derivable from the
 parent menu's active item — but opening the second popup window is itself an outside interaction,
 and `closeAllActivePopups()` closes every popup rather than the one that lost the interaction, so
-parent and child go down together. Nothing in the app can prevent that: the Export and Move to
-Folder submenus in the launcher's notebook menus cannot be opened at all, and anything that has to
+parent and child go down together. Nothing in the app can prevent that, so anything that has to
 work here belongs in a flat menu.
+
+Note what that looks like from the outside, because it is not what a broken submenu usually looks
+like: the parent closes too, so the entire menu disappears on the tap, which is indistinguishable
+from having missed the item.
+
+`flattenSubmenu()` in `source/ui/MenuPopup.cpp` is how the launcher's four nested menus — three
+Export submenus and Move to Folder — are made reachable. Build the submenu as usual, then hand it
+and its parent to `flattenSubmenu()`; on HarmonyOS its actions are lifted into the parent and the
+item that opened it stays in place, disabled, as a heading for them. Off HarmonyOS it does nothing,
+so the same call site keeps real submenus on desktop — which is why action labels need to read
+correctly in both layouts (`To PDF...` under an `Export` heading).
 
 ### Modal dialogs are not kept in front
 
@@ -562,6 +609,7 @@ SpeedyNote/
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.3 | 2026-09-17 | First alpha report: stylus pressure confirmed on a MatePad Air; hardcoded dialog minimums replace the layout's own and clipped content at 12pt; submenus are flattened via `flattenSubmenu()` rather than left unreachable; a drag does not scroll a `QScrollArea` without `QScroller` |
 | 1.2 | 2026-09-16 | Dialog and window placement: the frame-drop must use `overrideWindowFlags()` or every message box crashes; self-placing dialogs are the ones that opened in the corner, not the exception to it; a first show has to be placed before it, not after; the Launcher's rect is unusable early in a cold start |
 | 1.1 | 2026-09-15 | Record the handheld/PC-mode split and the 2-in-1 regression; correct the form-factor summary, which still claimed `phone` was excluded |
 | 1.0 | 2026-09-15 | Initial HarmonyOS port: MuPDF backend, HAP packaging, sandbox/save fixes, window management |

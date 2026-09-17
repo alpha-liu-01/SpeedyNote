@@ -421,6 +421,8 @@ void StarredView::showOverflowMenu()
         }
     });
     
+    flattenSubmenu(menu, exportMenu);
+    
     menu.addSeparator();
     
     // Move to Folder... (L-008: opens FolderPickerDialog)
