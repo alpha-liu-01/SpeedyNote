@@ -25,6 +25,8 @@
 #include "../../android/PdfPickerAndroid.h"
 #elif defined(Q_OS_IOS)
 #include "../../ios/PdfPickerIOS.h"
+#elif defined(Q_OS_HARMONY)
+#include "../../harmony/HarmonyPdfImport.h"
 #endif
 
 namespace {
@@ -187,9 +189,16 @@ QString PdfSourcesDialog::choosePdfFile(const QString& startPath)
 #else
     QString directory = QFileInfo(startPath).absolutePath();
     if (directory.isEmpty() || !QDir(directory).exists()) directory = QDir::homePath();
-    return QFileDialog::getOpenFileName(
+    const QString picked = QFileDialog::getOpenFileName(
         this, tr("Locate PDF Source"), directory,
         tr("PDF Files (*.pdf);;All Files (*)"));
+#ifdef Q_OS_HARMONY
+    // Without this the relink succeeds and then expires with the process, which
+    // is the failure a tester described as "it will never relink".
+    return HarmonyPdfImport::ensureReachable(picked);
+#else
+    return picked;
+#endif
 #endif
 }
 

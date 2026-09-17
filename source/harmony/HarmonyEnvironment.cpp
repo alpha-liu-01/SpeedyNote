@@ -25,6 +25,10 @@ namespace {
 QString s_documentsDir;
 bool s_probed = false;
 
+// Why s_documentsDir is empty, kept so the About tab can show it. Every branch
+// below that returns without setting s_documentsDir sets this instead.
+QString s_failureDetail;
+
 const char *errorName(FileManagement_ErrCode code)
 {
     switch (code) {
@@ -50,6 +54,9 @@ void probe()
         // Expected on phones (no syscap) and before the permission is granted.
         // Logged rather than silent because the two causes need different fixes
         // and are otherwise indistinguishable from "saving is broken".
+        s_failureDetail = QStringLiteral("OH_Environment_GetUserDocumentDir: %1, rc=%2")
+                              .arg(QString::fromLatin1(errorName(rc)))
+                              .arg(rc);
         qWarning() << "HarmonyEnvironment: no user Documents dir, rc =" << rc
                    << errorName(rc);
         free(raw);
@@ -61,6 +68,7 @@ void probe()
 
     // The API can hand back a path that is mapped but not yet materialised.
     if (!QDir(path).exists() && !QDir().mkpath(path)) {
+        s_failureDetail = QStringLiteral("cannot create %1").arg(path);
         qWarning() << "HarmonyEnvironment: user Documents dir is not usable:" << path;
         return;
     }
@@ -77,6 +85,8 @@ void probe()
     QFile::remove(canaryFile);            // in case a previous run was killed
     QDir().rmdir(canaryDir);              // mid-probe, leaving these behind
     if (!QDir().mkdir(canaryDir)) {
+        s_failureDetail = QStringLiteral("mkdir in %1: %2")
+                              .arg(path, QString::fromLocal8Bit(strerror(errno)));
         qWarning() << "HarmonyEnvironment: cannot create directories in" << path
                    << "-" << strerror(errno) << "- bundles cannot be stored there";
         return;
@@ -84,6 +94,8 @@ void probe()
     const int fd = ::open(canaryFile.toUtf8().constData(),
                           O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (fd < 0) {
+        s_failureDetail = QStringLiteral("open() in %1: %2")
+                              .arg(path, QString::fromLocal8Bit(strerror(errno)));
         qWarning() << "HarmonyEnvironment: can create directories but not files in"
                    << path << "-" << strerror(errno)
                    << "- bundles cannot be stored there";
@@ -106,6 +118,14 @@ QString userDocumentsDir()
         probe();
     }
     return s_documentsDir;
+}
+
+QString accessFailureDetail()
+{
+    if (!s_probed) {
+        probe();
+    }
+    return s_failureDetail;
 }
 
 bool hasUserDocumentsAccess()

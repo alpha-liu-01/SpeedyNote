@@ -386,6 +386,7 @@ protected:
 
 #ifdef Q_OS_HARMONY
 #include "harmony/HarmonyEnvironment.h"
+#include "harmony/HarmonyPersistentGrant.h"
 #endif
 
 #include "harmony/HarmonyWindowSwitch.h"
@@ -1243,6 +1244,12 @@ int main(int argc, char* argv[])
     // HarmonyEnvironment caches it, so this also keeps the dialogs snappy.
     qInfo() << "HarmonyOS: documents root =" << HarmonyEnvironment::writableDocumentsRoot()
             << "(user folder access:" << HarmonyEnvironment::hasUserDocumentsAccess() << ")";
+    // Probed here rather than where it is used so that every run records the
+    // answer, including runs on devices that have user folders and never need it.
+    // It is one query against a service, and we would otherwise be guessing at
+    // which retail devices support persistence from a documentation set that
+    // contradicts itself.
+    HarmonyPersistentGrant::isSupported();
 #endif
 
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)

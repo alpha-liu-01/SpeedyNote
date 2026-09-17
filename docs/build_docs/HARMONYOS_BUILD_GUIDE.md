@@ -1,12 +1,15 @@
 # SpeedyNote HarmonyOS Build Guide
 
-**Document Version:** 1.3
+**Document Version:** 1.4
 **Date:** September 2026
 **Status:** ⚠️ Verified working on a **tablet** emulator (API 23), and on **retail tablet
 hardware** as of the first alpha: a MatePad Air running HarmonyOS 6 draws with a
 pressure-sensitive M-Pencil. The **2-in-1** case, which 1.0 recorded as verified, has since
 regressed — see
-[The workarounds target one window mode](#the-workarounds-target-one-window-mode).
+[The workarounds target one window mode](#the-workarounds-target-one-window-mode). Note that
+retail tablets have **no access to the user's document folders**, so notebooks live in the app
+sandbox and external PDFs are copied into it — see
+[User folders are 2-in-1 only](#user-folders-are-2-in-1-only-so-external-pdfs-are-copied-in).
 
 ---
 
@@ -278,6 +281,8 @@ assuming any of it applies on a 2-in-1 or in PC mode.
 | Touch-drag scrolling | Worked around | A drag inside a `QScrollArea` viewport does not scroll it. `QScroller::grabGesture(viewport, QScroller::LeftMouseButtonGesture)` does; the `TouchGesture` variant never fires. Only the export dialog is fixed so far. |
 | Stylus pressure | Works on hardware | Confirmed pressure-sensitive on a retail MatePad Air with an M-Pencil. Not reproducible on the emulator, which has no pen device: `uinput -S` injects generic touch events. |
 | Stylus tilt / eraser end | Untested | Same hardware constraint; the alpha report covers pressure only. |
+| User document folders | Not available on tablets | The `FolderObtain` syscap is 2-in-1 only below API 26, and 6.1 is API 23, so notebooks live in the app sandbox on every tablet in circulation. Not a permission we are missing; see below. |
+| External PDFs | Worked around | The picker's grant on a PDF outside the sandbox dies with the process, so a notebook reopened later could never resolve it. `HarmonyPdfImport::ensureReachable()` copies it in at pick time, as Android and iOS already did; see below. |
 
 ### Q_OS_LINUX is defined
 
@@ -306,6 +311,52 @@ Two separate problems, both about `.snb` being a *directory* bundle:
    leaving an empty bundle. `source/platform/BundleFile.h` is a shim that is `QSaveFile`
    everywhere else and a direct-writing `QFile` subclass on HarmonyOS. Crash-atomicity is lost
    on this platform.
+
+### User folders are 2-in-1 only, so external PDFs are copied in
+
+`HarmonyEnvironment::userDocumentsDir()` probes `OH_Environment_GetUserDocumentDir()` at
+startup, and on a tablet it answers `801 ERR_DEVICE_NOT_SUPPORTED`. That is the documented
+behaviour rather than a misconfiguration: Huawei's reference states the interface works on
+PC/2-in-1 from API 13 and on tablets only from **API 26.0.0**, and this build requires 6.1,
+which is API 23. The SDK agrees from the other direction — `ets/api/device-define/2in1.json`
+lists `SystemCapability.FileManagement.File.Environment.FolderObtain`, and none of the other
+five device profiles do, `tablet.json` included.
+
+**No permission fixes this, so do not go looking for one.** `READ_WRITE_DOCUMENTS_DIRECTORY`
+is `normal`/`user_grant` and we do declare it, but it grants access to a directory the device
+will not name; since API 12 the interface does not even check it. The permissions that would
+give broader access are all beyond a third-party app, per the SDK's own
+`toolchains/lib/PermissionDefinitions.json`: `FILE_ACCESS_MANAGER` and `STORAGE_MANAGER` are
+`availableType: SYSTEM`, while `READ_WRITE_USER_FILE` and `READ_WRITE_DESKTOP_DIRECTORY` are
+`system_basic`, which needs an ACL entry in a Huawei-issued signing profile.
+
+So notebooks live in `AppDataLocation/notebooks`, and the consequence lands on PDFs rather
+than on notebooks. `QFileDialog` here *is* the system `DocumentViewPicker`, so a user can pick
+a PDF from a folder the sandbox otherwise hides, and it opens — but the grant lasts only for
+the life of the process. A notebook that stored that path resolved it today and could never
+resolve it again, which an alpha tester reported as a PDF that "will never relink": the
+relink itself worked, then expired.
+
+`HarmonyPdfImport::ensureReachable()` closes that by copying the picked file into
+`AppDataLocation/pdfs` at pick time, which is what `PdfPickerAndroid` and `PdfPickerIOS` have
+always done inside their own grant windows. Three call sites use it — `openPdfDocument()`,
+`addPagesFromPdf()` and `PdfSourcesDialog::choosePdfFile()` — so **Locate...** now repairs a
+notebook permanently. It deliberately reuses Android's directory so
+`Launcher::findImportedPdfPath()` deletes the copy along with the notebook, and it returns the
+path untouched when no copy is needed: on a device that does have user folders, and for files
+already inside app storage. A failed copy also returns the original, degrading to today's
+behaviour rather than blocking the open.
+
+Keeping the file in place instead would need a persistent grant
+(`OH_FileShare_PersistPermission` plus `activatePermission` on every launch). That is all C,
+so it needs no ArkTS bridge, and `ohos.permission.FILE_ACCESS_PERSIST` is `system_grant` at
+`normal` level, so declaring it is the whole of getting it — but its syscap,
+`AppFileService.FolderAuthorization`, is 2-in-1 only in the same `device-define` data.
+`HarmonyPersistentGrant::capabilityDetail()` probes it and prints the result in the About tab,
+so a tester's screenshot settles what the documentation contradicts itself about. **Do not
+trust the emulator on any of this.** It is an OpenHarmony image and reports the whole syscap
+set: `FolderObtain` succeeds there and the persistence probe returns `ERR_OK`, neither of
+which a retail tablet will do.
 
 ### Windows and ability instances
 

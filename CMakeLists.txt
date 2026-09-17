@@ -1140,6 +1140,8 @@ set(HARMONY_PLATFORM_SOURCES "")
 if(OHOS)
     set(HARMONY_PLATFORM_SOURCES
         source/harmony/HarmonyEnvironment.cpp
+        source/harmony/HarmonyPdfImport.cpp
+        source/harmony/HarmonyPersistentGrant.cpp
         source/ui/dialogs/SaveDocumentDialog.cpp
     )
 endif()
@@ -1357,6 +1359,22 @@ elseif(OHOS)
   }
 }")
 
+    # FILE_ACCESS_PERSIST is system_grant at normal level, so declaring it here is
+    # the whole of obtaining it: no prompt, no ACL entry in the signing profile.
+    # It is what lets HarmonyPersistentGrant ask whether a picked PDF can stay
+    # reachable after a restart, which is the only way a sandboxed device can keep
+    # referring to a file it cannot name by path.
+    set_property(TARGET speedynote APPEND PROPERTY _qt_harmonyos_permissions
+"{
+  \"name\" : \"ohos.permission.FILE_ACCESS_PERSIST\",
+  \"reason\" : \"Lets SpeedyNote reopen the PDFs your notebooks are based on.\",
+  \"usedScene\" :
+  {
+    \"abilities\" : [ \"QAbility\" ],
+    \"when\" : \"always\"
+  }
+}")
+
     target_include_directories(speedynote PRIVATE
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/source
@@ -1514,6 +1532,11 @@ elseif(OHOS)
         # folder on 2-in-1 devices. Named without a path because it resolves out
         # of the OHOS sysroot the toolchain file already points at.
         libohenvironment.so
+        # Same kit, the other half of source/harmony/: OH_FileShare_* and
+        # OH_FileUri_* behind HarmonyPersistentGrant, which asks whether this
+        # device can keep access to a picked file across launches.
+        libohfileshare.so
+        libohfileuri.so
     )
 
 elseif(UNIX)

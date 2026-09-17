@@ -1336,6 +1336,16 @@ This cannot be undone.</source>
         <translation type="unfinished">© 2026 SpeedyNote 保留所有权利。</translation>
     </message>
     <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1786"/>
+        <source>Notebooks are saved in your Documents folder:</source>
+        <translation type="unfinished">笔记本保存在你的“文档”文件夹中：</translation>
+    </message>
+    <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1787"/>
+        <source>Notebooks are saved in private app storage:</source>
+        <translation type="unfinished">笔记本保存在应用私有空间中：</translation>
+    </message>
+    <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1797"/>
         <source>Cache Management</source>
         <translation type="unfinished">缓存管理</translation>

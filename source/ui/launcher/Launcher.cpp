@@ -1199,7 +1199,7 @@ bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
             mainWindow->closeDocumentById(docId, true);  // discardChanges=true
         }
         
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
         // BUG-A003 Storage Cleanup: Check if this document has an imported PDF in sandbox
         // If so, delete the PDF too to prevent storage leaks
         QString pdfToDelete = findImportedPdfPath(bundlePath);
@@ -1214,7 +1214,7 @@ bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
             bundleDir.removeRecursively();
         }
         
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
         // Delete imported PDF if found
         if (!pdfToDelete.isEmpty() && QFile::exists(pdfToDelete)) {
             QFile::remove(pdfToDelete);
@@ -2003,7 +2003,10 @@ void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& d
     }
 }
 
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+// HarmonyOS joins this for the same reason Android needed it: PDFs picked from
+// outside the sandbox are copied into <AppData>/pdfs, so they are ours to delete
+// along with the notebook. See HarmonyPdfImport.
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
 QString Launcher::findImportedPdfPath(const QString& bundlePath)
 {
     // BUG-A003 Storage Cleanup: Check if this document has an imported PDF in sandbox.

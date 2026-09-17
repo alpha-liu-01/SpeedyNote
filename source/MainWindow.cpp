@@ -123,6 +123,7 @@
 
 #ifdef Q_OS_HARMONY
 #include "harmony/HarmonyEnvironment.h"
+#include "harmony/HarmonyPdfImport.h"
 #endif
 
 #include "harmony/HarmonyWindowSwitch.h"
@@ -4628,6 +4629,9 @@ void MainWindow::addPagesFromPdf(const QString& filePath,
             settings.setValue(QStringLiteral("FileDialogs/lastOpenDirectory"),
                               QFileInfo(pdfPath).absolutePath());
         }
+#ifdef Q_OS_HARMONY
+        pdfPath = HarmonyPdfImport::ensureReachable(pdfPath);
+#endif
 #endif
     }
     if (pdfPath.isEmpty()) return;
@@ -4745,6 +4749,12 @@ void MainWindow::openPdfDocument(const QString &filePath)
         }
         
         pdfSettings.setValue("FileDialogs/lastOpenDirectory", QFileInfo(pdfPath).absolutePath());
+
+#ifdef Q_OS_HARMONY
+        // The picker's grant dies with the process, so a path from outside the
+        // sandbox has to be copied in before the notebook records it.
+        pdfPath = HarmonyPdfImport::ensureReachable(pdfPath);
+#endif
 #endif
     }
     

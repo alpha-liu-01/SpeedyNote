@@ -138,7 +138,7 @@ private:
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     void showInFileManager(const QString& bundlePath);
 #endif
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
     QString findImportedPdfPath(const QString& bundlePath);
 #endif
     
