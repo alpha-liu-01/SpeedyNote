@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include <QApplication>
+#include <QElapsedTimer>
 #include <QTranslator>
 #include <QLocale>
 #include <QFileInfo>
@@ -872,6 +873,29 @@ static Launcher* createLauncherForColdStart()
     // to a stray mouse or key event delivered during the priming tick.
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 #endif
+
+#ifdef Q_OS_HARMONY
+    // One tick is not always enough, and every rect used for the rest of the cold
+    // start is measured against this window. The platform sizes it asynchronously,
+    // and until it does, geometry() reads as QWidget's default 640x480 -- a rect
+    // nothing treats as suspect, so the session prompt centred on it lands in the
+    // top-left quadrant and a MainWindow given it comes up small. It depends purely
+    // on whether the resize arrived in time, which is why it showed up as an
+    // intermittent misplacement on roughly the first launch after a cold start.
+    //
+    // Filling the display's width is what says the platform has had its say. The
+    // wait is bounded because a window manager that gives the Launcher less than the
+    // full width -- PC mode does -- would never satisfy that, and a mispositioned
+    // dialog is a far better outcome than a startup that hangs.
+    if (const QScreen* screen = launcher->screen()) {
+        QElapsedTimer settling;
+        settling.start();
+        while (launcher->width() < screen->geometry().width() && settling.elapsed() < 500) {
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
+        }
+    }
+#endif
+
     return launcher;
 }
 

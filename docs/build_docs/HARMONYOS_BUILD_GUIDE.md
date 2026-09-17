@@ -1,6 +1,6 @@
 # SpeedyNote HarmonyOS Build Guide
 
-**Document Version:** 1.1
+**Document Version:** 1.2
 **Date:** September 2026
 **Status:** ⚠️ Verified working on a **tablet** emulator (API 23). The **2-in-1** case, which
 1.0 recorded as verified, has since regressed — see
@@ -336,6 +336,18 @@ Three things to know before touching window code on this platform:
   display, so a MainWindow is positioned from the Launcher's client rect (`targetGeometry()`).
   Maximise and fullscreen state is not copied between windows (`copiesWindowState()`) because
   the platform ignores both.
+- **A window that does not exist yet has to be placed before its first show, and then left
+  alone.** `QWidget::move()` after the platform window exists is re-read against the frame
+  instead of the client area, so the rect comes back applied twice: a MainWindow asked for the
+  Launcher's client rect at `y=39` landed at `y=-37`, two 37px title bars higher, with its
+  toolbar under the status bar. `preserveWindowState()` has always moved before showing;
+  `switchTo()` now matches it for a first show, and is unchanged for windows that already exist.
+- **The Launcher's own rect is not trustworthy until the platform has sized it.** It reads as
+  `QWidget`'s default 640x480 for the first moments of a cold start, and since every rect used
+  during startup is measured against it, anything reading it too early gets a plausible wrong
+  answer — the session prompt landed in the top-left quadrant about one cold start in four.
+  `createLauncherForColdStart()` waits for the window to fill the display's width, bounded at
+  500 ms because in PC mode it never will.
 
 ### Dialog placement
 
@@ -346,12 +358,18 @@ A position reaches this platform only for a window Qt considers deliberately pla
 `Qt::WA_Moved` set, which is what `QWidget::create()` checks before sending a position rather
 than only a size. `QDialog` does centre itself, in `adjustPosition()`, but clears `WA_Moved`
 afterwards ("not really an explicit position"), so nothing is ever submitted and the window
-stays where the platform put it. `BatchExportDialog` was the one dialog that came up centred,
-because it moves itself in its constructor and so still has `WA_Moved` set when the window is
-created.
+stays where the platform put it.
 
-`HarmonyDialogCentring` in `source/Main.cpp` centres the rest. Placing a window that already
-exists is harder than it sounds, and the three things it has to get right are worth knowing
+A dialog that moves itself in its constructor keeps `WA_Moved`, and that is worse rather than
+better: it stops `QDialog::showEvent()` from calling `adjustPosition()` *and* it used to make
+this filter stand aside, so nothing repositioned it at all. `BatchImportDialog`,
+`SaveDocumentDialog` and `ExportResultsDialog` all do it, all with the same
+`move(parent->geometry().center() - rect().center())` computed from a `rect()` the layout has
+not filled in yet, and all sat in the corner because of it. Since no dialog in the app means to
+open anywhere but centred, the filter now clears `WA_Moved` on `Show` and places all of them.
+
+`HarmonyDialogCentring` in `source/Main.cpp` does the centring. Placing a window that already
+exists is harder than it sounds, and the four things it has to get right are worth knowing
 before touching it:
 
 - **Only `QWindow::setGeometry()` moves a dialog.** `QWidget::move()`, `QWidget::resize()` and
@@ -370,15 +388,32 @@ before touching it:
   `QDialog` creates its window and so the last chance to change the flag without recreating it.
   Nothing is given up: the platform draws no decoration on these sub-windows, and that margin
   only ever existed in the geometry arithmetic.
+
+  **It must be set with `overrideWindowFlags()`, not `setWindowFlag()`.** `ChildAdded` arrives
+  from the constructor, and `setWindowFlag()` reparents the widget, which re-inherits the style,
+  which delivers `StyleChange` to a half-built object. `QMessageBox` answers that by re-applying
+  its icon through a member it has not assigned yet, and the app dies in `QLabel::setPixmap()` —
+  in *every* message box, not just one. `overrideWindowFlags()` assigns the same field `create()
+  ` reads without any of that, and is safe here precisely because there is no platform window
+  yet for it to leave out of sync. `QEvent::Polish` is not an alternative: `create()` runs before
+  `ensurePolished()` inside `QWidgetPrivate::setVisible()`.
 - **The position has to be re-stated after the show.** A dialog that asked for less room than its
   layout needs is resized on the first layout pass afterwards, and the position has to be
   reasserted for the size it ends up with. The filter runs on `Move` and `Resize` as well as
   `Show` for that reason, and converges because it only ever submits a geometry the window does
   not already have.
+- **A submission made from the `Show` handler does not stick, and Qt's cached geometry will not
+  tell you.** At `Show` the window is not on screen yet; the platform answers with its own
+  placement — the top-left corner — and that lands back in Qt as the window's geometry and wins.
+  Dialogs that let `adjustPosition()` place them recover by themselves, because it moves them
+  after mapping and the resulting `Move` brings the filter back. A dialog that placed itself gets
+  no such second event, so the filter also queues one re-centre from `Show`. Do not try to detect
+  this by comparing against `QWindow::geometry()`: that cache is what Qt last set, not where the
+  window is, and `QWindow::setGeometry()` returns early on a rect it believes is current — so a
+  cache that happens to hold the right answer locks the app out of ever submitting it.
 
-The filter leaves menus and tooltips alone — they are given an explicit position when they open,
-and it skips anything with `WA_Moved` set in any case — but menus turn out to have a related
-problem of their own, below.
+The filter leaves menus and tooltips alone — they are given an explicit position when they open —
+but menus turn out to have a related problem of their own, below.
 
 ### Menus open in the corner and dismiss themselves
 
@@ -527,6 +562,7 @@ SpeedyNote/
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.2 | 2026-09-16 | Dialog and window placement: the frame-drop must use `overrideWindowFlags()` or every message box crashes; self-placing dialogs are the ones that opened in the corner, not the exception to it; a first show has to be placed before it, not after; the Launcher's rect is unusable early in a cold start |
 | 1.1 | 2026-09-15 | Record the handheld/PC-mode split and the 2-in-1 regression; correct the form-factor summary, which still claimed `phone` was excluded |
 | 1.0 | 2026-09-15 | Initial HarmonyOS port: MuPDF backend, HAP packaging, sandbox/save fixes, window management |
 
