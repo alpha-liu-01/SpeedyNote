@@ -2055,13 +2055,11 @@ QStringList Launcher::survivingNotebookBundles(const QStringList& bundlesBeingDe
         add(notebook.bundlePath);
     }
 
-    const QString notebooksDir =
-        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
-    const QDir dir(notebooksDir);
-    const QStringList onDisk =
-        dir.entryList({QStringLiteral("*.snb")}, QDir::Dirs | QDir::NoDotAndDotDot);
-    for (const QString& name : onDisk) {
-        add(dir.absoluteFilePath(name));
+    const QStringList onDisk = SandboxPdfOwnership::bundlesInDirectories(
+        {QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+             + QStringLiteral("/notebooks")});
+    for (const QString& bundlePath : onDisk) {
+        add(bundlePath);
     }
 
     return survivors;

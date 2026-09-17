@@ -164,6 +164,64 @@ inline bool testSharedCopiesSurvive()
     return success;
 }
 
+// Overwriting a notebook on import removes its bundle, but its PDFs sit outside it:
+// a picked one was copied into app storage, a packaged one was extracted into an
+// embedded/ folder shared with the other notebooks imported to the same place. The
+// question is asked after the replacement lands, because re-importing the same
+// package reuses the same embedded file.
+inline bool testOverwriteOnImport()
+{
+    bool success = true;
+
+    QTemporaryDir tmp;
+    if (!check(tmp.isValid(), "temporary directory")) {
+        return false;
+    }
+    const QString appData = tmp.filePath(QStringLiteral("app"));
+    const QString destDir = appData + QStringLiteral("/notebooks");
+    const QString bundle = destDir + QStringLiteral("/Lecture.snb");
+    const QString neighbour = destDir + QStringLiteral("/Seminar.snb");
+
+    const QString oldEmbedded = destDir + QStringLiteral("/embedded/Lecture_week1.pdf");
+    const QString sharedEmbedded = destDir + QStringLiteral("/embedded/Seminar_reader.pdf");
+
+    // What the overwritten notebook was using, noted before its bundle went away.
+    const QStringList noted = SandboxPdfOwnership::ownedPdfPaths(
+        manifestWith(oldEmbedded, {oldEmbedded, sharedEmbedded}), appData);
+    success &= check(noted.size() == 2, "both PDFs of the overwritten notebook are noted");
+
+    // The replacement brought a differently named PDF, and a neighbour still wants
+    // the shared one.
+    const QString newEmbedded = destDir + QStringLiteral("/embedded/Lecture_week2.pdf");
+    success &= check(writeBundle(bundle, manifestWith(newEmbedded, {})), "write replacement");
+    success &= check(writeBundle(neighbour, manifestWith(sharedEmbedded, {})), "write neighbour");
+
+    const QStringList holders =
+        SandboxPdfOwnership::bundlesInDirectories({destDir});
+    success &= check(holders.size() == 2,
+                     QStringLiteral("both bundles are found on disk, got %1").arg(holders.size()));
+
+    const QStringList orphans =
+        SandboxPdfOwnership::unreferencedPdfPaths(noted, holders, appData);
+    success &= check(orphans == QStringList{oldEmbedded},
+                     QStringLiteral("only the PDF nothing kept is freed, got %1")
+                         .arg(orphans.join(QStringLiteral(", "))));
+
+    // Re-importing the same package: the replacement points at the same file it did
+    // before, so noting it earlier must not turn into deleting it.
+    success &= check(SandboxPdfOwnership::unreferencedPdfPaths(
+                         {newEmbedded}, holders, appData).isEmpty(),
+                     "a PDF the replacement still points at is kept");
+
+    // A directory with no bundles in it keeps nothing, and must not throw the caller
+    // off by looking like an answer.
+    success &= check(SandboxPdfOwnership::bundlesInDirectories(
+                         {tmp.filePath(QStringLiteral("nowhere")), QString()}).isEmpty(),
+                     "missing and empty directories contribute no bundles");
+
+    return success;
+}
+
 inline bool runAllTests()
 {
     qDebug() << "\n========================================";
@@ -172,6 +230,7 @@ inline bool runAllTests()
 
     bool success = testOwnership();
     success &= testSharedCopiesSurvive();
+    success &= testOverwriteOnImport();
 
     qDebug() << "========================================";
     qDebug() << (success ? "All SandboxPdfOwnership tests PASSED"

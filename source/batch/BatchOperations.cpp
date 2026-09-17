@@ -3,6 +3,7 @@
 
 #include "../core/Document.h"
 #include "../core/NotebookLibrary.h"
+#include "../core/SandboxPdfOwnership.h"
 #include "../sharing/NotebookExporter.h"
 #include "../sharing/NotebookImporter.h"
 #include "../pdf/MuPdfExporter.h"
@@ -12,6 +13,7 @@
 #include <QFileInfo>
 #include <QElapsedTimer>
 #include <QDebug>
+#include <QStandardPaths>
 
 /**
  * @file BatchOperations.cpp
@@ -644,7 +646,24 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
         
         // If overwrite is enabled and target exists, remove it first
         // When overwrite is false, NotebookImporter handles auto-rename internally
+        //
+        // The PDFs the overwritten notebook was using do not live inside the bundle,
+        // so removing the directory does not account for them: a picked PDF was copied
+        // into app storage, and a packaged one was extracted into the embedded/ folder
+        // this destination shares with its neighbours. Note them here, while the
+        // manifest naming them still exists, and settle up once the replacement has
+        // landed -- re-importing the same package usually reuses the same embedded
+        // file, and deciding earlier would delete the file the new notebook wants.
+        QStringList pdfsOfOverwritten;
         if (QDir(expectedOutputPath).exists() && options.overwrite) {
+            pdfsOfOverwritten = SandboxPdfOwnership::ownedPdfPathsForBundle(
+                expectedOutputPath,
+                QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+
+            // The replacement gets a new document id, which is what the thumbnail
+            // cache is keyed by, so the old thumbnail would never be looked at again.
+            NotebookLibrary::instance()->invalidateThumbnail(expectedOutputPath);
+
             QDir existingDir(expectedOutputPath);
             if (!existingDir.removeRecursively()) {
                 fr.status = FileStatus::Error;
@@ -654,12 +673,42 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
                 continue;
             }
         }
+
+        // Called on every route out of this iteration once the bundle is gone. A
+        // failed import is not a reason to keep the files: the notebook that referred
+        // to them has already been removed either way.
+        const auto reclaimPdfsOfOverwritten = [&]() {
+            if (pdfsOfOverwritten.isEmpty()) {
+                return;
+            }
+            const QString appData =
+                QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+            // Everyone who might still want them: the library, whatever else sits in
+            // this destination, and the app's own notebooks folder on the platforms
+            // where imports land there.
+            QStringList holders;
+            const QList<NotebookInfo> tracked = NotebookLibrary::instance()->recentNotebooks();
+            for (const NotebookInfo& notebook : tracked) {
+                holders << notebook.bundlePath;
+            }
+            holders << SandboxPdfOwnership::bundlesInDirectories(
+                {options.destDir, appData + QStringLiteral("/notebooks")});
+
+            const QStringList orphans =
+                SandboxPdfOwnership::unreferencedPdfPaths(pdfsOfOverwritten, holders, appData);
+            for (const QString& orphan : orphans) {
+                if (QFile::exists(orphan) && QFile::remove(orphan)) {
+                    qInfo() << "[BatchOps] reclaimed PDF of overwritten notebook" << orphan;
+                }
+            }
+        };
         
         // Call NotebookImporter
         NotebookImporter::ImportResult importResult = 
             NotebookImporter::importPackage(snbxPath, options.destDir);
         
         if (!importResult.success) {
+            reclaimPdfsOfOverwritten();
             fr.status = FileStatus::Error;
             fr.message = importResult.errorMessage;
             result.errorCount++;
@@ -691,6 +740,9 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
         if (options.addToLibrary) {
             NotebookLibrary::instance()->addToRecent(finalPath);
         }
+
+        // Now that the replacement is on disk and can speak for the files it kept.
+        reclaimPdfsOfOverwritten();
         
         fr.status = FileStatus::Success;
         fr.outputPath = finalPath;

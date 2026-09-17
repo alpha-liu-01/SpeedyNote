@@ -102,34 +102,69 @@ inline QStringList ownedPdfPathsForBundle(const QString& bundlePath, const QStri
     return ownedPdfPaths(doc.object(), appDataDir);
 }
 
-// Of the PDFs owned by the notebooks about to be deleted, the ones no surviving
-// notebook still refers to.
+// Which of these PDFs nothing needs any more: the ones no bundle in `bundles`
+// refers to.
 //
-// The subtraction is the point. Imports are deduplicated -- two notebooks made from
-// the same file name the same copy on disk -- so ownership is shared, and deleting
-// one notebook's copy would blank the other notebook's page backgrounds. Must be
-// called while both sets of bundles are still on disk, since it reads their
-// manifests; a bundle whose manifest has already gone contributes nothing, which on
-// the surviving side would be a vote to delete.
+// The subtraction is the point. Imports are deduplicated and .snbx packages extract
+// into a folder shared by every notebook imported alongside them, so one file can
+// have several users, and freeing it on the strength of a single notebook going away
+// would blank another notebook's page backgrounds. Every bundle that might still
+// want the file has to be in `bundles`, and each has to still be on disk, since this
+// reads their manifests -- a bundle whose manifest has gone contributes nothing,
+// which here amounts to a vote to delete.
+inline QStringList unreferencedPdfPaths(const QStringList& candidates,
+                                        const QStringList& bundles,
+                                        const QString& appDataDir)
+{
+    QStringList retained;
+    for (const QString& bundle : bundles) {
+        retained << ownedPdfPathsForBundle(bundle, appDataDir);
+    }
+
+    QStringList orphans;
+    for (const QString& candidate : candidates) {
+        const QString absolute = QFileInfo(candidate).absoluteFilePath();
+        if (!retained.contains(absolute) && !orphans.contains(absolute)) {
+            orphans << absolute;
+        }
+    }
+    return orphans;
+}
+
+// Of the PDFs owned by the notebooks about to be deleted, the ones no surviving
+// notebook still refers to. Reads the departing manifests before they go.
 inline QStringList deletablePdfPaths(const QStringList& bundlesBeingDeleted,
                                      const QStringList& survivingBundles,
                                      const QString& appDataDir)
 {
-    QStringList retained;
-    for (const QString& bundle : survivingBundles) {
-        retained << ownedPdfPathsForBundle(bundle, appDataDir);
-    }
-
-    QStringList deletable;
+    QStringList owned;
     for (const QString& bundle : bundlesBeingDeleted) {
-        const QStringList owned = ownedPdfPathsForBundle(bundle, appDataDir);
-        for (const QString& path : owned) {
-            if (!retained.contains(path) && !deletable.contains(path)) {
-                deletable << path;
+        owned << ownedPdfPathsForBundle(bundle, appDataDir);
+    }
+    return unreferencedPdfPaths(owned, survivingBundles, appDataDir);
+}
+
+// Every .snb bundle in these directories. The caller pairs this with the library's
+// own list when working out who still holds a reference, because a notebook that is
+// on disk but absent from the library index still opens and still needs its PDF.
+inline QStringList bundlesInDirectories(const QStringList& directories)
+{
+    QStringList bundles;
+    for (const QString& directory : directories) {
+        if (directory.isEmpty()) {
+            continue;
+        }
+        const QDir dir(directory);
+        const QStringList names =
+            dir.entryList({QStringLiteral("*.snb")}, QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QString& name : names) {
+            const QString path = QDir::cleanPath(dir.absoluteFilePath(name));
+            if (!bundles.contains(path)) {
+                bundles << path;
             }
         }
     }
-    return deletable;
+    return bundles;
 }
 
 } // namespace SandboxPdfOwnership
