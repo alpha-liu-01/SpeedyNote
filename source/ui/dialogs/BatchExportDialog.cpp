@@ -1,5 +1,7 @@
 #include "BatchExportDialog.h"
 
+#include "DialogSizing.h"
+
 #include <QApplication>
 #include <QButtonGroup>
 #include <QCheckBox>
@@ -51,9 +53,13 @@ BatchExportDialog::BatchExportDialog(const QStringList& bundlePaths,
     validateExportButton();
 
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
-    setMinimumSize(560, 720);
-    resize(600, 780);
-    setMaximumSize(720, 880);
+    // A preferred size and nothing else. The three calls this replaces pinned the
+    // dialog from every side at once -- a minimum that overrode the layout's own,
+    // a maximum 86px below what the content needs against HarmonyOS's 12pt font,
+    // and a resize that suppressed the adjustSize() which would have fitted the
+    // dialog to its layout. The tab pages scroll now, so there is no size left
+    // for this to have to promise: the content no longer has to fit.
+    DialogSizing::openAtSize(this, QSize(600, 780));
     if (parent) move(parent->geometry().center() - rect().center());
 #endif
 }
@@ -94,7 +100,9 @@ void BatchExportDialog::setupUi()
     auto* heading = new QLabel(headingText, this);
     heading->setWordWrap(true);
     heading->setAlignment(Qt::AlignCenter);
-    heading->setStyleSheet(QStringLiteral("font-size: 15px; font-weight: 600;"));
+    QFont headingFont = DialogSizing::scaledFont(heading->font(), 1.1);
+    headingFont.setBold(true);
+    heading->setFont(headingFont);
     mainLayout->addWidget(heading);
 
     m_tabs = new QTabWidget(this);
@@ -160,8 +168,9 @@ QWidget* BatchExportDialog::createPdfTab()
     m_pdfWarningLabel = new QLabel(tab);
     m_pdfWarningLabel->setWordWrap(true);
     m_pdfWarningLabel->setStyleSheet(QStringLiteral(
-        "QLabel { color: #e67e22; font-size: 13px; padding: 8px;"
+        "QLabel { color: #e67e22; padding: 8px;"
         " background: rgba(230, 126, 34, 0.1); border-radius: 6px; }"));
+    m_pdfWarningLabel->setFont(DialogSizing::scaledFont(m_pdfWarningLabel->font(), 0.9));
     const int skipped = m_skippedPdfBundles.size();
     if (skipped > 0) {
         m_pdfWarningLabel->setText(skipped == 1
@@ -211,8 +220,8 @@ QWidget* BatchExportDialog::createPdfTab()
     rangeLayout->addWidget(m_pageRangeEdit, 1);
     pagesLayout->addLayout(rangeLayout);
     auto* rangeNote = new QLabel(tr("Page range applies to all notebooks"), pagesGroup);
-    rangeNote->setStyleSheet(
-        QStringLiteral("color: palette(placeholderText); font-size: 12px;"));
+    rangeNote->setStyleSheet(QStringLiteral("color: palette(placeholderText);"));
+    rangeNote->setFont(DialogSizing::scaledFont(rangeNote->font(), 0.9));
     pagesLayout->addWidget(rangeNote);
     connect(m_allPagesRadio, &QRadioButton::toggled, this, [this](bool checked) {
         onPageRangeToggled(!checked);
@@ -279,7 +288,12 @@ QWidget* BatchExportDialog::createPdfTab()
     });
     layout->addWidget(optionsGroup);
     layout->addStretch();
-    return tab;
+    // Four group boxes of font-dependent rows: this page asks for 966px against
+    // HarmonyOS's 12pt font, on a display 960px tall. No dialog size can show all
+    // of it, so what matters is which way it fails -- scrolled, or with the last
+    // group box in the layout crushed into an illegible band, which is what the
+    // Options checkboxes came out as.
+    return DialogSizing::inScrollArea(tab, this);
 }
 
 QWidget* BatchExportDialog::createSnbxTab()
@@ -326,7 +340,10 @@ QWidget* BatchExportDialog::createSnbxTab()
     m_includePdfCheckbox->setMinimumHeight(48);
     layout->addWidget(m_includePdfCheckbox);
     layout->addStretch();
-    return tab;
+    // This page fits comfortably, but it shares a QTabWidget with one that does
+    // not, and a stacked layout is as tall as its tallest page. Wrapping only the
+    // PDF page would leave this one setting a floor the other has to live with.
+    return DialogSizing::inScrollArea(tab, this);
 }
 
 void BatchExportDialog::loadSettings()

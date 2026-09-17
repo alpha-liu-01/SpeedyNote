@@ -225,6 +225,26 @@ protected:
             return QObject::eventFilter(obj, event);
         }
 
+        const char* cls = dialog->metaObject()->className();
+        if ((qstrcmp(cls, "BatchImportDialog") == 0 || qstrcmp(cls, "BatchExportDialog") == 0)
+            && (event->type() == QEvent::Show || event->type() == QEvent::Resize)) {
+            const QFont f = QApplication::font();
+            qWarning("PROBE %s evt=%d cur=%dx%d hint=%dx%d minHint=%dx%d min=%dx%d "
+                     "max=%dx%d layoutMin=%dx%d font=%.1fpt avail=%dx%d",
+                     cls,
+                     static_cast<int>(event->type()),
+                     dialog->width(), dialog->height(),
+                     dialog->sizeHint().width(), dialog->sizeHint().height(),
+                     dialog->minimumSizeHint().width(), dialog->minimumSizeHint().height(),
+                     dialog->minimumWidth(), dialog->minimumHeight(),
+                     dialog->maximumWidth(), dialog->maximumHeight(),
+                     dialog->layout() != nullptr ? dialog->layout()->totalMinimumSize().width() : -1,
+                     dialog->layout() != nullptr ? dialog->layout()->totalMinimumSize().height() : -1,
+                     f.pointSizeF(),
+                     dialog->screen() != nullptr ? dialog->screen()->availableGeometry().width() : -1,
+                     dialog->screen() != nullptr ? dialog->screen()->availableGeometry().height() : -1);
+        }
+
         switch (event->type()) {
         case QEvent::ChildAdded:
             // The window has to be frameless for the placement below to be exact, and a
