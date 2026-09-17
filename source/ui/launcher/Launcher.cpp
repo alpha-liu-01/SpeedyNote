@@ -19,9 +19,11 @@
 #include "../widgets/ExportProgressWidget.h"
 #include "../../MainWindow.h"
 #include "../../core/NotebookLibrary.h"
+#include "../../core/SandboxPdfOwnership.h"
 #include "../../core/Document.h"
 #include "../../batch/ExportQueueManager.h"
 #include "../../android/AndroidShareHelper.h"
+#include "../../platform/DocumentsDirectory.h"
 #include "../../platform/SystemNotification.h"
 #include "../../harmony/HarmonyWindowSwitch.h"
 
@@ -49,6 +51,7 @@
 #include <QUrl>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QJsonParseError>
 #include <QSettings>
 #include <QStandardPaths>
@@ -889,8 +892,7 @@ void Launcher::dropEvent(QDropEvent* event)
             }
         }
 
-        QString destDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
-                          + "/SpeedyNote";
+        QString destDir = PlatformPaths::notebooksDirectory();
         QDir().mkpath(destDir);
         performBatchImport(snbxFiles, destDir);
     }
@@ -1190,6 +1192,15 @@ bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
     
     MainWindow* mainWindow = MainWindow::findExistingMainWindow();
     
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
+    // Which imported PDFs go with them. Decided before the loop, while every
+    // manifest involved is still on disk, and against the notebooks we are keeping
+    // so that a copy shared with one of those survives. See SandboxPdfOwnership.
+    const QStringList pdfsToDelete = SandboxPdfOwnership::deletablePdfPaths(
+        bundlePaths, survivingNotebookBundles(bundlePaths),
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+#endif
+
     for (const QString& bundlePath : bundlePaths) {
         // BUG-TAB-002 FIX: If this notebook is open in MainWindow, close it first
         // This prevents undefined behavior (editing deleted files, save failures)
@@ -1199,12 +1210,11 @@ bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
             mainWindow->closeDocumentById(docId, true);  // discardChanges=true
         }
         
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
-        // BUG-A003 Storage Cleanup: Check if this document has an imported PDF in sandbox
-        // If so, delete the PDF too to prevent storage leaks
-        QString pdfToDelete = findImportedPdfPath(bundlePath);
-#endif
-        
+        // Before removeFromRecent(), which is what maps this bundle to the document
+        // id the cached thumbnail is filed under. Afterwards the file is orphaned:
+        // nothing else ever looks at it again, on any platform.
+        lib->invalidateThumbnail(bundlePath);
+
         // Remove from library
         lib->removeFromRecent(bundlePath);
         
@@ -1213,17 +1223,25 @@ bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
         if (bundleDir.exists()) {
             bundleDir.removeRecursively();
         }
-        
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
-        // Delete imported PDF if found
-        if (!pdfToDelete.isEmpty() && QFile::exists(pdfToDelete)) {
-            QFile::remove(pdfToDelete);
-#ifdef SPEEDYNOTE_DEBUG
-            qDebug() << "Launcher::deleteNotebooks: Also deleted imported PDF:" << pdfToDelete;
-#endif
-        }
-#endif
     }
+
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
+    // BUG-A003 Storage Cleanup: the PDFs we copied into app storage for these
+    // notebooks. Nothing else reclaims them, and the user cannot reach them with a
+    // file manager, so leaving them behind costs space that only reinstalling frees.
+    for (const QString& pdfToDelete : pdfsToDelete) {
+        if (!QFile::exists(pdfToDelete)) {
+            continue;
+        }
+        if (QFile::remove(pdfToDelete)) {
+            qInfo() << "Launcher: reclaimed imported PDF" << pdfToDelete;
+        } else {
+            // Worth a complaint rather than silence: on these platforms this is the
+            // only thing that can free the file, so a failure here is permanent.
+            qWarning() << "Launcher: could not delete imported PDF" << pdfToDelete;
+        }
+    }
+#endif
     
     // blocker goes out of scope here, re-enabling signals on NotebookLibrary.
     // Now do a single refresh of both views (L-010).
@@ -1900,8 +1918,10 @@ void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& d
         // Android/iOS: Use app data location for imports
         importDestDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
 #else
-        // Desktop: Use Documents/SpeedyNote as default
-        importDestDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/SpeedyNote";
+        // Desktop: Documents/SpeedyNote. On HarmonyOS this resolves to app storage
+        // instead when the device has no reachable Documents folder, which is every
+        // tablet -- importing into Documents there fails at the first write.
+        importDestDir = PlatformPaths::notebooksDirectory();
 #endif
     }
     QDir().mkpath(importDestDir);
@@ -2004,51 +2024,47 @@ void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& d
 }
 
 // HarmonyOS joins this for the same reason Android needed it: PDFs picked from
-// outside the sandbox are copied into <AppData>/pdfs, so they are ours to delete
-// along with the notebook. See HarmonyPdfImport.
+// outside the sandbox are copied into app storage, so they are ours to delete along
+// with the notebook. See HarmonyPdfImport and SandboxPdfOwnership.
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
-QString Launcher::findImportedPdfPath(const QString& bundlePath)
+// The notebooks that will still exist after this deletion, whose imported PDFs must
+// therefore be left alone.
+//
+// The library is the main source, but app storage is scanned as well, because a
+// notebook that is on disk and missing from the library index still opens and still
+// needs its PDF -- and if the index is ever lost or rebuilt, every notebook is in
+// that state at once. Erring towards keeping a file only wastes space; erring the
+// other way blanks the pages of a notebook we were not asked to touch.
+QStringList Launcher::survivingNotebookBundles(const QStringList& bundlesBeingDeleted)
 {
-    // BUG-A003 Storage Cleanup: Check if this document has an imported PDF in sandbox.
-    // Returns the path to the PDF if it's in our sandbox, empty string otherwise.
-    
-    // Read document.json to get the PDF path
-    QString manifestPath = bundlePath + "/document.json";
-    QFile manifestFile(manifestPath);
-    if (!manifestFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        return QString();
+    QSet<QString> excluded;
+    for (const QString& path : bundlesBeingDeleted) {
+        excluded.insert(QDir::cleanPath(path));
     }
-    
-    QByteArray data = manifestFile.readAll();
-    manifestFile.close();
-    
-    QJsonParseError parseError;
-    QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
-    if (parseError.error != QJsonParseError::NoError) {
-        return QString();
+
+    QStringList survivors;
+    const auto add = [&](const QString& bundlePath) {
+        const QString clean = QDir::cleanPath(bundlePath);
+        if (!excluded.contains(clean) && !survivors.contains(clean)) {
+            survivors << clean;
+        }
+    };
+
+    const QList<NotebookInfo> tracked = NotebookLibrary::instance()->recentNotebooks();
+    for (const NotebookInfo& notebook : tracked) {
+        add(notebook.bundlePath);
     }
-    
-    QJsonObject obj = doc.object();
-    QString pdfPath = obj["pdf_path"].toString();
-    
-    if (pdfPath.isEmpty()) {
-        return QString(); // Not a PDF-backed document
+
+    const QString notebooksDir =
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
+    const QDir dir(notebooksDir);
+    const QStringList onDisk =
+        dir.entryList({QStringLiteral("*.snb")}, QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString& name : onDisk) {
+        add(dir.absoluteFilePath(name));
     }
-    
-    // Check if the PDF is in our sandbox directories:
-    // 1. /files/pdfs/ - Direct PDF imports via SAF (BUG-A003)
-    // 2. /files/notebooks/embedded/ - PDFs extracted from .snbx packages (Phase 2)
-    QString appDataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QString sandboxPdfDir = appDataDir + "/pdfs";
-    QString embeddedDir = appDataDir + "/notebooks/embedded";
-    
-    if (pdfPath.startsWith(sandboxPdfDir) || pdfPath.startsWith(embeddedDir)) {
-        // This PDF was imported to our sandbox - safe to delete
-        return pdfPath;
-    }
-    
-    // PDF is external (user's original file) - don't delete it
-    return QString();
+
+    return survivors;
 }
 #endif
 

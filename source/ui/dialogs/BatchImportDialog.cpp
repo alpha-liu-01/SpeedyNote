@@ -4,6 +4,7 @@
 
 #include "../ThemeColors.h"
 #include "DialogSizing.h"
+#include "../../platform/DocumentsDirectory.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -47,8 +48,7 @@ BatchImportDialog::BatchImportDialog(QWidget* parent)
         m_destEdit->setText(lastDestDir);
     } else {
         // Default to Documents/SpeedyNote
-        QString defaultDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) 
-                            + "/SpeedyNote";
+        QString defaultDir = PlatformPaths::notebooksDirectory();
         QDir().mkpath(defaultDir);
         m_destEdit->setText(defaultDir);
     }
@@ -209,7 +209,7 @@ void BatchImportDialog::onAddFilesClicked()
     settings.endGroup();
     
     if (lastDir.isEmpty() || !QDir(lastDir).exists()) {
-        lastDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+        lastDir = PlatformPaths::documentsDirectory();
     }
     
     QStringList files = QFileDialog::getOpenFileNames(
@@ -237,7 +237,7 @@ void BatchImportDialog::onAddFolderClicked()
     settings.endGroup();
     
     if (lastDir.isEmpty() || !QDir(lastDir).exists()) {
-        lastDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+        lastDir = PlatformPaths::documentsDirectory();
     }
     
     QString folder = QFileDialog::getExistingDirectory(
@@ -293,7 +293,7 @@ void BatchImportDialog::onBrowseDestClicked()
 {
     QString currentDir = m_destEdit->text();
     if (currentDir.isEmpty() || !QDir(currentDir).exists()) {
-        currentDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+        currentDir = PlatformPaths::documentsDirectory();
     }
     
     QString folder = QFileDialog::getExistingDirectory(

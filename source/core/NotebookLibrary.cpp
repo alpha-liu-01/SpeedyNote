@@ -32,6 +32,11 @@ NotebookLibrary::NotebookLibrary(QObject* parent)
     
     // Load existing library data
     load();
+
+    // Enforce the cache ceiling once per run. Without this call the limit below was
+    // never applied to anything -- and on Android, iOS and HarmonyOS the user cannot
+    // open the cache directory to clear it by hand.
+    cleanupThumbnailCache();
 }
 
 NotebookLibrary* NotebookLibrary::instance()

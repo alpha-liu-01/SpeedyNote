@@ -54,31 +54,56 @@ QString ensureReachable(const QString& pickedPath)
         return pickedPath;
     }
 
-    // Same file, already imported: match on name and size, as the Android copy
-    // does. Hash would be stronger, but Document computes and stores one anyway,
-    // and a name and size collision between two different PDFs the same user
-    // picked twice is not worth a second read of the whole file.
-    QString target = QDir(dir).absoluteFilePath(picked.fileName());
-    const QFileInfo existing(target);
-    if (existing.exists() && existing.size() == picked.size()) {
-        return target;
+    // Leftovers from a run that was killed mid-copy. Harmless but unreclaimable:
+    // the user has no file manager access to app storage.
+    const QDir importRoot(dir);
+    const QStringList stale =
+        importRoot.entryList({QStringLiteral("*.part")}, QDir::Files);
+    for (const QString& name : stale) {
+        QFile::remove(importRoot.absoluteFilePath(name));
     }
 
-    // Different file wearing a name we already used.
-    if (existing.exists()) {
-        const QString base = picked.completeBaseName();
-        const QString suffix = picked.suffix().isEmpty()
-                                   ? QString()
-                                   : QLatin1Char('.') + picked.suffix();
-        for (int n = 1; QFileInfo::exists(target); ++n) {
-            target = QDir(dir).absoluteFilePath(
-                QStringLiteral("%1_%2%3").arg(base).arg(n).arg(suffix));
+    // Reuse an identical import rather than making a second copy, matching on name
+    // and size as the Android copy does. Hash would be stronger, but Document
+    // computes and stores one anyway, and reading whole files here to catch a
+    // same-name same-size collision is not worth it.
+    //
+    // The numbered candidates have to be checked too, not just the plain name:
+    // when a different PDF already holds the plain name, picking the same file
+    // repeatedly would otherwise add a copy on every open.
+    const QString base = picked.completeBaseName();
+    const QString suffix =
+        picked.suffix().isEmpty() ? QString() : QLatin1Char('.') + picked.suffix();
+    QString target;
+    for (int n = 0; target.isEmpty(); ++n) {
+        const QString candidate = importRoot.absoluteFilePath(
+            n == 0 ? picked.fileName()
+                   : QStringLiteral("%1_%2%3").arg(base).arg(n).arg(suffix));
+        const QFileInfo existing(candidate);
+        if (!existing.exists()) {
+            target = candidate;
+        } else if (existing.size() == picked.size()) {
+            return candidate;
         }
     }
 
-    if (!QFile::copy(pickedPath, target)) {
-        qWarning() << "HarmonyPdfImport: cannot copy" << pickedPath << "to" << target
+    // Copy to a temporary name and rename into place. An interrupted copy would
+    // otherwise leave a short file that the size check above reads as a different
+    // PDF, so every subsequent open would copy again. rename(2) is safe here: the
+    // sharefs restriction that defeats QSaveFile applies to the user's folders,
+    // not to app-private storage.
+    const QString partial = target + QStringLiteral(".part");
+    QFile::remove(partial);
+    if (!QFile::copy(pickedPath, partial)) {
+        qWarning() << "HarmonyPdfImport: cannot copy" << pickedPath << "to" << partial
                    << "- keeping the picked path, which will not survive a restart";
+        QFile::remove(partial);
+        return pickedPath;
+    }
+    if (!QFile::rename(partial, target)) {
+        qWarning() << "HarmonyPdfImport: cannot rename" << partial << "to" << target
+                   << "- keeping the picked path, which will not survive a restart";
+        QFile::remove(partial);
         return pickedPath;
     }
 

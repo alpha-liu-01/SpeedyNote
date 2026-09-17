@@ -569,6 +569,7 @@ static void applyAndroidFonts(QApplication& app)
 #include "core/PageTests.h"
 #include "core/DocumentTests.h"
 #include "core/NotebookLibraryTests.h"
+#include "core/SandboxPdfOwnershipTests.h"
 #include "core/DocumentViewportTests.h"
 #include "ui/ToolbarButtonTests.h"
 #include "objects/LinkObjectTests.h"
@@ -953,6 +954,8 @@ static int runTests(const QString& testType)
         success = DocumentTests::runAllTests();
     } else if (testType == "notebooklibrary") {
         success = NotebookLibraryTests::runAllTests();
+    } else if (testType == "sandboxpdf") {
+        success = SandboxPdfOwnershipTests::runAllTests();
     } else if (testType == "viewport-unit") {
         success = DocumentViewportTests::runUnitTests();
     } else if (testType == "linkobject") {
@@ -1244,6 +1247,10 @@ int main(int argc, char* argv[])
     // HarmonyEnvironment caches it, so this also keeps the dialogs snappy.
     qInfo() << "HarmonyOS: documents root =" << HarmonyEnvironment::writableDocumentsRoot()
             << "(user folder access:" << HarmonyEnvironment::hasUserDocumentsAccess() << ")";
+    // Logged because several dialogs still default to it, and on this platform it
+    // names a directory that exists and is listable but is not necessarily writable.
+    qInfo() << "HarmonyOS: QStandardPaths DocumentsLocation ="
+            << QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     // Probed here rather than where it is used so that every run records the
     // answer, including runs on devices that have user folders and never need it.
     // It is one query against a service, and we would otherwise be guessing at
@@ -1312,6 +1319,8 @@ int main(int argc, char* argv[])
             testToRun = "document";
         } else if (arg == "--test-notebooklibrary") {
             testToRun = "notebooklibrary";
+        } else if (arg == "--test-sandboxpdf") {
+            testToRun = "sandboxpdf";
         } else if (arg == "--test-viewport-unit") {
             testToRun = "viewport-unit";
         } else if (arg == "--test-viewport") {

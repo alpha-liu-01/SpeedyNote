@@ -1,6 +1,7 @@
 #include "BatchExportDialog.h"
 
 #include "DialogSizing.h"
+#include "../../platform/DocumentsDirectory.h"
 
 #include <QApplication>
 #include <QButtonGroup>
@@ -385,7 +386,7 @@ void BatchExportDialog::loadSettings()
 
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     const QString documents =
-        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+        PlatformPaths::documentsDirectory();
     m_pdfOutputEdit->setText(
         !pdfOutput.isEmpty() && QDir(pdfOutput).exists() ? pdfOutput : documents);
     m_snbxOutputEdit->setText(
@@ -463,7 +464,7 @@ QString BatchExportDialog::chooseOutputDirectory(QLineEdit* edit) const
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     QString current = edit ? edit->text().trimmed() : QString();
     if (current.isEmpty() || !QDir(current).exists()) {
-        current = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+        current = PlatformPaths::documentsDirectory();
     }
     const QString selected = QFileDialog::getExistingDirectory(
         const_cast<BatchExportDialog*>(this), tr("Select Output Folder"), current,
