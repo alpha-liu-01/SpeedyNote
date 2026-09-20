@@ -25,6 +25,8 @@
 #include "../../android/PdfPickerAndroid.h"
 #elif defined(Q_OS_IOS)
 #include "../../ios/PdfPickerIOS.h"
+#elif defined(Q_OS_HARMONY)
+#include "../../harmony/HarmonyPdfImport.h"
 #endif
 
 namespace {
@@ -38,6 +40,8 @@ QString statusText(PdfSourceHealthStatus status)
         return QCoreApplication::translate("PdfSourcesDialog", "Available (relative copy)");
     case PdfSourceHealthStatus::AvailableBundled:
         return QCoreApplication::translate("PdfSourcesDialog", "Available (embedded copy)");
+    case PdfSourceHealthStatus::AvailableUpdated:
+        return QCoreApplication::translate("PdfSourcesDialog", "Available (file has changed)");
     case PdfSourceHealthStatus::PartialBundled:
         return QCoreApplication::translate("PdfSourcesDialog", "Embedded copy is incomplete");
     case PdfSourceHealthStatus::IdentityMismatch:
@@ -187,9 +191,16 @@ QString PdfSourcesDialog::choosePdfFile(const QString& startPath)
 #else
     QString directory = QFileInfo(startPath).absolutePath();
     if (directory.isEmpty() || !QDir(directory).exists()) directory = QDir::homePath();
-    return QFileDialog::getOpenFileName(
+    const QString picked = QFileDialog::getOpenFileName(
         this, tr("Locate PDF Source"), directory,
         tr("PDF Files (*.pdf);;All Files (*)"));
+#ifdef Q_OS_HARMONY
+    // Without this the relink succeeds and then expires with the process, which
+    // is the failure a tester described as "it will never relink".
+    return HarmonyPdfImport::ensureReachable(picked);
+#else
+    return picked;
+#endif
 #endif
 }
 
@@ -214,12 +225,67 @@ void PdfSourcesDialog::locateSelectedSource()
 void PdfSourcesDialog::handleLocatedPath(const QString& sourceId, const QString& path)
 {
     if (!m_document || path.isEmpty()) return;
-    emit sourcesAboutToChange();
-    if (!m_document->locateSource(sourceId, path)) {
+
+    using Probe = Document::SourceCandidateProbe;
+    const Probe probe = m_document->probeSourceCandidate(sourceId, path);
+
+    if (probe.result == Probe::Result::Unreadable
+        || probe.result == Probe::Result::InvalidTarget) {
         QMessageBox::warning(
-            this, tr("PDF Source Not Matched"),
-            tr("The selected PDF is damaged or does not match the original source. "
+            this, tr("PDF Could Not Be Opened"),
+            tr("The selected file could not be read as a PDF. "
                "No document links were changed."));
+        return;
+    }
+
+    // A mismatch is not necessarily the wrong document: re-saving a PDF in
+    // another app rewrites the bytes the fingerprint covers. Name the concrete
+    // differences and let the user decide, since refusing outright leaves no
+    // way at all to re-link a file that has been rewritten in place.
+    bool acceptMismatch = false;
+    if (probe.result == Probe::Result::Mismatch) {
+        const PdfSource* source = m_document->pdfSourceById(sourceId);
+        const qint64 storedSize = source ? source->size : 0;
+        const int storedPages = source ? source->pageCount : 0;
+
+        QString details = tr("Selected file: %1").arg(QFileInfo(path).fileName());
+        if (storedPages > 0) {
+            details += QLatin1Char('\n')
+                + tr("Pages: %1 originally, %2 in this file")
+                      .arg(storedPages).arg(probe.pageCount);
+        } else {
+            details += QLatin1Char('\n') + tr("Pages in this file: %1").arg(probe.pageCount);
+        }
+        if (storedSize > 0) {
+            details += QLatin1Char('\n')
+                + tr("Size: %1 originally, %2 in this file")
+                      .arg(locale().formattedDataSize(storedSize),
+                           locale().formattedDataSize(probe.size));
+        }
+
+        QMessageBox box(this);
+        box.setIcon(QMessageBox::Warning);
+        box.setWindowTitle(tr("PDF Source Not Matched"));
+        box.setText(tr("This PDF is not the exact file that was originally linked."));
+        box.setInformativeText(
+            tr("Linking it anyway is safe if the document was only re-saved or its "
+               "metadata changed. Page backgrounds are matched by page number, so a "
+               "file with different pages will show the wrong background behind "
+               "your annotations."));
+        box.setDetailedText(details);
+        QPushButton* linkAnyway = box.addButton(tr("Link Anyway"), QMessageBox::AcceptRole);
+        QPushButton* cancel = box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(cancel);
+        box.exec();
+        if (box.clickedButton() != linkAnyway) return;
+        acceptMismatch = true;
+    }
+
+    emit sourcesAboutToChange();
+    if (!m_document->locateSource(sourceId, path, acceptMismatch)) {
+        QMessageBox::warning(
+            this, tr("PDF Source Not Linked"),
+            tr("The selected PDF could not be linked. No document links were changed."));
         emit sourcesChanged();
         return;
     }

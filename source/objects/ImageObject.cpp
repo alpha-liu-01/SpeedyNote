@@ -12,7 +12,7 @@
 #include <QImageReader>
 #include <QPainter>
 #include <QPixmapCache>
-#include <QSaveFile>
+#include "../platform/BundleFile.h"
 #include <QtEndian>
 #include <QtMath>
 #include <limits>
@@ -516,7 +516,7 @@ bool ImageObject::saveToAssets(const QString& bundlePath)
 
     // Atomically publish the exact bytes used for hashing. This avoids the
     // previous second full-resolution PNG encode and prevents partial assets.
-    QSaveFile output(fullFilePath);
+    BundleFile output(fullFilePath);
     output.setDirectWriteFallback(false);
     if (!output.open(QIODevice::WriteOnly)
         || output.write(bytes) != bytes.size()

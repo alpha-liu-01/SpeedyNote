@@ -56,6 +56,7 @@
 #include "core/ToolType.h" // Include the header file where ToolType is defined
 #include "ui/SplitViewManager.h"
 #include "ui/TabManager.h"
+#include "ui/MenuPopup.h"
 #include "ui/TabBar.h"
 #include <QFileDialog>
 #include <QDateTime>
@@ -120,6 +121,36 @@
 
 #endif // Q_OS_ANDROID / Q_OS_IOS
 
+#ifdef Q_OS_HARMONY
+#include "harmony/HarmonyEnvironment.h"
+#include "harmony/HarmonyPdfImport.h"
+#endif
+
+#include "harmony/HarmonyWindowSwitch.h"
+
+// ============================================================================
+// Dialog options for .snb bundles
+// ============================================================================
+// HarmonyOS routes native file dialogs to the system DocumentViewPicker, which
+// is file-oriented: asked to save, it creates an empty regular file at the
+// chosen path and grants "secure access" to that one file. A .snb bundle is a
+// directory, so the save then fails on the very file the picker just created,
+// and Open cannot select a bundle at all. Qt's own widget dialog sidesteps both,
+// and ohos.permission.READ_WRITE_DOCUMENTS_DIRECTORY lets us create the
+// directory ourselves -- the arrangement HarmonyEnvironment probes for.
+//
+// Only bundle dialogs opt out. The PDF and plain-folder dialogs keep the native
+// picker, since those really do operate on one file or one folder, which is what
+// it is good at, and it grants access without needing any permission.
+static QFileDialog::Options bundleDialogOptions()
+{
+#ifdef Q_OS_HARMONY
+    return QFileDialog::DontUseNativeDialog;
+#else
+    return QFileDialog::Options();
+#endif
+}
+
 #ifdef Q_OS_MACOS
 #include "macos/MacPlatformHelper.h"
 #endif
@@ -148,7 +179,10 @@ QSharedMemory *MainWindow::sharedMemory = nullptr;
 // Always using new architecture now
 // bool MainWindow::s_useNewViewport = false;
 
-#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
+// Desktop Linux only. Q_OS_LINUX is also defined on Android and HarmonyOS, and
+// neither wants this: the _exit(0) below would bypass the platform's own
+// shutdown, and there is no shared memory or peer socket to release there.
+#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID) && !defined(Q_OS_HARMONY)
 // Linux-specific signal handler for cleanup (not used on Android)
 void linuxSignalHandler(int signal) {
     Q_UNUSED(signal);
@@ -183,9 +217,16 @@ MainWindow::MainWindow(QWidget *parent)
     // viewport / current-tab change thereafter.
     setWindowTitle(QStringLiteral("SpeedyNote"));
 
+    // Before anything can realise this window: on HarmonyOS it has to be a
+    // sub-window of the Launcher rather than an ability instance of its own, or
+    // the switch between the two becomes unrecoverable. Done here rather than at
+    // the four call sites that construct a MainWindow so that none of them can
+    // forget. A no-op off HarmonyOS.
+    HarmonyWindowSwitch::adoptAsLauncherSubWindow(this);
+
     // Phase 3.1: Always using new DocumentViewport architecture
 
-#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
+#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID) && !defined(Q_OS_HARMONY)
     // Setup signal handlers for proper cleanup on Linux (not Android)
     setupLinuxSignalHandlers();
 #endif
@@ -3742,7 +3783,15 @@ bool MainWindow::saveNewDocumentWithDialog(Document* doc)
     QSettings saveSettings("SpeedyNote", "App");
     QString lastSaveDir = saveSettings.value("FileDialogs/lastSaveDirectory").toString();
     if (lastSaveDir.isEmpty() || !QDir(lastSaveDir).exists()) {
+#ifdef Q_OS_HARMONY
+        // Not QDir::homePath(): see HarmonyEnvironment::writableDocumentsRoot().
+        // It resolves to /storage/Users/<user> here, which is listable but not
+        // writable unless the user granted the Documents permission, so it would
+        // offer a default path that then fails to save.
+        lastSaveDir = HarmonyEnvironment::writableDocumentsRoot();
+#else
         lastSaveDir = QDir::homePath();
+#endif
     }
     QString defaultPath = lastSaveDir + "/" + defaultName + ".snb";
     
@@ -3750,7 +3799,9 @@ bool MainWindow::saveNewDocumentWithDialog(Document* doc)
         this,
         isEdgeless ? tr("Save Canvas") : tr("Save Document"),
         defaultPath,
-        tr("SpeedyNote Bundle (*.snb)")
+        tr("SpeedyNote Bundle (*.snb)"),
+        nullptr,
+        bundleDialogOptions()
     );
     
     if (filePath.isEmpty()) {
@@ -4009,7 +4060,11 @@ void MainWindow::loadDocument()
     QSettings openSettings("SpeedyNote", "App");
     QString lastOpenDir = openSettings.value("FileDialogs/lastOpenDirectory").toString();
     if (lastOpenDir.isEmpty() || !QDir(lastOpenDir).exists()) {
+#ifdef Q_OS_HARMONY
+        lastOpenDir = HarmonyEnvironment::writableDocumentsRoot();
+#else
         lastOpenDir = QDir::homePath();
+#endif
     }
     
     QString filter = tr("SpeedyNote Files (*.snb *.pdf);;SpeedyNote Bundle (*.snb);;PDF Documents (*.pdf);;All Files (*)");
@@ -4017,7 +4072,9 @@ void MainWindow::loadDocument()
         this,
         tr("Open Document"),
         lastOpenDir,
-        filter
+        filter,
+        nullptr,
+        bundleDialogOptions()
     );
     
     if (filePath.isEmpty()) {
@@ -4572,6 +4629,9 @@ void MainWindow::addPagesFromPdf(const QString& filePath,
             settings.setValue(QStringLiteral("FileDialogs/lastOpenDirectory"),
                               QFileInfo(pdfPath).absolutePath());
         }
+#ifdef Q_OS_HARMONY
+        pdfPath = HarmonyPdfImport::ensureReachable(pdfPath);
+#endif
 #endif
     }
     if (pdfPath.isEmpty()) return;
@@ -4689,6 +4749,12 @@ void MainWindow::openPdfDocument(const QString &filePath)
         }
         
         pdfSettings.setValue("FileDialogs/lastOpenDirectory", QFileInfo(pdfPath).absolutePath());
+
+#ifdef Q_OS_HARMONY
+        // The picker's grant dies with the process, so a path from outside the
+        // sandbox has to be copied in before the notebook records it.
+        pdfPath = HarmonyPdfImport::ensureReachable(pdfPath);
+#endif
 #endif
     }
     
@@ -8119,13 +8185,17 @@ void MainWindow::preserveWindowState(QWidget* sourceWindow, bool isExistingWindo
         }
     } else {
         // For new windows, apply source window's state
-        if (sourceWindow->isMaximized()) {
+        const bool copyState = HarmonyWindowSwitch::copiesWindowState();
+        if (copyState && sourceWindow->isMaximized()) {
             showMaximized();
-        } else if (sourceWindow->isFullScreen()) {
+        } else if (copyState && sourceWindow->isFullScreen()) {
             showFullScreen();
         } else {
-            resize(sourceWindow->size());
-            move(sourceWindow->pos());
+            const QRect target = HarmonyWindowSwitch::targetGeometry(this, sourceWindow);
+            if (target.isValid()) {
+                resize(target.size());
+                move(target.topLeft());
+            }
             show();
         }
     }
@@ -8520,114 +8590,17 @@ void MainWindow::toggleLauncher() {
         return;
     }
     
-    // Animation duration in milliseconds
-    const int fadeDuration = 150;
-    
-    if (launcher->isVisible()) {
+    if (HarmonyWindowSwitch::launcherInFront(launcher)) {
         // ========== LAUNCHER → MAINWINDOW ==========
-        // Read Launcher state BEFORE we reset it below.
-        const bool launcherMaximized  = launcher->isMaximized();
-        const bool launcherFullScreen = launcher->isFullScreen();
-        const QPoint launcherPos  = launcher->pos();
-        const QSize  launcherSize = launcher->size();
-        
-        // Show MainWindow in the Launcher's window state.
-        // Reset stale native state on the hidden MainWindow (same reasoning
-        // as the Launcher reset in the other branch — QWidget skips the
-        // platform update for hidden widgets, but QWindow does not).
-        setWindowState(Qt::WindowNoState);
-        if (QWindow* win = windowHandle()) {
-            win->setWindowState(Qt::WindowNoState);
-        }
-        setWindowOpacity(0.0);
-        if (launcherMaximized) {
-            showMaximized();
-        } else if (launcherFullScreen) {
-            showFullScreen();
-        } else {
-            showNormal();
-            // Set geometry AFTER show so our move()/resize() has the final
-            // word.  On Windows, ShowWindow(SW_SHOWNORMAL) can adjust the
-            // position using stale placement data; applying geometry after
-            // the show overrides that.  The window is at opacity 0, so the
-            // brief intermediate position is invisible.
-            move(launcherPos);
-            resize(launcherSize);
-        }
-        raise();
-        activateWindow();
+        HarmonyWindowSwitch::switchTo(/*incoming*/this, /*outgoing*/launcher);
         
         // Sync fullscreen button with the actual window state
         if (m_navigationBar) {
             m_navigationBar->setFullscreenChecked(isFullScreen());
         }
-        
-        // Restore Launcher to normal windowed state BEFORE hiding.
-        // On Windows, hide() preserves the native window's fullscreen styling
-        // (no decorations, full-screen geometry).  Qt's setWindowState() on a
-        // *hidden* widget only updates the internal state variable — it skips
-        // the platform-level update because isVisible() is false.  That means
-        // a later showNormal() finds the native window still carrying stale
-        // fullscreen styles, producing a frameless or full-screen window.
-        // Transitioning while visible (behind MainWindow, opacity 0) forces the
-        // window manager to properly restore the window frame.
-        launcher->setWindowOpacity(0.0);
-        if (launcher->windowState() != Qt::WindowNoState) {
-            launcher->setWindowState(Qt::WindowNoState);
-        }
-        launcher->hide();
-        launcher->setWindowOpacity(1.0);  // Reset for next time
-        
-        // Fade MainWindow in
-        auto* fadeIn = new QPropertyAnimation(this, "windowOpacity");
-        fadeIn->setDuration(fadeDuration);
-        fadeIn->setStartValue(0.0);
-        fadeIn->setEndValue(1.0);
-        fadeIn->setEasingCurve(QEasingCurve::OutCubic);
-        fadeIn->start(QAbstractAnimation::DeleteWhenStopped);
-        
     } else {
         // ========== MAINWINDOW → LAUNCHER ==========
-        const bool srcMaximized  = isMaximized();
-        const bool srcFullScreen = isFullScreen();
-        const QPoint srcPos  = pos();
-        const QSize  srcSize = size();
-        
-        // Show Launcher in MainWindow's window state.
-        // Reset stale fullscreen/maximized state at BOTH the QWidget and
-        // QWindow level.  QWidget::setWindowState() on a hidden widget only
-        // updates the internal flag — it skips the platform update because
-        // isVisible() is false.  QWindow::setWindowState() has no such guard,
-        // so calling it on windowHandle() forces the native window to restore
-        // normal styling (decorations, geometry) even while hidden.
-        launcher->setWindowState(Qt::WindowNoState);
-        if (QWindow* win = launcher->windowHandle()) {
-            win->setWindowState(Qt::WindowNoState);
-        }
-        launcher->setWindowOpacity(0.0);
-        if (srcMaximized) {
-            launcher->showMaximized();
-        } else if (srcFullScreen) {
-            launcher->showFullScreen();
-        } else {
-            launcher->show();
-            launcher->move(srcPos);
-            launcher->resize(srcSize);
-        }
-        launcher->raise();
-        launcher->activateWindow();
-        
-        // Hide MainWindow immediately (no flicker since launcher is now on top)
-        hide();
-        setWindowOpacity(1.0);  // Reset for next time
-        
-        // Fade launcher in
-        auto* fadeIn = new QPropertyAnimation(launcher, "windowOpacity");
-        fadeIn->setDuration(fadeDuration);
-        fadeIn->setStartValue(0.0);
-        fadeIn->setEndValue(1.0);
-        fadeIn->setEasingCurve(QEasingCurve::OutCubic);
-        fadeIn->start(QAbstractAnimation::DeleteWhenStopped);
+        HarmonyWindowSwitch::switchTo(/*incoming*/launcher, /*outgoing*/this);
     }
 }
 
@@ -8664,12 +8637,10 @@ void MainWindow::showAddMenu() {
     
     // Position menu below the add button
     QWidget* addButton = m_navigationBar->addButton();
-    if (addButton) {
-        QPoint buttonPos = addButton->mapToGlobal(QPoint(0, addButton->height()));
-        menu.exec(buttonPos);
-    } else {
-        menu.exec(QCursor::pos());
-    }
+    const QPoint pos = addButton != nullptr
+        ? addButton->mapToGlobal(QPoint(0, addButton->height()))
+        : QCursor::pos();
+    execMenuAt(menu, pos);
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event) {
@@ -9448,8 +9419,28 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 
 bool MainWindow::isInstanceRunning()
 {
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
-    // Android/iOS handle app lifecycle differently - always return false
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
+    // Android/iOS/HarmonyOS handle app lifecycle differently - always return false.
+    //
+    // On HarmonyOS this is not merely unnecessary but actively fatal, and it must
+    // stay that way. The ability framework already guarantees one instance per
+    // bundle, while the desktop mechanism below locks the app out permanently
+    // after its first run:
+    //
+    //   - Qt for HarmonyOS backs QSharedMemory with POSIX shm, not System V
+    //     (nativeIpcKey reads "posix:/qipc_sharedmemory_SpeedyNoteSingleInstance...").
+    //   - A POSIX shm object outlives its creator until someone calls shm_unlink.
+    //     When the ability framework tears the process down, nothing does, so the
+    //     object leaks and every later create() returns AlreadyExists.
+    //   - The stale-segment recovery below cannot clear it: attach()/detach() only
+    //     unlinks in the creating process, and the last-resort cleanup shells out
+    //     to ipcs/ipcrm, which do not exist on HarmonyOS and are System V tools
+    //     that could not touch a POSIX object anyway.
+    //   - Unlike the macOS path, the Linux path has no "assume we are alone"
+    //     fallback, so it falls through to return true. main() then exits 0 before
+    //     the event loop, the ability is destroyed, and because it is a clean exit
+    //     there is no crash and no faultlog -- just an app that silently refuses
+    //     to start until the device reboots.
     return false;
 #else
     if (!sharedMemory) {
@@ -9571,7 +9562,9 @@ bool MainWindow::sendToExistingInstance(const QString &filePath)
 
 void MainWindow::setupSingleInstanceServer()
 {
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
+    // No counterpart to isInstanceRunning() on these platforms, so there is
+    // nothing for the peer socket to serve.
     return;
 #else
     localServer = new QLocalServer(this);
@@ -9667,7 +9660,9 @@ void MainWindow::cleanupSharedResources()
     QLocalServer::removeServer("SpeedyNote_SingleInstance");
 #endif
     
-#ifdef Q_OS_LINUX
+// Not on HarmonyOS: ipcs/ipcrm are absent there, and its QSharedMemory is POSIX
+// rather than System V, so this would be a pointless subprocess at every exit.
+#if defined(Q_OS_LINUX) && !defined(Q_OS_HARMONY)
     // On Linux, try to clean up stale shared memory segments
     // Use system() instead of QProcess to avoid Qt dependencies in cleanup
     int ret = system("ipcs -m | grep $(whoami) | awk '/SpeedyNote/{print $2}' | xargs -r ipcrm -m 2>/dev/null");
@@ -9893,6 +9888,10 @@ bool MainWindow::switchToDocument(const QString& bundlePath)
 
 void MainWindow::bringToFront()
 {
+    // The canonical "MainWindow comes forward" entry point, so it is where the
+    // switch direction is recorded for the paths that do not call switchTo().
+    HarmonyWindowSwitch::setLauncherInFront(false);
+
     // Phase P.4.5: Fade in if window was hidden
     bool wasHidden = !isVisible();
     

@@ -3,6 +3,8 @@
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)  // Desktop only
 
 #include "../ThemeColors.h"
+#include "DialogSizing.h"
+#include "../../platform/DocumentsDirectory.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -46,8 +48,7 @@ BatchImportDialog::BatchImportDialog(QWidget* parent)
         m_destEdit->setText(lastDestDir);
     } else {
         // Default to Documents/SpeedyNote
-        QString defaultDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) 
-                            + "/SpeedyNote";
+        QString defaultDir = PlatformPaths::notebooksDirectory();
         QDir().mkpath(defaultDir);
         m_destEdit->setText(defaultDir);
     }
@@ -55,7 +56,15 @@ BatchImportDialog::BatchImportDialog(QWidget* parent)
     updateImportButton();
     
     // Size and position
-    setMinimumSize(DIALOG_MIN_WIDTH, DIALOG_MIN_HEIGHT);
+    //
+    // A preferred size, not a minimum: these numbers are a floor for how small
+    // the dialog should look, and they were only ever a ceiling on how much of
+    // it you could see. Setting them as the minimum told QLayout::activate() to
+    // use them in place of the minimum the layout reports, which on HarmonyOS is
+    // 568x620 against a 12pt font -- so the dialog opened 170px shorter than its
+    // own content needed, the file list was squeezed away to nothing and the row
+    // of buttons under it was clipped through the middle.
+    DialogSizing::openAtSize(this, QSize(DIALOG_MIN_WIDTH, DIALOG_MIN_HEIGHT));
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
     
     if (parent) {
@@ -80,8 +89,10 @@ void BatchImportDialog::setupUi()
     
     // ===== Title =====
     m_titleLabel = new QLabel(tr("Select Notebooks to Import"));
-    QFont titleFont = m_titleLabel->font();
-    titleFont.setPointSize(16);
+    // Proportional, not 16pt: an absolute size is a different amount of emphasis
+    // on every platform -- nearly twice the body text against a 9pt desktop
+    // default, a quarter above it against HarmonyOS's 12pt.
+    QFont titleFont = DialogSizing::scaledFont(m_titleLabel->font(), 1.3);
     titleFont.setBold(true);
     m_titleLabel->setFont(titleFont);
     mainLayout->addWidget(m_titleLabel);
@@ -91,7 +102,11 @@ void BatchImportDialog::setupUi()
         tr("Add .snbx notebook packages to import. You can add individual files "
            "or scan a folder for notebooks."));
     descLabel->setWordWrap(true);
-    descLabel->setStyleSheet("color: palette(placeholderText); font-size: 13px;");
+    // Colour in the stylesheet, size on the font: a px size here is a constant
+    // beside a body size that is not one, so it means "smaller" on a 96dpi
+    // desktop and "the same or larger" on a platform reporting 72dpi.
+    descLabel->setStyleSheet("color: palette(placeholderText);");
+    descLabel->setFont(DialogSizing::scaledFont(descLabel->font(), 0.9));
     mainLayout->addWidget(descLabel);
     
     // ===== File List =====
@@ -101,7 +116,8 @@ void BatchImportDialog::setupUi()
     
     // File count label
     m_fileCountLabel = new QLabel(tr("No files selected"));
-    m_fileCountLabel->setStyleSheet("color: palette(placeholderText); font-size: 12px;");
+    m_fileCountLabel->setStyleSheet("color: palette(placeholderText);");
+    m_fileCountLabel->setFont(DialogSizing::scaledFont(m_fileCountLabel->font(), 0.9));
     filesLayout->addWidget(m_fileCountLabel);
     
     // File list widget
@@ -193,7 +209,7 @@ void BatchImportDialog::onAddFilesClicked()
     settings.endGroup();
     
     if (lastDir.isEmpty() || !QDir(lastDir).exists()) {
-        lastDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+        lastDir = PlatformPaths::documentsDirectory();
     }
     
     QStringList files = QFileDialog::getOpenFileNames(
@@ -221,7 +237,7 @@ void BatchImportDialog::onAddFolderClicked()
     settings.endGroup();
     
     if (lastDir.isEmpty() || !QDir(lastDir).exists()) {
-        lastDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+        lastDir = PlatformPaths::documentsDirectory();
     }
     
     QString folder = QFileDialog::getExistingDirectory(
@@ -277,7 +293,7 @@ void BatchImportDialog::onBrowseDestClicked()
 {
     QString currentDir = m_destEdit->text();
     if (currentDir.isEmpty() || !QDir(currentDir).exists()) {
-        currentDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+        currentDir = PlatformPaths::documentsDirectory();
     }
     
     QString folder = QFileDialog::getExistingDirectory(

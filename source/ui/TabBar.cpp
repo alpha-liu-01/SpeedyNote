@@ -1,5 +1,6 @@
 #include "TabBar.h"
 #include "StyleLoader.h"
+#include "MenuPopup.h"
 #include <QGuiApplication>
 #include <QPalette>
 #include <QMenu>
@@ -212,7 +213,7 @@ void TabBar::showSplitMenu(const QPoint& globalPos, int tabIndex)
     }
 
     if (!menu.isEmpty())
-        menu.exec(globalPos);
+        execMenuAt(menu, globalPos);
 }
 
 void TabBar::contextMenuEvent(QContextMenuEvent* event)

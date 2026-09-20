@@ -13,7 +13,7 @@
 #include <QCryptographicHash>
 #include <QImageReader>
 #include <QRegularExpression>
-#include <QSaveFile>
+#include "../platform/BundleFile.h"
 #include <QSettings>
 #include <QtConcurrent>
 #include <cmath>
@@ -250,6 +250,7 @@ void Document::clearCachedPdfProvider(const QString& registryId) const
     m_pdfProviderPathModifiedTimes.erase(registryId);
     m_pdfProvidersUsingBundled.remove(registryId);
     m_pdfProvidersUsingRelative.remove(registryId);
+    m_pdfSourceDrifted.remove(registryId);
     m_pdfSourceFailures.erase(registryId);
 }
 
@@ -288,6 +289,11 @@ Document::PdfSourceOpenResult Document::openBestPdfSourceCandidate(const PdfSour
     bool foundExisting = false;
     bool foundIdentityMismatch = false;
     bool foundUnreadable = false;
+
+    // Pass 1: candidates whose identity checks out. An exact match always wins,
+    // so a bundled mini-PDF (guaranteed to be the original content) is still
+    // preferred over an external file whose bytes have moved on.
+    QVector<Candidate> drifted;
     for (const Candidate& candidate : candidates) {
         QFileInfo info(candidate.path);
         if (!info.exists() || !info.isFile()) {
@@ -302,6 +308,7 @@ Document::PdfSourceOpenResult Document::openBestPdfSourceCandidate(const PdfSour
             const bool hashMatches = sizeMatches && computePdfHash(candidate.path) == source.hash;
             if (!hashMatches) {
                 foundIdentityMismatch = true;
+                drifted.append(candidate);
                 continue;
             }
         }
@@ -312,10 +319,44 @@ Document::PdfSourceOpenResult Document::openBestPdfSourceCandidate(const PdfSour
             continue;
         }
 
+        if (!candidate.bundled) {
+            rememberSourcePageCount(source.id, provider->pageCount());
+        }
         result.provider = std::move(provider);
         result.path = candidate.path;
         result.bundled = candidate.bundled;
         result.relative = candidate.relative;
+        return result;
+    }
+
+    // Pass 2: nothing verified, so fall back to a file that is no longer
+    // byte-identical. Re-saving a PDF in another app rewrites the header and
+    // metadata that the fingerprint covers without touching any page, and
+    // refusing those strands the notebook with no way back. Requiring the page
+    // count to still line up is what keeps a genuinely different document out,
+    // since page backgrounds are matched by page number.
+    for (const Candidate& candidate : drifted) {
+        std::unique_ptr<PdfProvider> provider = PdfProvider::create(candidate.path);
+        if (!provider || !provider->isValid()) {
+            foundUnreadable = true;
+            continue;
+        }
+
+        const int candidatePages = provider->pageCount();
+        const bool compatible = source.pageCount > 0
+            ? candidatePages == source.pageCount
+            // Unknown original count (pre-"pages" document): settle for every
+            // page the notebook actually references still existing.
+            : maxReferencedOriginalPage(normalizedPdfSourceId(source)) < candidatePages;
+        if (!compatible) {
+            continue;
+        }
+
+        result.provider = std::move(provider);
+        result.path = candidate.path;
+        result.bundled = candidate.bundled;
+        result.relative = candidate.relative;
+        result.drifted = true;
         return result;
     }
 
@@ -360,6 +401,8 @@ QString Document::pdfPathForSource(const QString& sourceId) const
     else m_pdfProvidersUsingBundled.remove(s->id);
     if (opened.relative) m_pdfProvidersUsingRelative.insert(s->id);
     else m_pdfProvidersUsingRelative.remove(s->id);
+    if (opened.drifted) m_pdfSourceDrifted.insert(s->id);
+    else m_pdfSourceDrifted.remove(s->id);
     return opened.path;
 }
 
@@ -406,6 +449,8 @@ PdfProvider* Document::providerForSource(const QString& sourceId) const
     else m_pdfProvidersUsingBundled.remove(s->id);
     if (opened.relative) m_pdfProvidersUsingRelative.insert(s->id);
     else m_pdfProvidersUsingRelative.remove(s->id);
+    if (opened.drifted) m_pdfSourceDrifted.insert(s->id);
+    else m_pdfSourceDrifted.remove(s->id);
     return raw;
 }
 
@@ -420,6 +465,36 @@ int Document::notebookPageCountForSource(const QString& sourceId) const
         if (pageSource == sourceId) ++count;
     }
     return count;
+}
+
+int Document::maxReferencedOriginalPage(const QString& sourceId) const
+{
+    int highest = -1;
+    for (const auto& [uuid, originalPage] : m_pagePdfIndex) {
+        auto sourceIt = m_pagePdfSource.find(uuid);
+        const QString pageSource = sourceIt != m_pagePdfSource.end()
+            ? sourceIt->second : QString();
+        if (pageSource == sourceId && originalPage > highest) {
+            highest = originalPage;
+        }
+    }
+    return highest;
+}
+
+void Document::rememberSourcePageCount(const QString& registryId, int count) const
+{
+    if (count <= 0) return;
+    // Const because every resolution path is const. Filling in a fact about the
+    // file on disk is not a document edit, which is also why markModified() is
+    // not called: an unsaved notebook must not become dirty just by opening.
+    for (const PdfSource& s : m_pdfSources) {
+        if (s.id == registryId) {
+            if (s.pageCount <= 0) {
+                const_cast<PdfSource&>(s).pageCount = count;
+            }
+            return;
+        }
+    }
 }
 
 void Document::retryPdfSource(const QString& sourceId) const
@@ -493,6 +568,11 @@ QVector<PdfSourceHealth> Document::pdfSourceHealthSnapshot() const
                 health.status = unavailable > 0
                     ? PdfSourceHealthStatus::PartialBundled
                     : PdfSourceHealthStatus::AvailableBundled;
+            } else if (m_pdfSourceDrifted.contains(source.id)) {
+                // Takes precedence over external/relative: which path it came
+                // from matters less than the file no longer being the one that
+                // was fingerprinted.
+                health.status = PdfSourceHealthStatus::AvailableUpdated;
             } else {
                 health.status = m_pdfProvidersUsingRelative.contains(source.id)
                     ? PdfSourceHealthStatus::AvailableRelative
@@ -510,12 +590,16 @@ QVector<PdfSourceHealth> Document::pdfSourceHealthSnapshot() const
     return result;
 }
 
-QString Document::registerSource(const QString& path, const QString& hash, qint64 size, bool bundled)
+QString Document::registerSource(const QString& path, const QString& hash, qint64 size,
+                                 bool bundled, int pageCount)
 {
     // Dedup by identity (hash + size) against existing sources.
     if (!hash.isEmpty()) {
         for (PdfSource& s : m_pdfSources) {
             if (s.hash == hash && s.size == size) {
+                if (s.pageCount <= 0 && pageCount > 0) {
+                    s.pageCount = pageCount;
+                }
                 // A newly selected copy can recover an existing deduplicated
                 // source whose old absolute path has gone stale.
                 if (!path.isEmpty() && QFileInfo::exists(path)
@@ -532,35 +616,75 @@ QString Document::registerSource(const QString& path, const QString& hash, qint6
     src.path = path;
     src.hash = hash;
     src.size = size;
+    src.pageCount = pageCount;
     src.bundled = bundled;
     src.primary = false;  // Registered (imported) sources are never the primary base PDF.
     m_pdfSources.push_back(src);
     return src.id;
 }
 
-bool Document::locateSource(const QString& sourceId, const QString& newPath)
+Document::SourceCandidateProbe Document::probeSourceCandidate(
+    const QString& sourceId, const QString& path) const
+{
+    SourceCandidateProbe probe;
+
+    const PdfSource* source = pdfSourceById(sourceId);
+    if (!source || path.isEmpty() || !PdfProvider::isAvailable()) return probe;
+
+    const QFileInfo info(path);
+    if (!info.exists() || !info.isFile()) return probe;
+
+    probe.hash = computePdfHash(path);
+    probe.size = info.size();
+    if (probe.hash.isEmpty()) {
+        probe.result = SourceCandidateProbe::Result::Unreadable;
+        return probe;
+    }
+
+    std::unique_ptr<PdfProvider> provider = PdfProvider::create(path);
+    if (!provider || !provider->isValid()) {
+        probe.result = SourceCandidateProbe::Result::Unreadable;
+        return probe;
+    }
+    probe.pageCount = provider->pageCount();
+
+    const bool identityKnown = !source->hash.isEmpty();
+    const bool matches = !identityKnown
+        || (probe.hash == source->hash
+            && (source->size <= 0 || probe.size == source->size));
+    probe.result = matches ? SourceCandidateProbe::Result::Match
+                           : SourceCandidateProbe::Result::Mismatch;
+    return probe;
+}
+
+bool Document::locateSource(const QString& sourceId, const QString& newPath,
+                            bool acceptMismatch)
 {
     PdfSource* source = pdfSourceById(sourceId);
     if (!source || newPath.isEmpty()) return false;
 
-    QFileInfo info(newPath);
-    if (!info.exists() || !info.isFile() || !PdfProvider::isAvailable()) return false;
-
-    const QString candidateHash = computePdfHash(newPath);
-    if (candidateHash.isEmpty()) return false;
-    if (!source->hash.isEmpty()) {
-        if (candidateHash != source->hash
-            || (source->size > 0 && info.size() != source->size)) {
-            return false;
-        }
+    const SourceCandidateProbe probe = probeSourceCandidate(sourceId, newPath);
+    using Result = SourceCandidateProbe::Result;
+    if (probe.result == Result::InvalidTarget || probe.result == Result::Unreadable) {
+        return false;
+    }
+    if (probe.result == Result::Mismatch && !acceptMismatch) {
+        return false;
     }
 
+    QFileInfo info(newPath);
     std::unique_ptr<PdfProvider> provider = PdfProvider::create(newPath);
     if (!provider || !provider->isValid()) return false;
 
-    if (source->hash.isEmpty()) {
-        source->hash = candidateHash;
-        source->size = info.size();
+    if (source->hash.isEmpty() || probe.result == Result::Mismatch) {
+        // Re-anchor to what the user actually has. Without this write a source
+        // whose file was rewritten stays permanently unmatchable, because
+        // verification can only ever compare against the bytes that are gone.
+        source->hash = probe.hash;
+        source->size = probe.size;
+        source->pageCount = probe.pageCount;
+    } else if (source->pageCount <= 0) {
+        source->pageCount = probe.pageCount;
     }
     source->path = info.absoluteFilePath();
     if (!m_bundlePath.isEmpty()) {
@@ -897,6 +1021,9 @@ bool Document::loadPdf(const QString& path)
         primary.hash = computePdfHash(path);
         primary.size = getPdfFileSize(path);
     }
+    if (primary.pageCount <= 0) {
+        primary.pageCount = provider->pageCount();
+    }
     
     cachePdfProviderPath(primary.id, path);
     m_pdfProviders[primary.id] = std::move(provider);
@@ -919,6 +1046,7 @@ void Document::clearPdfReference()
     m_pdfProviderPathModifiedTimes.clear();
     m_pdfProvidersUsingBundled.clear();
     m_pdfProvidersUsingRelative.clear();
+    m_pdfSourceDrifted.clear();
     m_pdfSourceFailures.clear();
     m_undoRetainedPdfSourceIds.clear();
     m_pdfSources.clear();
@@ -1636,7 +1764,7 @@ bool Document::savePage(int index)
     }
     
     QString pagePath = m_bundlePath + "/pages/" + uuid + ".json";
-    QSaveFile file(pagePath);
+    BundleFile file(pagePath);
     file.setDirectWriteFallback(false);
     if (!file.open(QIODevice::WriteOnly)) {
         qWarning() << "Cannot save page:" << pagePath;
@@ -2088,6 +2216,7 @@ QString Document::ensureImportedPdfSourceId(Document* srcDoc, const QString& ori
     const QString path = os->path;
     const QString hash = os->hash;
     const qint64 size = os->size;
+    const int pageCount = os->pageCount;
 
     // Broken/dismissed origin with neither identity nor path: nothing to
     // reference. Leave the page unresolved (blank) rather than registering a
@@ -2099,7 +2228,7 @@ QString Document::ensureImportedPdfSourceId(Document* srcDoc, const QString& ori
     QString destId;
     if (!hash.isEmpty()) {
         // registerSource dedups by hash+size, returning an existing id on match.
-        destId = registerSource(path, hash, size, /*bundled*/ false);
+        destId = registerSource(path, hash, size, /*bundled*/ false, pageCount);
     } else {
         // Hashless origin (e.g. legacy doc): dedup on absolute path so repeated
         // imports of the same file don't proliferate sources.
@@ -2110,7 +2239,7 @@ QString Document::ensureImportedPdfSourceId(Document* srcDoc, const QString& ori
             }
         }
         if (destId.isEmpty()) {
-            destId = registerSource(path, hash, size, /*bundled*/ false);
+            destId = registerSource(path, hash, size, /*bundled*/ false, pageCount);
         }
     }
 
@@ -2946,6 +3075,7 @@ QJsonObject Document::toJson() const
             if (!s.relativePath.isEmpty()) sObj["relative_path"] = s.relativePath;
             if (!s.hash.isEmpty()) sObj["hash"] = s.hash;
             if (s.size > 0) sObj["size"] = s.size;
+            if (s.pageCount > 0) sObj["pages"] = s.pageCount;
             if (s.bundled) {
                 sObj["bundled"] = true;
                 if (!s.bundledFile.isEmpty()) sObj["bundled_file"] = s.bundledFile;
@@ -3049,6 +3179,7 @@ std::unique_ptr<Document> Document::fromJson(const QJsonObject& obj)
             s.relativePath = sObj["relative_path"].toString();
             s.hash = sObj["hash"].toString();
             s.size = sObj["size"].toVariant().toLongLong();
+            s.pageCount = sObj["pages"].toInt(0);  // absent in pre-"pages" documents
             s.bundled = sObj["bundled"].toBool(false);
             s.bundledFile = sObj["bundled_file"].toString();
             if (sObj.contains("page_map")) {
@@ -3379,7 +3510,7 @@ bool Document::saveTile(TileCoord coord)
     QString tilePath = tilesDir + "/" + 
                        QString("%1,%2.json").arg(coord.first).arg(coord.second);
     
-    QSaveFile file(tilePath);
+    BundleFile file(tilePath);
     file.setDirectWriteFallback(false);
     if (!file.open(QIODevice::WriteOnly)) {
         qWarning() << "Cannot save tile: failed to open file" << tilePath;
@@ -3765,7 +3896,7 @@ bool Document::enqueueImageAssetWrite(ImageObject* imageObject, const QImage& so
             return true;
         }
 
-        QSaveFile output(fullPath);
+        BundleFile output(fullPath);
         output.setDirectWriteFallback(false);
         return output.open(QIODevice::WriteOnly)
             && output.write(bytes) == bytes.size()
@@ -4508,7 +4639,7 @@ bool Document::saveBundle(const QString& path, bool finalize)
         if (!source.open(QIODevice::ReadOnly)) return false;
         if (!QDir().mkpath(QFileInfo(destPath).absolutePath())) return false;
 
-        QSaveFile dest(destPath);
+        BundleFile dest(destPath);
         dest.setDirectWriteFallback(false);
         if (!dest.open(QIODevice::WriteOnly)) return false;
         constexpr qint64 chunkSize = 1024 * 1024;
@@ -4530,7 +4661,19 @@ bool Document::saveBundle(const QString& path, bool finalize)
     // and before any page/tile JSON is serialized.
     flushPendingImageWrites();
     m_bundlePath = path;
-    
+
+#ifdef Q_OS_HARMONY
+    // A regular file can be sitting where the bundle directory needs to go: the
+    // system save picker creates an empty file at the chosen path before handing
+    // it back, and builds before the picker was bypassed left those behind.
+    // Without clearing it, every later save to that name fails on mkpath. The
+    // save dialog has already confirmed the overwrite by this point, and the
+    // emptiness check keeps this from touching anything that holds data.
+    if (QFileInfo(path).isFile() && QFileInfo(path).size() == 0) {
+        QFile::remove(path);
+    }
+#endif
+
     // Phase P.1.1: Write .snb_marker file to identify this as a SpeedyNote bundle
     QString markerPath = path + "/.snb_marker";
     if (!QFile::exists(markerPath)) {
@@ -4738,7 +4881,7 @@ bool Document::saveBundle(const QString& path, bool finalize)
     
     // Write manifest
     QString manifestPath = path + "/document.json";
-    QSaveFile manifestFile(manifestPath);
+    BundleFile manifestFile(manifestPath);
     manifestFile.setDirectWriteFallback(false);
     if (!manifestFile.open(QIODevice::WriteOnly)) {
         qWarning() << "Cannot write manifest" << manifestPath;
@@ -4913,7 +5056,7 @@ bool Document::saveBundle(const QString& path, bool finalize)
             bool needsSave = savingToNewLocation || m_dirtyPages.count(uuid) > 0;
             if (needsSave) {
                 QString pagePath = path + "/pages/" + uuid + ".json";
-                QSaveFile file(pagePath);
+                BundleFile file(pagePath);
                 file.setDirectWriteFallback(false);
                 QJsonDocument doc(pagePtr->toJson());
                 const QByteArray pageData = doc.toJson(QJsonDocument::Compact);

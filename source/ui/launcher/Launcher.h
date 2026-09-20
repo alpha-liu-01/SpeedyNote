@@ -107,6 +107,7 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void showEvent(QShowEvent* event) override;
+    void changeEvent(QEvent* event) override;
     
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     // Drag-drop support for desktop (Step 3.10)
@@ -124,6 +125,7 @@ private:
     void setupFAB();
     void applyStyle();
     void updateNavigationState();
+    void updateReturnButtonVisibility();
     bool isDarkMode() const;
     void setNavigationCompact(bool compact);
     void onTimelineItemClicked(const QModelIndex& index);
@@ -136,8 +138,8 @@ private:
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     void showInFileManager(const QString& bundlePath);
 #endif
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
-    QString findImportedPdfPath(const QString& bundlePath);
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
+    QStringList survivingNotebookBundles(const QStringList& bundlesBeingDeleted);
 #endif
     
     // === Timeline Select Mode (L-007) ===

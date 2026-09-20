@@ -120,6 +120,11 @@ struct PdfSource {
     QString relativePath;       ///< Path relative to the bundle dir (portable .snbx)
     QString hash;               ///< SHA-256 of first 1MB ("sha256:...") of the original PDF
     qint64 size = 0;            ///< File size in bytes of the original PDF
+    int pageCount = 0;          ///< Page count of the original (never the bundled mini-PDF).
+                                ///< 0 = unknown, which is what pre-"pages" documents carry.
+                                ///< Sanity-checks a file whose bytes have drifted: a rewrite
+                                ///< that kept every page is safe to keep using, a document
+                                ///< that gained or lost pages would misplace annotations.
     bool bundled = false;       ///< True if materialized into the bundle (mini-PDF)
     QString bundledFile;        ///< Relative path of the bundled mini-PDF (when bundled)
     QHash<int,int> pageMap;     ///< Original PDF page -> bundled-file page (when bundled)
@@ -131,6 +136,11 @@ enum class PdfSourceHealthStatus {
     AvailableExternal,
     AvailableRelative,
     AvailableBundled,
+    /// The file no longer matches its stored fingerprint but still has the page
+    /// count the notebook expects, so it is used anyway. Advisory, not a repair
+    /// state: re-saving a PDF in another app rewrites its metadata without
+    /// touching a single page.
+    AvailableUpdated,
     PartialBundled,
     Missing,
     Unreadable,
@@ -1190,12 +1200,53 @@ public:
     int notebookPageCountForSource(const QString& sourceId) const;
 
     /**
-     * @brief Locate a moved source without changing its stored identity.
+     * @brief Highest original PDF page number any page references for a source.
+     * @param sourceId Empty for the primary source.
+     * @return -1 when no page references the source.
      *
-     * When a hash/size is stored the candidate must match. Legacy hashless sources
-     * establish their identity from the first successfully located file.
+     * Used to sanity-check a candidate whose identity is unknown: every
+     * referenced page must exist in it.
      */
-    bool locateSource(const QString& sourceId, const QString& newPath);
+    int maxReferencedOriginalPage(const QString& sourceId) const;
+
+    /**
+     * @brief What a candidate file is, relative to a source's stored identity.
+     *
+     * Separated from locateSource() so callers can explain a refusal instead of
+     * reporting one undifferentiated failure.
+     */
+    struct SourceCandidateProbe {
+        enum class Result {
+            Match,          ///< Identity matches, or the source is hashless
+            Mismatch,       ///< Opens fine as a PDF but is not the stored file
+            Unreadable,     ///< Cannot be hashed or cannot be opened as a PDF
+            InvalidTarget   ///< No such source, empty path, or no PDF backend
+        };
+        Result result = Result::InvalidTarget;
+        QString hash;        ///< Candidate's fingerprint (empty when unreadable)
+        qint64 size = 0;     ///< Candidate's size in bytes
+        int pageCount = 0;   ///< Candidate's page count
+    };
+
+    /**
+     * @brief Inspect a candidate file without changing anything.
+     * @param sourceId Empty for the primary source.
+     */
+    SourceCandidateProbe probeSourceCandidate(const QString& sourceId,
+                                              const QString& path) const;
+
+    /**
+     * @brief Point a source at a different file on disk.
+     * @param acceptMismatch Adopt the candidate even when it fails verification,
+     *        rewriting the stored hash/size/pageCount to match it.
+     *
+     * A stored identity is otherwise enforced, and legacy hashless sources
+     * establish theirs from the first successfully located file. Overriding is
+     * the only way to re-anchor a source whose file has been rewritten, since
+     * verification alone can never accept the new bytes.
+     */
+    bool locateSource(const QString& sourceId, const QString& newPath,
+                      bool acceptMismatch = false);
 
     /**
      * @brief Clear cached runtime resolution so the next health query retries a source.
@@ -1233,8 +1284,11 @@ public:
      * If a source with a matching non-empty hash and size already exists, its id is
      * returned and no new source is added. Otherwise a new source with a fresh UUID
      * is appended.
+     *
+     * @param pageCount Page count of the original file, or 0 when unknown.
      */
-    QString registerSource(const QString& path, const QString& hash, qint64 size, bool bundled = false);
+    QString registerSource(const QString& path, const QString& hash, qint64 size,
+                           bool bundled = false, int pageCount = 0);
 
     /**
      * @brief Ids of sources not referenced by any page (candidates for cleanup).
@@ -1889,6 +1943,9 @@ private:
     mutable std::map<QString, qint64> m_pdfProviderPathModifiedTimes;
     mutable QSet<QString> m_pdfProvidersUsingBundled;
     mutable QSet<QString> m_pdfProvidersUsingRelative;
+    /// Sources currently open from a file that failed identity verification but
+    /// passed the page-count check. Reported as AvailableUpdated.
+    mutable QSet<QString> m_pdfSourceDrifted;
     mutable std::map<QString, PdfSourceHealthStatus> m_pdfSourceFailures;
     QSet<QString> m_undoRetainedPdfSourceIds;
 
@@ -1912,8 +1969,13 @@ private:
         PdfSourceHealthStatus failureStatus = PdfSourceHealthStatus::Missing;
         bool bundled = false;
         bool relative = false;
+        bool drifted = false;  ///< Accepted despite failing identity verification
     };
     PdfSourceOpenResult openBestPdfSourceCandidate(const PdfSource& source) const;
+    /// Record a source's original page count once it is known. A refinement of
+    /// cached knowledge rather than a user edit, so it does not mark the
+    /// document modified; it persists only if the document is saved anyway.
+    void rememberSourcePageCount(const QString& registryId, int count) const;
     void cachePdfProviderPath(const QString& registryId, const QString& path) const;
     bool cachedPdfProviderPathIsCurrent(const QString& registryId) const;
     void clearCachedPdfProvider(const QString& registryId) const;

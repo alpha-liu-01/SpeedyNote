@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include <QApplication>
+#include <QElapsedTimer>
 #include <QTranslator>
 #include <QLocale>
 #include <QFileInfo>
@@ -17,8 +18,10 @@
 #include "ui/launcher/Launcher.h"
 #include "platform/SystemNotification.h"
 #include "core/DocumentViewport.h"
-// CLI support (Desktop only)
-#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+// CLI support (Desktop only). Excluded on HarmonyOS as well: Qt builds the app
+// as a shared module loaded by an ArkTS host there, so there is no argv-taking
+// executable for a command line to attach to.
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && !defined(Q_OS_HARMONY)
 #include <QGuiApplication>
 #include "cli/CliParser.h"
 #endif
@@ -105,9 +108,288 @@ protected:
 };
 #endif
 
+#ifdef Q_OS_HARMONY
+#include <QDialog>
+#include <QEvent>
+#include <QScreen>
+#include <QTimer>
+#include <QWindow>
+
+// The window a dialog should be centred on: the one that raised it, whose
+// geometry is also the only rect that knows where the status bar ends. Falls
+// back to the screen, which reports no safe-area margins here and so sits half a
+// status bar high -- still close enough to read as centred.
+static QRect harmonyDialogReference(const QDialog* dialog)
+{
+    const QWidget* reference = dialog->parentWidget() != nullptr
+        ? dialog->parentWidget()->window()
+        : QApplication::activeWindow();
+
+    // activeWindow() is the dialog itself once it has been shown, and centring it
+    // on itself would leave it wherever it already is.
+    if (reference != nullptr && reference != dialog && reference->geometry().isValid()) {
+        return reference->geometry();
+    }
+    if (const QScreen* screen = dialog->screen()) {
+        return screen->availableGeometry();
+    }
+    return QRect();
+}
+
+static void centreHarmonyDialog(QDialog* dialog)
+{
+    const QRect reference = harmonyDialogReference(dialog);
+    if (!reference.isValid()) {
+        return;
+    }
+
+    // Where the dialog should end up, in the coordinates the dialog is drawn in.
+    QRect target(QPoint(), dialog->size());
+    target.moveCenter(reference.center());
+
+    // A dialog taller or wider than the window it is centred on has to keep its
+    // top-left corner reachable -- that is where the title and the buttons are --
+    // so those two edges are clamped last and win.
+    if (target.right() > reference.right()) {
+        target.moveRight(reference.right());
+    }
+    if (target.bottom() > reference.bottom()) {
+        target.moveBottom(reference.bottom());
+    }
+    if (target.left() < reference.left()) {
+        target.moveLeft(reference.left());
+    }
+    if (target.top() < reference.top()) {
+        target.moveTop(reference.top());
+    }
+
+    QWindow* handle = dialog->windowHandle();
+    if (handle == nullptr) {
+        // Nothing to submit a position to yet, so WA_Moved is what carries it:
+        // QWidget::create() sends a position for a moved widget and only a size for any
+        // other. This is the path the dialogs that place themselves take, and the reason
+        // they are the ones that already came up centred.
+        dialog->move(target.topLeft());
+        return;
+    }
+
+    // Through the window, because QWidget::move() and QWidget::resize() do not carry a
+    // position here at all: the platform applies the size in a widget-level geometry and
+    // leaves the window where it was, whatever the timing. Only QWindow::setGeometry()
+    // moves a dialog.
+    //
+    // This is exact only because the window is frameless. With a frame the platform
+    // places the window a frame margin away from the rect submitted, and -- the part
+    // that actually hurts -- the QPA keeps mapping touches from the rect it was given,
+    // so the dialog draws in one place and answers taps a title bar lower.
+    // What Qt has cached is not a reliable picture of where this platform put a
+    // sub-window: the position submitted when the window was created is ignored
+    // here, so the two disagree from the start. Asking Qt is worse than useless,
+    // because QWindow::setGeometry() also returns early on a rect it believes is
+    // already current -- so a dialog whose constructor happened to compute the
+    // centred rect, as BatchImportDialog's does, would never have it applied and
+    if (handle->geometry() != target) {
+        handle->setGeometry(target);
+    }
+}
+
+/**
+ * @brief Event filter that centres top-level QDialog windows on HarmonyOS.
+ *
+ * The platform is only told where to put a window when Qt's
+ * QWindowPrivate::positionAutomatic is false, and only an explicit move() or
+ * setGeometry() clears that: QWidget::create() positions the native window if
+ * Qt::WA_Moved is set and merely resizes it otherwise. QDialog does centre
+ * itself, through adjustPosition() in its showEvent(), but then clears WA_Moved
+ * again -- "not really an explicit position" -- so no position is ever submitted
+ * and every dialog lands in the top-left corner with its title behind the status
+ * bar. Qt believes it is centred all the while, so nothing in the app can notice.
+ *
+ * BatchExportDialog is the exception that gives the game away: it moves itself in
+ * its constructor, before the native window exists, so WA_Moved is still set when
+ * create() runs and the position goes out with the window. That is the easy half
+ * of what this filter does. The hard half is that once the window exists a
+ * position can only be submitted through QWindow, and that only lands where it is
+ * asked to -- and only keeps the dialog clickable where it is drawn -- if the
+ * window has no frame, which is why the flag is dropped before it is created.
+ */
+class HarmonyDialogCentring : public QObject {
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override
+    {
+        auto* dialog = qobject_cast<QDialog*>(obj);
+        if (dialog == nullptr || !dialog->isWindow()) {
+            return QObject::eventFilter(obj, event);
+        }
+
+        switch (event->type()) {
+        case QEvent::ChildAdded:
+            // The window has to be frameless for the placement below to be exact, and a
+            // frame can only be dropped before the platform window exists. ChildAdded is
+            // the last event that arrives that early -- it comes from the constructor,
+            // while QDialog creates its window later, inside setVisible(). Re-applied on
+            // every child so a constructor that assigns its own flags after adding a
+            // widget does not silently take the frame back.
+            //
+            // Nothing is lost: the platform draws no decoration on these sub-windows, so
+            // the frame this gives up was only ever a margin in the geometry arithmetic.
+            //
+            // overrideWindowFlags() and not setWindowFlag(), because this runs inside the
+            // dialog's constructor and setWindowFlag() does not stay inside the flags: it
+            // reparents, the reparent re-inherits the style, and that delivers StyleChange
+            // to an object whose constructor has not finished. QMessageBox answers a style
+            // change by re-applying its icon, through an iconLabel it has not assigned yet,
+            // and the app dies in QLabel::setPixmap() on a garbage pointer -- every message
+            // box in the app, not just this one. The override is a plain assignment to the
+            // same flags create() will read, and it is safe here for precisely the reason
+            // its documented warning exists elsewhere: there is no platform window yet for
+            // it to leave out of sync.
+            if (dialog->windowHandle() == nullptr) {
+                dialog->overrideWindowFlags(dialog->windowFlags() | Qt::FramelessWindowHint);
+            }
+            break;
+        case QEvent::Show:
+            // Nothing here places itself on purpose. Every QDialog in the app that
+            // moves itself is trying to centre and does it in its constructor --
+            // BatchImportDialog, SaveDocumentDialog and ExportResultsDialog all run
+            // the same move(parent->geometry().center() - rect().center()) -- with a
+            // rect() the layout has not filled in yet and a parent rect that says
+            // nothing about where the status bar ends. So none of those placements is
+            // worth keeping, and WA_Moved is what made them stick: while it is set
+            // this filter stands aside, and QDialog::showEvent() skips its own
+            // adjustPosition() for the same reason, which left all three pinned to
+            // the top-left corner. Dropping it puts them on the path every other
+            // dialog already takes.
+            dialog->setAttribute(Qt::WA_Moved, false);
+
+            // And again once the platform has had the window: a position submitted
+            // from here goes out before the window is on screen, and the platform
+            // answers with its own placement -- the top-left corner -- which lands
+            // back in Qt as the window's geometry and wins. Dialogs that let
+            // QDialog::showEvent() place them recover on their own, because
+            // adjustPosition() moves them afterwards and the Move event brings this
+            // filter back; a dialog that placed itself gets no such second event, so
+            // without this it keeps the corner. exec() is running an event loop by
+            // then, so a queued call gets its turn. Placement is idempotent, so the
+            // dialogs that did not need this are unaffected.
+            QTimer::singleShot(0, dialog, [dialog] { centreHarmonyDialog(dialog); });
+            Q_FALLTHROUGH();
+        case QEvent::Move:
+        case QEvent::Resize:
+            // Move and Resize as well as Show, because the show is not the end of it: a
+            // dialog that asked for less room than its layout needs is resized on the
+            // first layout pass afterwards, and the position has to be reasserted for the
+            // size it ends up with.
+            //
+            // WA_Moved means something placed this window deliberately, which covers the
+            // dialogs that position themselves and, if this filter is ever widened past
+            // QDialog, every menu and tooltip -- they are all given a point to open at.
+            // Only Qt's own centring leaves it clear, and QDialog clears it again on the
+            // way out, so this reads the same on the first show and every later one.
+            if (!dialog->testAttribute(Qt::WA_Moved)) {
+                centreHarmonyDialog(dialog);
+            }
+            break;
+        default:
+            break;
+        }
+
+        return QObject::eventFilter(obj, event);
+    }
+};
+
+// Put the dialog that is currently taking input back in front of everything else.
+// Queued from the filter below rather than run inside event delivery: raising a window
+// while its own deactivation is still being delivered asks the platform to undo what it
+// is in the middle of doing, and waiting also means the modal is read after Qt has
+// finished bookkeeping, so a dialog that was on its way out is gone by now and a dialog
+// that was underneath one has already inherited the role.
+static void restoreHarmonyActiveModal()
+{
+    QWidget* modal = QApplication::activeModalWidget();
+    if (modal == nullptr || !modal->isVisible()) {
+        return;
+    }
+    // Not while the app is in the background: a dialog losing activation because the
+    // user left the app is not the case this is here for, and raise() on a sub-window
+    // goes to the top of the whole app, which would drag it back into view.
+    if (QGuiApplication::applicationState() != Qt::ApplicationActive) {
+        return;
+    }
+    modal->raise();
+    modal->activateWindow();
+}
+
+/**
+ * @brief Event filter that keeps a modal dialog in front of the windows it blocks.
+ *
+ * The platform does not enforce modality in the z-order. A tap outside an open dialog
+ * raises the window under it -- the dialog drops from ZOrd 104 to 103 and the fullscreen
+ * MainWindow it blocks takes 104 -- so the dialog ends up buried while keeping its
+ * geometry and its modality. Qt's modal event loop then discards every press that lands
+ * on the window now in front, and with the dialog out of sight the app reads as frozen.
+ *
+ * Almost none of that is reported to Qt, which is why this has two triggers rather than
+ * one obvious one:
+ *
+ * - A tap outside sends WindowDeactivate to the dialog and sets the focus window to
+ *   nullptr. The window that came forward is never activated, because Qt's own modality
+ *   is what blocks it, so there is nothing to react to on that side.
+ * - A dialog closing over another one is reported to neither. Dismissing the colour
+ *   picker opened from the settings dialog leaves the settings dialog at the z-order it
+ *   was pushed down to, without so much as a WindowActivate, so its own hide is the only
+ *   place the dialog underneath can be rescued from.
+ */
+class HarmonyModalKeeper : public QObject {
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override
+    {
+        auto* widget = qobject_cast<QWidget*>(obj);
+        if (widget == nullptr || !widget->isWindow()) {
+            return QObject::eventFilter(obj, event);
+        }
+
+        switch (event->type()) {
+        case QEvent::WindowDeactivate:
+            // Only for the topmost modal. A dialog losing activation to a modal of its
+            // own is no longer the active modal by this point, and is meant to stay
+            // where it is: behind the one that now is.
+            if (widget == QApplication::activeModalWidget()) {
+                QTimer::singleShot(0, widget, restoreHarmonyActiveModal);
+            }
+            break;
+        case QEvent::Hide:
+            // A modal going away uncovers whichever one it was opened from, which by
+            // then may have been pushed under a window it blocks by a tap outside.
+            if (widget->isModal()) {
+                QTimer::singleShot(0, qApp, restoreHarmonyActiveModal);
+            }
+            break;
+        default:
+            break;
+        }
+
+        return QObject::eventFilter(obj, event);
+    }
+};
+#endif
+
 #ifdef Q_OS_MACOS
 #include "macos/MacMenuBar.h"
 #endif
+
+#ifdef Q_OS_HARMONY
+#include "harmony/HarmonyEnvironment.h"
+#include "harmony/HarmonyPersistentGrant.h"
+#endif
+
+#include "harmony/HarmonyWindowSwitch.h"
 
 #ifdef Q_OS_ANDROID
 
@@ -287,6 +569,7 @@ static void applyAndroidFonts(QApplication& app)
 #include "core/PageTests.h"
 #include "core/DocumentTests.h"
 #include "core/NotebookLibraryTests.h"
+#include "core/SandboxPdfOwnershipTests.h"
 #include "core/DocumentViewportTests.h"
 #include "ui/ToolbarButtonTests.h"
 #include "objects/LinkObjectTests.h"
@@ -584,14 +867,37 @@ static Launcher* createLauncherForColdStart()
     auto* launcher = new Launcher();
     launcher->setAttribute(Qt::WA_DeleteOnClose);
     connectLauncherSignals(launcher);
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_HARMONY)
     launcher->show();
-    // Exclude user-input events: at this point in main() the only events
-    // we want to process are the ones that realize the NSWindow / activate
-    // NSApp. We don't want the launcher to spuriously react to a stray
-    // mouse or key event delivered during the priming tick.
+    // Exclude user-input events: at this point in main() the only events we
+    // want to process are the ones that realize the native window (and on
+    // macOS activate NSApp). We don't want the launcher to spuriously react
+    // to a stray mouse or key event delivered during the priming tick.
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 #endif
+
+#ifdef Q_OS_HARMONY
+    // One tick is not always enough, and every rect used for the rest of the cold
+    // start is measured against this window. The platform sizes it asynchronously,
+    // and until it does, geometry() reads as QWidget's default 640x480 -- a rect
+    // nothing treats as suspect, so the session prompt centred on it lands in the
+    // top-left quadrant and a MainWindow given it comes up small. It depends purely
+    // on whether the resize arrived in time, which is why it showed up as an
+    // intermittent misplacement on roughly the first launch after a cold start.
+    //
+    // Filling the display's width is what says the platform has had its say. The
+    // wait is bounded because a window manager that gives the Launcher less than the
+    // full width -- PC mode does -- would never satisfy that, and a mispositioned
+    // dialog is a far better outcome than a startup that hangs.
+    if (const QScreen* screen = launcher->screen()) {
+        QElapsedTimer settling;
+        settling.start();
+        while (launcher->width() < screen->geometry().width() && settling.elapsed() < 500) {
+            QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
+        }
+    }
+#endif
+
     return launcher;
 }
 
@@ -606,6 +912,13 @@ static void showMainWindowAtColdStart(MainWindow* w, Launcher* launcher)
     w->preserveWindowState(launcher, /*existing*/false);
     w->bringToFront();
     launcher->hide();
+#elif defined(Q_OS_HARMONY)
+    // The launcher is already visible here (see createLauncherForColdStart) and
+    // stays that way: hide() would minimise its ability instance, and the paired
+    // restore() is broken, so the user's first toggle back to the Launcher would
+    // find nothing to restore. Raising the MainWindow over it is the whole
+    // dismissal. See HarmonyWindowSwitch.
+    HarmonyWindowSwitch::switchTo(/*incoming*/w, /*outgoing*/launcher);
 #else
     (void)launcher;
     w->show();
@@ -613,11 +926,11 @@ static void showMainWindowAtColdStart(MainWindow* w, Launcher* launcher)
 }
 
 // Make Launcher visible at cold start for branches that want to land on
-// the Launcher. On macOS the Launcher is already visible from
+// the Launcher. On macOS and HarmonyOS the Launcher is already visible from
 // createLauncherForColdStart(), so this is a no-op there.
 static void showLauncherAtColdStart(Launcher* launcher)
 {
-#ifndef Q_OS_MACOS
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_HARMONY)
     launcher->show();
 #else
     (void)launcher;
@@ -641,6 +954,8 @@ static int runTests(const QString& testType)
         success = DocumentTests::runAllTests();
     } else if (testType == "notebooklibrary") {
         success = NotebookLibraryTests::runAllTests();
+    } else if (testType == "sandboxpdf") {
+        success = SandboxPdfOwnershipTests::runAllTests();
     } else if (testType == "viewport-unit") {
         success = DocumentViewportTests::runUnitTests();
     } else if (testType == "linkobject") {
@@ -883,7 +1198,7 @@ int main(int argc, char* argv[])
     // In release builds, enableDebugConsole() calls FreeConsole() to hide the
     // console window in GUI mode, but that would also disconnect stdout/stderr
     // for CLI mode, causing all terminal output to be silently lost.
-#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && !defined(Q_OS_HARMONY)
     if (Cli::isCliMode(argc, argv)) {
         QGuiApplication app(argc, argv);
         app.setOrganizationName("SpeedyNote");
@@ -924,10 +1239,33 @@ int main(int argc, char* argv[])
     IOSPlatformHelper::applyFonts(app);
     IOSPlatformHelper::installKeyboardFilter(app);
     IOSTouchTracker::install();
+#elif defined(Q_OS_HARMONY)
+    // Probe user-folder access once, up front. Whether this succeeds decides
+    // where file dialogs open and whether saving outside the sandbox works at
+    // all, and it is the platform's most common failure mode, so the result is
+    // worth having in the log of every run rather than only after a failed save.
+    // HarmonyEnvironment caches it, so this also keeps the dialogs snappy.
+    qInfo() << "HarmonyOS: documents root =" << HarmonyEnvironment::writableDocumentsRoot()
+            << "(user folder access:" << HarmonyEnvironment::hasUserDocumentsAccess() << ")";
+    // Logged because several dialogs still default to it, and on this platform it
+    // names a directory that exists and is listable but is not necessarily writable.
+    qInfo() << "HarmonyOS: QStandardPaths DocumentsLocation ="
+            << QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    // Probed here rather than where it is used so that every run records the
+    // answer, including runs on devices that have user folders and never need it.
+    // It is one query against a service, and we would otherwise be guessing at
+    // which retail devices support persistence from a documentation set that
+    // contradicts itself.
+    HarmonyPersistentGrant::isSupported();
 #endif
 
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     app.installEventFilter(new MobileDialogFilter(&app));
+#endif
+
+#ifdef Q_OS_HARMONY
+    app.installEventFilter(new HarmonyDialogCentring(&app));
+    app.installEventFilter(new HarmonyModalKeeper(&app));
 #endif
 
     QTranslator translator;
@@ -981,6 +1319,8 @@ int main(int argc, char* argv[])
             testToRun = "document";
         } else if (arg == "--test-notebooklibrary") {
             testToRun = "notebooklibrary";
+        } else if (arg == "--test-sandboxpdf") {
+            testToRun = "sandboxpdf";
         } else if (arg == "--test-viewport-unit") {
             testToRun = "viewport-unit";
         } else if (arg == "--test-viewport") {
@@ -1122,7 +1462,18 @@ int main(int argc, char* argv[])
     // sheet/window-modal dialog. On other platforms the launcher is
     // hidden, so a hidden parent would weaken modality - keep nullptr
     // (preserves the original application-modal behavior).
-#ifdef Q_OS_MACOS
+    //
+    // HarmonyOS has no choice in the matter: a parentless prompt here is fatal,
+    // not merely less modal. Every top-level Qt window is backed by an ability
+    // instance, and starting one requires the app to be in the foreground --
+    // which it stops being the moment it has no window at all. So a prompt shown
+    // before any window exists would take the app to the background when it
+    // closed, and the show() immediately after would abort inside libqohos.so
+    // with "Failed to start the Ability with instance id: 1", killing the app
+    // whichever button was pressed. The launcher is therefore shown up front
+    // (see createLauncherForColdStart) and owns this dialog, which also suits a
+    // platform that downgrades Qt::ApplicationModal to WindowModal anyway.
+#if defined(Q_OS_MACOS) || defined(Q_OS_HARMONY)
     QWidget* sessionPromptParent = launcher;
 #else
     QWidget* sessionPromptParent = nullptr;

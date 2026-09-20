@@ -34,7 +34,7 @@ endif()
 # ============================================================================
 # Qt Version Selection
 # ============================================================================
-option(USE_QT5 "Build with Qt5 instead of Qt6 (for 32-bit Windows, HarmonyOS, etc.)" OFF)
+option(USE_QT5 "Build with Qt5 instead of Qt6 (for 32-bit Windows)" OFF)
 if(USE_QT5)
     set(QT_VERSION_MAJOR 5)
     message(STATUS "Qt version: Qt5")
@@ -59,6 +59,12 @@ set(CMAKE_AUTOUIC ON)
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     set(IOS TRUE)
 endif()
+
+# HarmonyOS: the OHOS toolchain sets CMAKE_SYSTEM_NAME to "OHOS" and defines
+# OHOS itself, so no detection is needed here. What does need care is that CMake
+# considers OHOS a UNIX (UNIX is 1, LINUX is empty), so every "UNIX means Linux
+# desktop" test in this file needs an explicit "AND NOT OHOS", and every OHOS
+# branch below must come *before* the corresponding UNIX one.
 
 # Auto-enable ML Kit Digital Ink OCR on Android/iOS
 if(ANDROID OR IOS)
@@ -86,7 +92,7 @@ endif()
 # ONNX Runtime AND the mandatory default recognition model are both present
 # (mirrors the iOS ML Kit auto-disable pattern: graceful, no hard failure).
 # Populate them with linux/fetch-onnxruntime.sh + linux/fetch-ocr-models.sh.
-if(UNIX AND NOT APPLE AND NOT ANDROID)
+if(UNIX AND NOT APPLE AND NOT ANDROID AND NOT OHOS)
     set(ONNXRUNTIME_ROOT "${CMAKE_SOURCE_DIR}/linux/onnxruntime-build")
     file(GLOB _ort_libs "${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so*")
     if(_ort_libs
@@ -562,7 +568,50 @@ elseif(ANDROID)
     message(STATUS "✅ MuPDF PDF export enabled for Android")
     
     set(WIN_RESOURCES "")
-    
+
+elseif(OHOS)
+    # =========================================================================
+    # HarmonyOS Configuration
+    # =========================================================================
+    # Must precede the UNIX branch: CMake reports UNIX for OHOS too, and the
+    # Linux branch would otherwise run and demand Qt DBus, pkg-config and a
+    # system MuPDF, none of which exist here.
+    message(STATUS "🌸 Configuring for HarmonyOS (${OHOS_ARCH})")
+
+    # No DBus: notifications go through Notification Kit rather than
+    # org.freedesktop.Notifications. No Test either — the golden-image tests are
+    # desktop-only.
+    #
+    # The three private modules are all for HarmonyWindowSwitch: GuiPrivate for
+    # qpa/qplatformnativeinterface.h, which is how it reaches the QPA function that
+    # makes a MainWindow a sub-window; HarmonyExtrasPrivate for the startAbility()
+    # fallback, Qt shipping that whole module as private API with no public
+    # counterpart; and CorePrivate because HarmonyExtras' private headers include
+    # QtCore private ones and do not pull them in themselves.
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg CorePrivate GuiPrivate HarmonyExtrasPrivate)
+
+    # MuPDF is cross-compiled separately by harmony/build-mupdf.sh. Only
+    # arm64-v8a exists, so unlike Android there is no per-ABI directory.
+    if(NOT MUPDF_INCLUDE_DIR)
+        set(MUPDF_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/harmony/mupdf-build/include")
+    endif()
+    if(NOT MUPDF_LIBRARIES)
+        set(MUPDF_LIBRARIES
+            "${CMAKE_SOURCE_DIR}/harmony/mupdf-build/lib/libmupdf.a"
+            "${CMAKE_SOURCE_DIR}/harmony/mupdf-build/lib/libmupdf-third.a")
+    endif()
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/harmony/mupdf-build/lib/libmupdf.a")
+        message(FATAL_ERROR
+            "MuPDF for HarmonyOS not found. Build it with ./harmony/build-mupdf.sh")
+    endif()
+
+    include_directories(${CMAKE_CURRENT_BINARY_DIR} ${MUPDF_INCLUDE_DIR})
+
+    add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+    message(STATUS "✅ MuPDF PDF export enabled for HarmonyOS")
+
+    set(WIN_RESOURCES "")
+
 elseif(UNIX)
     # =========================================================================
     # Linux Configuration
@@ -782,7 +831,7 @@ endfunction()
 # which lacks the Qt 6 widget strings). The loader checks :/qt-translations
 # as a universal fallback so this works on every platform if needed.
 set(_QT_TRANSLATIONS_QRC "")
-if(IOS OR ANDROID)
+if(IOS OR ANDROID OR OHOS)
     if(_QT_TRANSLATIONS_DIR)
         set(_qrc_body "<RCC>\n  <qresource prefix=\"/qt-translations\">\n")
         set(_qrc_has_files FALSE)
@@ -907,6 +956,7 @@ set(UI_SOURCES
     source/ui/NavigationBar.cpp
     source/ui/Toolbar.cpp
     source/ui/StyleLoader.cpp
+    source/ui/MenuPopup.cpp
     source/ui/TabBar.cpp
     source/ui/SplitViewManager.cpp
     source/ui/PageThumbnailModel.cpp
@@ -1010,15 +1060,26 @@ set(BATCH_SOURCES
 )
 
 # CLI module (Desktop only - headless batch operations)
-# Mobile platforms (Android/iOS) use launcher UI for batch operations instead
+# Mobile platforms (Android/iOS) use launcher UI for batch operations instead.
+# HarmonyOS is excluded for a structural reason rather than a UX one: Qt builds
+# the app as a shared module loaded by an ArkTS host, so there is no argv-taking
+# executable for a command line to attach to.
 set(CLI_SOURCES "")
-if(NOT ANDROID AND NOT IOS)
+if(NOT ANDROID AND NOT IOS AND NOT OHOS)
     set(CLI_SOURCES
         source/cli/CliParser.cpp
         source/cli/CliProgress.cpp
         source/cli/CliHandler.cpp
         source/cli/CliSignal.cpp
         source/ui/dialogs/BatchImportDialog.cpp  # Desktop-only batch import dialog
+    )
+elseif(OHOS)
+    # HarmonyOS drops the CLI proper but keeps the batch import dialog. That
+    # dialog is ordinary Qt widget code and only sits in this list by grouping;
+    # 2-in-1 HarmonyOS devices are windowed and pointer-driven, so the desktop
+    # import flow is the one that fits them.
+    set(CLI_SOURCES
+        source/ui/dialogs/BatchImportDialog.cpp
     )
 endif()
 
@@ -1071,14 +1132,32 @@ if(APPLE AND NOT IOS)
     )
 endif()
 
+# HarmonyOS-specific utilities and UI. The NAPI/ArkTS bridges that stand in for
+# the JNI ones (file picking, sharing, Core Vision Kit OCR) are not written yet;
+# for now this only picks up the touch-friendly save dialog that both mobile
+# platforms already share.
+set(HARMONY_PLATFORM_SOURCES "")
+if(OHOS)
+    set(HARMONY_PLATFORM_SOURCES
+        source/harmony/HarmonyEnvironment.cpp
+        source/harmony/HarmonyPdfImport.cpp
+        source/harmony/HarmonyPersistentGrant.cpp
+        source/ui/dialogs/SaveDocumentDialog.cpp
+    )
+endif()
+
 # Cross-platform utilities (Step 3.11: System notifications)
+# HarmonyWindowSwitch lives under source/harmony/ because HarmonyOS is the only
+# reason it exists, but it carries the shared Launcher/MainWindow switch for every
+# platform, so it is built unconditionally.
 set(PLATFORM_SOURCES
     source/platform/SystemNotification.cpp
+    source/harmony/HarmonyWindowSwitch.cpp
 )
 
 # Desktop-only sources (tests require Qt::Test, debug builds only)
 set(DESKTOP_ONLY_SOURCES "")
-if(NOT ANDROID AND NOT IOS AND ENABLE_DEBUG_OUTPUT)
+if(NOT ANDROID AND NOT IOS AND NOT OHOS AND ENABLE_DEBUG_OUTPUT)
     set(DESKTOP_ONLY_SOURCES
         source/ui/ToolbarButtonTests.cpp
         source/ui/ToolbarButtonTestWidget.cpp
@@ -1113,6 +1192,7 @@ set(APP_SOURCES
     ${ANDROID_PLATFORM_SOURCES}
     ${IOS_PLATFORM_SOURCES}
     ${MACOS_PLATFORM_SOURCES}
+    ${HARMONY_PLATFORM_SOURCES}
     ${DESKTOP_ONLY_SOURCES}
         ${QMARKDOWNTEXTEDIT_SOURCES}
     ${QMARKDOWNTEXTEDIT_MOC_SOURCES}
@@ -1202,6 +1282,99 @@ elseif(IOS)
         message(STATUS "iOS signing: ad-hoc (no DEVELOPMENT_TEAM — simulator / jailbreak / TrollStore)")
     endif()
     
+    target_include_directories(speedynote PRIVATE
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/source
+        ${MUPDF_INCLUDE_DIR}
+    )
+
+elseif(OHOS)
+    # qt_add_executable is mandatory here, not just preferred: on HarmonyOS it
+    # emits a shared module (libspeedynote.so) loaded by the generated ArkTS
+    # host, plus the *-harmony-deployment-settings.json that harmonydeployqt
+    # consumes. Plain add_executable would produce an ELF binary that nothing
+    # ever loads, and harmony/build-hap.sh would fail to find its settings file.
+    qt_add_executable(speedynote ${APP_SOURCES})
+    qt_policy(SET QTP0002 NEW)
+
+    # deviceTypes is deliberately left at Qt's default (phone, tablet, 2in1).
+    # Restricting it to "tablet;2in1" crashed the app on a tablet, and it would not
+    # buy anything: the restriction was meant to make window.restore() work
+    # (QTBUG-148467), but on a tablet that call is refused for being off a PC
+    # ("Restore: This is not PC or PcAppInPad, not supported") no matter what the
+    # manifest declares. The Launcher/MainWindow switch avoids restore() instead,
+    # by never minimising a window. See HarmonyWindowSwitch.
+
+    # App identity. Without these the HAP ships as Qt's template
+    # (org.qtproject.example.speedynote, vendor "example", label "speedynote"),
+    # which is fine for a toolchain smoke test and not for handing builds to
+    # testers: the bundle name is the app's permanent identity -- it fixes the
+    # sandbox data path and is what AppGallery ties updates to.
+    #
+    # Deliberately the same identifier as the Apple platforms use above, rather
+    # than the AppStream one (org.speedynote.SpeedyNote): all-lowercase matches
+    # HarmonyOS convention and sidesteps any doubt about case handling.
+    #
+    # APP_NAME is left at its default (the target name). It is not user-visible;
+    # harmonydeployqt derives the generated DevEco project directory from it,
+    # which harmony/build-hap.sh locates by the lib*-harmonyos glob.
+
+    # One integer that must increase with every release. Same scheme as the
+    # template's 1.0.0 -> 1000000, so 1.6.3 -> 1006003. Computed rather than
+    # concatenated: pasting the components together would make 1.10.0 sort below
+    # 1.6.3 and the platform would refuse the update as a downgrade.
+    math(EXPR SPEEDYNOTE_HARMONY_VERSION_CODE
+        "${PROJECT_VERSION_MAJOR} * 1000000 + ${PROJECT_VERSION_MINOR} * 1000 + ${PROJECT_VERSION_PATCH}")
+
+    set_target_properties(speedynote PROPERTIES
+        QT_HARMONYOS_APP_BUNDLE_NAME "org.speedynote.speedynote"
+        QT_HARMONYOS_APP_LABEL "SpeedyNote"
+        QT_HARMONYOS_APP_VENDOR "SpeedyNote"
+        QT_HARMONYOS_APP_VERSION_NAME "${PROJECT_VERSION}"
+        QT_HARMONYOS_MODULE_DESCRIPTION "Fast note-taking and PDF annotation"
+        QT_HARMONYOS_APP_VERSION_CODE "${SPEEDYNOTE_HARMONY_VERSION_CODE}"
+        # A single PNG is enough: harmonydeployqt copies it into both the
+        # AppScope and entry media directories and repoints the ability's
+        # "$media:layered_image" at it, so the launcher icon comes from here too
+        # rather than from the template's foreground/background pair.
+        QT_HARMONYOS_APP_ICON "${CMAKE_SOURCE_DIR}/harmony/app-resources/app_icon.png"
+    )
+
+    # module.json5 permissions. Qt builds that list from this target's own
+    # _qt_harmonyos_permissions property first, then from the linked Qt modules'
+    # (the target's entries win on duplicate names). harmonydeployqt turns a
+    # literal "reason" into the $string: resource that module.json5 requires.
+    #
+    # READ_WRITE_DOCUMENTS_DIRECTORY is what makes saving work at all: the
+    # sandbox otherwise refuses writes to the user's Documents folder, and
+    # QFileDialog will happily return a path there that QFile then cannot open.
+    set_property(TARGET speedynote APPEND PROPERTY _qt_harmonyos_permissions
+"{
+  \"name\" : \"ohos.permission.READ_WRITE_DOCUMENTS_DIRECTORY\",
+  \"reason\" : \"Lets SpeedyNote open and save notebooks in your Documents folder.\",
+  \"usedScene\" :
+  {
+    \"abilities\" : [ \"QAbility\" ],
+    \"when\" : \"always\"
+  }
+}")
+
+    # FILE_ACCESS_PERSIST is system_grant at normal level, so declaring it here is
+    # the whole of obtaining it: no prompt, no ACL entry in the signing profile.
+    # It is what lets HarmonyPersistentGrant ask whether a picked PDF can stay
+    # reachable after a restart, which is the only way a sandboxed device can keep
+    # referring to a file it cannot name by path.
+    set_property(TARGET speedynote APPEND PROPERTY _qt_harmonyos_permissions
+"{
+  \"name\" : \"ohos.permission.FILE_ACCESS_PERSIST\",
+  \"reason\" : \"Lets SpeedyNote reopen the PDFs your notebooks are based on.\",
+  \"usedScene\" :
+  {
+    \"abilities\" : [ \"QAbility\" ],
+    \"when\" : \"always\"
+  }
+}")
+
     target_include_directories(speedynote PRIVATE
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/source
@@ -1346,6 +1519,26 @@ elseif(ANDROID)
         log z
     )
 
+elseif(OHOS)
+    # Must precede the UNIX branch, which would otherwise link Qt DBus.
+    # MuPDF vendors its own zlib (built hidden, see harmony/build-mupdf.sh), so
+    # there is no system z here -- unlike Android, which links it explicitly.
+    target_link_libraries(speedynote PRIVATE
+        Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent Qt${QT_VERSION_MAJOR}::Xml Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Svg
+        Qt${QT_VERSION_MAJOR}::CorePrivate Qt${QT_VERSION_MAJOR}::GuiPrivate Qt${QT_VERSION_MAJOR}::HarmonyExtrasPrivate
+        ${MUPDF_LIBRARIES}
+        # Core File Kit: OH_Environment_GetUserDocumentDir() and friends, used by
+        # source/harmony/HarmonyEnvironment.cpp to find the user's real Documents
+        # folder on 2-in-1 devices. Named without a path because it resolves out
+        # of the OHOS sysroot the toolchain file already points at.
+        libohenvironment.so
+        # Same kit, the other half of source/harmony/: OH_FileShare_* and
+        # OH_FileUri_* behind HarmonyPersistentGrant, which asks whether this
+        # device can keep access to a picked file across launches.
+        libohfileshare.so
+        libohfileuri.so
+    )
+
 elseif(UNIX)
     set(PLATFORM_LIBS
             Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent Qt${QT_VERSION_MAJOR}::Xml Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Svg
@@ -1412,6 +1605,11 @@ elseif(APPLE)
     endif()
     _install_qtbase_translations(share/speedynote/translations)
     install(FILES resources/icons/mainicon.svg DESTINATION share/speedynote/icons)
+
+elseif(OHOS)
+    # Nothing to install: harmonydeployqt stages libspeedynote.so and its
+    # dependencies into a generated DevEco project, and hvigor packages the HAP.
+    # Translations reach the device through the embedded qt_translations.qrc.
 
 elseif(UNIX AND NOT ANDROID)
     install(TARGETS speedynote DESTINATION bin)

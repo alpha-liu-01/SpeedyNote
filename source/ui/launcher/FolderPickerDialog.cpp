@@ -1,5 +1,6 @@
 #include "FolderPickerDialog.h"
 #include "../ThemeColors.h"
+#include "../MenuPopup.h"
 #include "../../core/NotebookLibrary.h"
 
 #include <QVBoxLayout>
@@ -433,7 +434,7 @@ void FolderPickerDialog::onFolderContextMenu(const QPoint& pos)
         deleteFolder(folderName);
     });
     
-    menu.exec(m_folderList->viewport()->mapToGlobal(pos));
+    execMenuAt(menu, m_folderList->viewport()->mapToGlobal(pos));
 }
 
 bool FolderPickerDialog::isFolderEmpty(const QString& folderName) const

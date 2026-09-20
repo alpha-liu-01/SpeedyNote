@@ -41,6 +41,12 @@
 #include <QColor>
 #include <algorithm>
 
+#ifdef Q_OS_HARMONY
+#include "harmony/HarmonyEnvironment.h"
+#include "harmony/HarmonyPersistentGrant.h"
+#include "ui/dialogs/DialogSizing.h"
+#endif
+
 // Android/iOS keyboard fix (BUG-A001)
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 #include <QGuiApplication>
@@ -1771,6 +1777,42 @@ void ControlPanelDialog::createAboutTab() {
     copyrightLabel->setAlignment(Qt::AlignCenter);
     copyrightLabel->setStyleSheet("font-size: 10px; color: #95a5a6;");
     layout->addWidget(copyrightLabel);
+
+#ifdef Q_OS_HARMONY
+    // Where notebooks are stored cannot be worked out from the app on HarmonyOS.
+    // A device without user-folder support has no /storage in its sandbox at all,
+    // so the file dialog simply offers fewer places to look and nothing says why;
+    // the first tester to hit it went looking through 计算机/data for a folder that
+    // was never going to be there. The state is put here because a screenshot of
+    // this tab is something a tester can send, unlike a hilog capture, and because
+    // an unsupported device and a refused permission need opposite advice.
+    layout->addSpacing(15);
+
+    QLabel *storageLabel = new QLabel(aboutTab);
+    storageLabel->setAlignment(Qt::AlignCenter);
+    storageLabel->setWordWrap(true);
+    storageLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    storageLabel->setStyleSheet("color: #7f8c8d;");
+    storageLabel->setFont(DialogSizing::scaledFont(storageLabel->font(), 0.85));
+
+    QString storageText = HarmonyEnvironment::hasUserDocumentsAccess()
+                              ? tr("Notebooks are saved in your Documents folder:")
+                              : tr("Notebooks are saved in private app storage:");
+    storageText += QLatin1Char('\n') + HarmonyEnvironment::writableDocumentsRoot();
+
+    const QString storageDetail = HarmonyEnvironment::accessFailureDetail();
+    if (!storageDetail.isEmpty()) {
+        storageText += QLatin1Char('\n') + storageDetail;
+    }
+
+    // Only worth showing where it decides something: with real Documents access,
+    // PDFs are opened by path and persistent grants are moot.
+    if (!HarmonyEnvironment::hasUserDocumentsAccess()) {
+        storageText += QLatin1Char('\n') + HarmonyPersistentGrant::capabilityDetail();
+    }
+    storageLabel->setText(storageText);
+    layout->addWidget(storageLabel);
+#endif
     
     // Add stretch to push everything to the top
     layout->addStretch();

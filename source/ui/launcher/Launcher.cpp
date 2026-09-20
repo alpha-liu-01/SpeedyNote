@@ -4,6 +4,7 @@
 #include "TimelineModel.h"
 #include "TimelineDelegate.h"
 #include "TimelineListView.h"
+#include "../MenuPopup.h"
 #include "NotebookCardDelegate.h"
 #include "StarredView.h"
 #include "SearchView.h"
@@ -18,10 +19,13 @@
 #include "../widgets/ExportProgressWidget.h"
 #include "../../MainWindow.h"
 #include "../../core/NotebookLibrary.h"
+#include "../../core/SandboxPdfOwnership.h"
 #include "../../core/Document.h"
 #include "../../batch/ExportQueueManager.h"
 #include "../../android/AndroidShareHelper.h"
+#include "../../platform/DocumentsDirectory.h"
 #include "../../platform/SystemNotification.h"
+#include "../../harmony/HarmonyWindowSwitch.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -47,6 +51,7 @@
 #include <QUrl>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QJsonParseError>
 #include <QSettings>
 #include <QStandardPaths>
@@ -333,28 +338,11 @@ void Launcher::setupNavigation()
         // Find and show the existing MainWindow before hiding the Launcher
         MainWindow* mainWindow = MainWindow::findExistingMainWindow();
         if (mainWindow) {
-            // Clear any stale fullscreen/maximized state on the MainWindow.
-            // QWidget::setWindowState() on a hidden widget only sets the
-            // internal flag; QWindow::setWindowState() also updates the
-            // native window, ensuring decorations are properly restored.
-            mainWindow->setWindowState(Qt::WindowNoState);
-            if (QWindow* win = mainWindow->windowHandle()) {
-                win->setWindowState(Qt::WindowNoState);
-            }
-            
-            if (isMaximized()) {
-                mainWindow->showMaximized();
-            } else if (isFullScreen()) {
-                mainWindow->showFullScreen();
-            } else {
-                const QPoint srcPos  = pos();
-                const QSize  srcSize = size();
-                mainWindow->show();
-                mainWindow->move(srcPos);
-                mainWindow->resize(srcSize);
-            }
-            mainWindow->raise();
-            mainWindow->activateWindow();
+            // hideWithAnimation() below dismisses this window with its own
+            // fade-out, so switchTo() must not hide it.
+            HarmonyWindowSwitch::switchTo(
+                /*incoming*/mainWindow, /*outgoing*/this,
+                HarmonyWindowSwitch::OutgoingPolicy::LeaveToCaller);
         }
         hideWithAnimation();
     });
@@ -693,6 +681,17 @@ void Launcher::showWithAnimation()
 
 void Launcher::hideWithAnimation()
 {
+    HarmonyWindowSwitch::setLauncherInFront(false);
+
+    if (HarmonyWindowSwitch::mustStayResident(this)) {
+        // On HarmonyOS the Launcher owns the app's only ability instance, and
+        // hide() would minimise it with nothing able to restore it, so the
+        // Launcher stays resident behind whichever MainWindow was just raised
+        // over it. Fading it out is skipped too: a resident window left at
+        // opacity 0 would come back invisible on the next switch.
+        return;
+    }
+
     m_fadeAnimation->stop();
     m_fadeAnimation->setStartValue(1.0);
     m_fadeAnimation->setEndValue(0.0);
@@ -725,8 +724,10 @@ void Launcher::closeEvent(QCloseEvent* event)
 {
     MainWindow* mw = MainWindow::findExistingMainWindow();
     if (mw && mw->tabCount() > 0) {
-        mw->show();
-        mw->raise();
+        // bringToFront() rather than show()/raise() so that the switch direction is
+        // recorded: if the MainWindow refuses to close below, this window stays open
+        // with the MainWindow in front of it, and the next toggle has to know that.
+        mw->bringToFront();
         if (!mw->close()) {
             event->ignore();
             return;
@@ -759,17 +760,32 @@ void Launcher::resizeEvent(QResizeEvent* event)
     setNavigationCompact(shouldBeCompact);
 }
 
+// A MainWindow may have been created or destroyed since the Launcher was last in
+// front, so the Return button cannot be set once and left alone.
+void Launcher::updateReturnButtonVisibility()
+{
+    if (m_returnBtn) {
+        m_returnBtn->setVisible(MainWindow::findExistingMainWindow() != nullptr);
+    }
+}
+
+void Launcher::changeEvent(QEvent* event)
+{
+    QMainWindow::changeEvent(event);
+
+    // Coming back to the front is not always a show(): on HarmonyOS the Launcher
+    // owns the app's ability instance and is never hidden, so switching to it only
+    // raises it and showEvent() below never runs. Activation covers both.
+    if (event->type() == QEvent::ActivationChange && isActiveWindow()) {
+        updateReturnButtonVisibility();
+    }
+}
+
 void Launcher::showEvent(QShowEvent* event)
 {
     QMainWindow::showEvent(event);
     
-    // Update Return button visibility based on whether MainWindow exists
-    // This must be checked each time the Launcher is shown because MainWindow
-    // may have been created/destroyed since the Launcher was last visible
-    bool hasMainWindow = (MainWindow::findExistingMainWindow() != nullptr);
-    if (m_returnBtn) {
-        m_returnBtn->setVisible(hasMainWindow);
-    }
+    updateReturnButtonVisibility();
     
     // Refresh timeline if date has changed since last shown
     // This handles scenarios like system sleep/hibernate during midnight
@@ -876,8 +892,7 @@ void Launcher::dropEvent(QDropEvent* event)
             }
         }
 
-        QString destDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
-                          + "/SpeedyNote";
+        QString destDir = PlatformPaths::notebooksDirectory();
         QDir().mkpath(destDir);
         performBatchImport(snbxFiles, destDir);
     }
@@ -1011,6 +1026,8 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
             }
         });
         
+        flattenSubmenu(menu, folderMenu);
+        
         menu.addSeparator();
     }
     
@@ -1042,6 +1059,8 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
         showSnbxExportDialog({bundlePath});
     });
     
+    flattenSubmenu(menu, exportMenu);
+    
     menu.addSeparator();
     
     // Show in file manager action (not available on Android/iOS - sandboxed storage)
@@ -1060,7 +1079,7 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
         deleteNotebooks({bundlePath});
     });
     
-    menu.exec(globalPos);
+    execMenuAt(menu, globalPos);
 }
 
 void Launcher::showFolderContextMenu(const QString& folderName, const QPoint& globalPos)
@@ -1107,7 +1126,7 @@ void Launcher::showFolderContextMenu(const QString& folderName, const QPoint& gl
         }
     });
     
-    menu.exec(globalPos);
+    execMenuAt(menu, globalPos);
 }
 
 bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
@@ -1173,6 +1192,15 @@ bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
     
     MainWindow* mainWindow = MainWindow::findExistingMainWindow();
     
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
+    // Which imported PDFs go with them. Decided before the loop, while every
+    // manifest involved is still on disk, and against the notebooks we are keeping
+    // so that a copy shared with one of those survives. See SandboxPdfOwnership.
+    const QStringList pdfsToDelete = SandboxPdfOwnership::deletablePdfPaths(
+        bundlePaths, survivingNotebookBundles(bundlePaths),
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+#endif
+
     for (const QString& bundlePath : bundlePaths) {
         // BUG-TAB-002 FIX: If this notebook is open in MainWindow, close it first
         // This prevents undefined behavior (editing deleted files, save failures)
@@ -1182,12 +1210,11 @@ bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
             mainWindow->closeDocumentById(docId, true);  // discardChanges=true
         }
         
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
-        // BUG-A003 Storage Cleanup: Check if this document has an imported PDF in sandbox
-        // If so, delete the PDF too to prevent storage leaks
-        QString pdfToDelete = findImportedPdfPath(bundlePath);
-#endif
-        
+        // Before removeFromRecent(), which is what maps this bundle to the document
+        // id the cached thumbnail is filed under. Afterwards the file is orphaned:
+        // nothing else ever looks at it again, on any platform.
+        lib->invalidateThumbnail(bundlePath);
+
         // Remove from library
         lib->removeFromRecent(bundlePath);
         
@@ -1196,17 +1223,25 @@ bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
         if (bundleDir.exists()) {
             bundleDir.removeRecursively();
         }
-        
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
-        // Delete imported PDF if found
-        if (!pdfToDelete.isEmpty() && QFile::exists(pdfToDelete)) {
-            QFile::remove(pdfToDelete);
-#ifdef SPEEDYNOTE_DEBUG
-            qDebug() << "Launcher::deleteNotebooks: Also deleted imported PDF:" << pdfToDelete;
-#endif
-        }
-#endif
     }
+
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
+    // BUG-A003 Storage Cleanup: the PDFs we copied into app storage for these
+    // notebooks. Nothing else reclaims them, and the user cannot reach them with a
+    // file manager, so leaving them behind costs space that only reinstalling frees.
+    for (const QString& pdfToDelete : pdfsToDelete) {
+        if (!QFile::exists(pdfToDelete)) {
+            continue;
+        }
+        if (QFile::remove(pdfToDelete)) {
+            qInfo() << "Launcher: reclaimed imported PDF" << pdfToDelete;
+        } else {
+            // Worth a complaint rather than silence: on these platforms this is the
+            // only thing that can free the file, so a failure here is permanent.
+            qWarning() << "Launcher: could not delete imported PDF" << pdfToDelete;
+        }
+    }
+#endif
     
     // blocker goes out of scope here, re-enabling signals on NotebookLibrary.
     // Now do a single refresh of both views (L-010).
@@ -1569,6 +1604,8 @@ void Launcher::showTimelineOverflowMenu()
         }
     });
     
+    flattenSubmenu(menu, exportMenu);
+    
     menu.addSeparator();
     
     // Move to Folder... (L-008: opens FolderPickerDialog)
@@ -1615,7 +1652,7 @@ void Launcher::showTimelineOverflowMenu()
     // Position menu relative to overflow button
     QPoint menuPos = m_timelineOverflowMenuButton->mapToGlobal(
         QPoint(m_timelineOverflowMenuButton->width(), m_timelineOverflowMenuButton->height()));
-    menu.exec(menuPos);
+    execMenuAt(menu, menuPos);
 }
 
 void Launcher::onTimelineSelectModeChanged(bool active)
@@ -1881,8 +1918,10 @@ void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& d
         // Android/iOS: Use app data location for imports
         importDestDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
 #else
-        // Desktop: Use Documents/SpeedyNote as default
-        importDestDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/SpeedyNote";
+        // Desktop: Documents/SpeedyNote. On HarmonyOS this resolves to app storage
+        // instead when the device has no reachable Documents folder, which is every
+        // tablet -- importing into Documents there fails at the first write.
+        importDestDir = PlatformPaths::notebooksDirectory();
 #endif
     }
     QDir().mkpath(importDestDir);
@@ -1984,49 +2023,46 @@ void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& d
     }
 }
 
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
-QString Launcher::findImportedPdfPath(const QString& bundlePath)
+// HarmonyOS joins this for the same reason Android needed it: PDFs picked from
+// outside the sandbox are copied into app storage, so they are ours to delete along
+// with the notebook. See HarmonyPdfImport and SandboxPdfOwnership.
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || defined(Q_OS_HARMONY)
+// The notebooks that will still exist after this deletion, whose imported PDFs must
+// therefore be left alone.
+//
+// The library is the main source, but app storage is scanned as well, because a
+// notebook that is on disk and missing from the library index still opens and still
+// needs its PDF -- and if the index is ever lost or rebuilt, every notebook is in
+// that state at once. Erring towards keeping a file only wastes space; erring the
+// other way blanks the pages of a notebook we were not asked to touch.
+QStringList Launcher::survivingNotebookBundles(const QStringList& bundlesBeingDeleted)
 {
-    // BUG-A003 Storage Cleanup: Check if this document has an imported PDF in sandbox.
-    // Returns the path to the PDF if it's in our sandbox, empty string otherwise.
-    
-    // Read document.json to get the PDF path
-    QString manifestPath = bundlePath + "/document.json";
-    QFile manifestFile(manifestPath);
-    if (!manifestFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        return QString();
+    QSet<QString> excluded;
+    for (const QString& path : bundlesBeingDeleted) {
+        excluded.insert(QDir::cleanPath(path));
     }
-    
-    QByteArray data = manifestFile.readAll();
-    manifestFile.close();
-    
-    QJsonParseError parseError;
-    QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
-    if (parseError.error != QJsonParseError::NoError) {
-        return QString();
+
+    QStringList survivors;
+    const auto add = [&](const QString& bundlePath) {
+        const QString clean = QDir::cleanPath(bundlePath);
+        if (!excluded.contains(clean) && !survivors.contains(clean)) {
+            survivors << clean;
+        }
+    };
+
+    const QList<NotebookInfo> tracked = NotebookLibrary::instance()->recentNotebooks();
+    for (const NotebookInfo& notebook : tracked) {
+        add(notebook.bundlePath);
     }
-    
-    QJsonObject obj = doc.object();
-    QString pdfPath = obj["pdf_path"].toString();
-    
-    if (pdfPath.isEmpty()) {
-        return QString(); // Not a PDF-backed document
+
+    const QStringList onDisk = SandboxPdfOwnership::bundlesInDirectories(
+        {QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+             + QStringLiteral("/notebooks")});
+    for (const QString& bundlePath : onDisk) {
+        add(bundlePath);
     }
-    
-    // Check if the PDF is in our sandbox directories:
-    // 1. /files/pdfs/ - Direct PDF imports via SAF (BUG-A003)
-    // 2. /files/notebooks/embedded/ - PDFs extracted from .snbx packages (Phase 2)
-    QString appDataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QString sandboxPdfDir = appDataDir + "/pdfs";
-    QString embeddedDir = appDataDir + "/notebooks/embedded";
-    
-    if (pdfPath.startsWith(sandboxPdfDir) || pdfPath.startsWith(embeddedDir)) {
-        // This PDF was imported to our sandbox - safe to delete
-        return pdfPath;
-    }
-    
-    // PDF is external (user's original file) - don't delete it
-    return QString();
+
+    return survivors;
 }
 #endif
 
