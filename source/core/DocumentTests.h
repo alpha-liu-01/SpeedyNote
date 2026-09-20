@@ -15,11 +15,13 @@
 
 #include "Document.h"
 #include "Page.h"
+#include "../pdf/PdfProvider.h"
 #include "../ui/dialogs/PageRangeSelectDialog.h"
 #include <QDebug>
 #include <QJsonDocument>
 #include <QFileInfo>
 #include <QImage>
+#include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <algorithm>
 #include <cassert>
@@ -1146,6 +1148,224 @@ inline bool testActualPdfLoad()
     return success;
 }
 
+/**
+ * @brief Build a structurally valid PDF with @p pageCount blank pages.
+ * @param marker Embedded as a comment, so two files can differ byte-for-byte
+ *        while containing the same pages - what re-saving in another app does.
+ */
+inline QByteArray makeMinimalPdf(int pageCount, const QByteArray& marker = QByteArray())
+{
+    QList<QByteArray> objects;
+    QByteArray kids;
+    for (int i = 0; i < pageCount; ++i) {
+        kids += QByteArray::number(3 + i) + " 0 R ";
+    }
+    objects << "<</Type/Catalog/Pages 2 0 R>>";
+    objects << "<</Type/Pages/Kids[" + kids.trimmed() + "]/Count "
+                   + QByteArray::number(pageCount) + ">>";
+    for (int i = 0; i < pageCount; ++i) {
+        objects << "<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Resources<<>>>>";
+    }
+
+    QByteArray pdf = "%PDF-1.4\n";
+    if (!marker.isEmpty()) pdf += "% " + marker + "\n";
+    QList<int> offsets;
+    for (int i = 0; i < objects.size(); ++i) {
+        offsets << static_cast<int>(pdf.size());
+        pdf += QByteArray::number(i + 1) + " 0 obj\n" + objects.at(i) + "\nendobj\n";
+    }
+
+    const int xrefOffset = static_cast<int>(pdf.size());
+    const QByteArray entryCount = QByteArray::number(objects.size() + 1);
+    pdf += "xref\n0 " + entryCount + "\n0000000000 65535 f \n";
+    for (int offset : offsets) {
+        // Each entry must be exactly 20 bytes.
+        pdf += QByteArray::number(offset).rightJustified(10, '0') + " 00000 n \n";
+    }
+    pdf += "trailer\n<</Size " + entryCount + "/Root 1 0 R>>\nstartxref\n"
+           + QByteArray::number(xrefOffset) + "\n%%EOF\n";
+    return pdf;
+}
+
+inline bool writeFixtureFile(const QString& path, const QByteArray& bytes)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+    const bool written = file.write(bytes) == bytes.size();
+    file.close();
+    return written;
+}
+
+/**
+ * @brief A PDF re-saved in place must stay usable and stay re-linkable.
+ *
+ * The fingerprint (first 1 MB + size) changes when any other app rewrites the
+ * file, even if no page changed. Verification alone can never accept the new
+ * bytes, so without tolerance at open time and an override at relink time the
+ * source becomes permanently unusable.
+ */
+inline bool testPdfSourceDriftTolerance()
+{
+    qDebug() << "=== Test: PDF Source Drift Tolerance ===";
+    if (!PdfProvider::isAvailable()) {
+        qDebug() << "  - SKIPPED: no PDF backend in this build";
+        return true;
+    }
+
+    QTemporaryDir dir;
+    if (!dir.isValid()) {
+        qDebug() << "FAIL: could not create temp dir for drift fixtures";
+        return false;
+    }
+    bool success = true;
+
+    const QString pdfPath = dir.filePath(QStringLiteral("drifting.pdf"));
+    if (!writeFixtureFile(pdfPath, makeMinimalPdf(3))) {
+        qDebug() << "FAIL: could not write the 3-page fixture";
+        return false;
+    }
+    {
+        auto probeProvider = PdfProvider::create(pdfPath);
+        if (!probeProvider || !probeProvider->isValid() || probeProvider->pageCount() != 3) {
+            qDebug() << "  - SKIPPED: backend cannot read the synthetic fixture";
+            return true;
+        }
+    }
+
+    auto doc = Document::createNew(QStringLiteral("Drift tolerance"));
+    const QString sourceId = doc->registerSource(
+        pdfPath, Document::computePdfHash(pdfPath), Document::getPdfFileSize(pdfPath),
+        false, 3);
+    auto page = Page::createForPdf(QSizeF(800, 1000), 2, sourceId);
+    if (!doc->restorePageFromSnapshot(doc->pageCount(), page->toJson())) {
+        qDebug() << "FAIL: could not add the PDF-backed page";
+        return false;
+    }
+    doc->removePage(0);
+
+    auto healthFor = [](const Document* d, const QString& id) {
+        const QVector<PdfSourceHealth> all = d->pdfSourceHealthSnapshot();
+        auto it = std::find_if(all.cbegin(), all.cend(),
+                               [&id](const PdfSourceHealth& h) { return h.sourceId == id; });
+        return it != all.cend() ? *it : PdfSourceHealth{};
+    };
+
+    if (healthFor(doc.get(), sourceId).status != PdfSourceHealthStatus::AvailableExternal) {
+        qDebug() << "FAIL: untouched source should be plainly available";
+        success = false;
+    }
+
+    // Same pages, different bytes: keep rendering, but say the file has changed.
+    if (!writeFixtureFile(pdfPath, makeMinimalPdf(3, "resaved by another app"))) {
+        qDebug() << "FAIL: could not rewrite the fixture";
+        return false;
+    }
+    doc->retryPdfSource(sourceId);
+    PdfSourceHealth drifted = healthFor(doc.get(), sourceId);
+    if (drifted.status != PdfSourceHealthStatus::AvailableUpdated
+        || drifted.requiresRepair() || drifted.unavailablePages != 0) {
+        qDebug() << "FAIL: a re-saved PDF with the same pages should stay usable"
+                 << static_cast<int>(drifted.status);
+        success = false;
+    }
+
+    // The dialog needs to tell "wrong document" apart from "cannot be opened".
+    using Probe = Document::SourceCandidateProbe;
+    if (doc->probeSourceCandidate(sourceId, pdfPath).result != Probe::Result::Mismatch) {
+        qDebug() << "FAIL: a readable drifted file should probe as Mismatch";
+        success = false;
+    }
+    const QString junkPath = dir.filePath(QStringLiteral("junk.pdf"));
+    writeFixtureFile(junkPath, QByteArrayLiteral("not a pdf"));
+    if (doc->probeSourceCandidate(sourceId, junkPath).result != Probe::Result::Unreadable) {
+        qDebug() << "FAIL: an unopenable file should probe as Unreadable";
+        success = false;
+    }
+    if (doc->probeSourceCandidate(sourceId, dir.filePath(QStringLiteral("nope.pdf"))).result
+        != Probe::Result::InvalidTarget) {
+        qDebug() << "FAIL: a nonexistent file should probe as InvalidTarget";
+        success = false;
+    }
+
+    // Fewer pages than the notebook references is a different document.
+    if (!writeFixtureFile(pdfPath, makeMinimalPdf(1))) {
+        qDebug() << "FAIL: could not write the truncated fixture";
+        return false;
+    }
+    doc->retryPdfSource(sourceId);
+    if (healthFor(doc.get(), sourceId).status != PdfSourceHealthStatus::IdentityMismatch) {
+        qDebug() << "FAIL: a file that lost pages must not be tolerated";
+        success = false;
+    }
+
+    // Re-anchoring: refused by default, accepted on override, and the stored
+    // identity then describes the file the user actually has.
+    if (!writeFixtureFile(pdfPath, makeMinimalPdf(4, "a different document"))) {
+        qDebug() << "FAIL: could not write the replacement fixture";
+        return false;
+    }
+    if (doc->locateSource(sourceId, pdfPath)) {
+        qDebug() << "FAIL: locateSource accepted a mismatch without an override";
+        success = false;
+    }
+    if (!doc->locateSource(sourceId, pdfPath, /*acceptMismatch*/ true)) {
+        qDebug() << "FAIL: locateSource refused an explicitly accepted mismatch";
+        success = false;
+    }
+    const PdfSource* reanchored = doc->pdfSourceById(sourceId);
+    if (!reanchored || reanchored->pageCount != 4
+        || reanchored->hash != Document::computePdfHash(pdfPath)
+        || reanchored->size != Document::getPdfFileSize(pdfPath)) {
+        qDebug() << "FAIL: override should rewrite hash, size and page count";
+        success = false;
+    }
+    doc->retryPdfSource(sourceId);
+    if (healthFor(doc.get(), sourceId).status != PdfSourceHealthStatus::AvailableExternal) {
+        qDebug() << "FAIL: a re-anchored source should stop reporting a mismatch";
+        success = false;
+    }
+
+    auto restored = Document::fromFullJson(doc->toFullJson());
+    const PdfSource* restoredSource = restored ? restored->pdfSourceById(sourceId) : nullptr;
+    if (!restoredSource || restoredSource->pageCount != 4) {
+        qDebug() << "FAIL: page count did not survive a save/load round trip";
+        success = false;
+    }
+
+    // Legacy source with no recorded page count: every referenced page still
+    // existing is the only check available.
+    auto legacy = Document::createNew(QStringLiteral("Legacy drift"));
+    const QString legacyPath = dir.filePath(QStringLiteral("legacy.pdf"));
+    writeFixtureFile(legacyPath, makeMinimalPdf(3));
+    const QString legacyId = legacy->registerSource(
+        legacyPath, Document::computePdfHash(legacyPath),
+        Document::getPdfFileSize(legacyPath), false);
+    auto legacyPage = Page::createForPdf(QSizeF(800, 1000), 2, legacyId);
+    legacy->restorePageFromSnapshot(legacy->pageCount(), legacyPage->toJson());
+    legacy->removePage(0);
+    if (legacy->maxReferencedOriginalPage(legacyId) != 2) {
+        qDebug() << "FAIL: highest referenced original page should be 2";
+        success = false;
+    }
+    writeFixtureFile(legacyPath, makeMinimalPdf(3, "legacy resave"));
+    legacy->retryPdfSource(legacyId);
+    if (healthFor(legacy.get(), legacyId).status != PdfSourceHealthStatus::AvailableUpdated) {
+        qDebug() << "FAIL: hashless-era source should tolerate drift by page range";
+        success = false;
+    }
+    auto legacyRestored = Document::fromFullJson(legacy->toFullJson());
+    const PdfSource* legacyBefore = legacy->pdfSourceById(legacyId);
+    const PdfSource* legacyAfter =
+        legacyRestored ? legacyRestored->pdfSourceById(legacyId) : nullptr;
+    if (!legacyBefore || !legacyAfter || legacyBefore->pageCount != legacyAfter->pageCount) {
+        qDebug() << "FAIL: page count did not round-trip for a legacy source";
+        success = false;
+    }
+
+    if (success) qDebug() << "PASS: PDF source drift tolerance tests successful!";
+    return success;
+}
+
 inline bool testMultiPdfSourceRecovery()
 {
     qDebug() << "=== Test: Multi-PDF Source Recovery ===";
@@ -1574,6 +1794,9 @@ inline bool runAllTests()
     qDebug() << "";
 
     allPass &= testMultiPdfSourceRecovery();
+    qDebug() << "";
+
+    allPass &= testPdfSourceDriftTolerance();
     qDebug() << "";
 
     allPass &= testPdfImportPageRanges();
