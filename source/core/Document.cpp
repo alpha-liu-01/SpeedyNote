@@ -1082,6 +1082,22 @@ QPixmap Document::renderPdfPageToPixmap(int pageIndex, qreal dpi) const
     return provider->renderPageToPixmap(pageIndex, dpi);
 }
 
+QImage Document::renderPdfPageRegionToImage(const QString& sourceId, int pageIndex, qreal dpi,
+                                            const QRectF& clipRegionPt) const
+{
+    PdfProvider* provider = providerForSource(sourceId);
+    if (!provider || !provider->isValid()) {
+        return QImage();
+    }
+    // Same original->provider page mapping as the whole-page path: a bundled
+    // source is served by a mini-PDF whose indices differ from the original ones.
+    const int providerPage = resolveSourcePageIndex(sourceId, pageIndex);
+    if (providerPage < 0) {
+        return QImage();
+    }
+    return provider->renderPageRegionToImage(providerPage, dpi, clipRegionPt);
+}
+
 QVector<QRect> Document::pdfImageRegions(int pageIndex, qreal dpi) const
 {
     return pdfImageRegions(QString(), pageIndex, dpi);
