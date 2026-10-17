@@ -5,6 +5,7 @@
 #include "subtoolbars/PenSubToolbar.h"
 #include "subtoolbars/MarkerSubToolbar.h"
 #include "subtoolbars/EraserSubToolbar.h"
+#include "subtoolbars/LassoSubToolbar.h"
 #include "subtoolbars/HighlighterSubToolbar.h"
 #include "subtoolbars/OcrSubToolbar.h"
 
@@ -83,12 +84,14 @@ void Toolbar::setupUi()
     m_straightLineButton->setToolTip(tr("Straight Line Mode (/)"));
     mainLayout->addWidget(m_straightLineButton);
 
-    // --- Lasso (no subtoolbar) ---
-    m_lassoButton = new ToolButton(this);
-    m_lassoButton->setThemedIcon("rope");
-    m_lassoButton->setToolTip(tr("Lasso Selection Tool (L)"));
-    m_toolGroup->addButton(m_lassoButton);
-    mainLayout->addWidget(m_lassoButton);
+    // --- Lasso (with mode subtoolbar: Freeform / Rectangle) ---
+    m_lassoSubToolbar = new LassoSubToolbar();
+    m_lassoExpandable = new ExpandableToolButton(this);
+    m_lassoExpandable->setThemedIcon("rope");
+    m_lassoExpandable->toolButton()->setToolTip(tr("Lasso Selection Tool (L)"));
+    m_lassoExpandable->setContentWidget(m_lassoSubToolbar);
+    m_toolGroup->addButton(m_lassoExpandable->toolButton());
+    mainLayout->addWidget(m_lassoExpandable);
 
     // --- Object tools (one internal ObjectSelect tool, three insert modes) ---
     // The Link tool's controls live in a floating, viewport-owned LinkObjectBar
@@ -123,7 +126,7 @@ void Toolbar::setupUi()
 
     m_page1Widgets = {
         m_penExpandable, m_markerExpandable, m_eraserExpandable,
-        m_straightLineButton, m_lassoButton, m_objectImageButton,
+        m_straightLineButton, m_lassoExpandable, m_objectImageButton,
         m_objectLinkButton, m_objectTextButton, m_textExpandable
     };
 
@@ -211,7 +214,7 @@ void Toolbar::connectSignals()
         expandToolButton(ToolType::Eraser);
         emit toolSelected(ToolType::Eraser);
     });
-    connect(m_lassoButton, &QPushButton::clicked, this, [this]() {
+    connect(m_lassoExpandable->toolButton(), &QPushButton::clicked, this, [this]() {
         expandToolButton(ToolType::Lasso);
         emit toolSelected(ToolType::Lasso);
     });
@@ -267,6 +270,7 @@ void Toolbar::expandToolButton(ToolType tool)
         case ToolType::Pen:       newSub = m_penSubToolbar; break;
         case ToolType::Marker:    newSub = m_markerSubToolbar; break;
         case ToolType::Eraser:    newSub = m_eraserSubToolbar; break;
+        case ToolType::Lasso:     newSub = m_lassoSubToolbar; break;
         case ToolType::Highlighter: newSub = m_highlighterSubToolbar; break;
         default: break;
     }
@@ -295,6 +299,7 @@ void Toolbar::collapseAllToolButtons()
     m_penExpandable->setExpanded(false);
     m_markerExpandable->setExpanded(false);
     m_eraserExpandable->setExpanded(false);
+    m_lassoExpandable->setExpanded(false);
     m_textExpandable->setExpanded(false);
 }
 
@@ -318,6 +323,7 @@ ExpandableToolButton* Toolbar::expandableForTool(ToolType tool) const
         case ToolType::Pen:          return m_penExpandable;
         case ToolType::Marker:       return m_markerExpandable;
         case ToolType::Eraser:       return m_eraserExpandable;
+        case ToolType::Lasso:        return m_lassoExpandable;
         case ToolType::Highlighter:  return m_textExpandable;
         default: return nullptr;
     }
@@ -347,9 +353,6 @@ void Toolbar::setCurrentTool(ToolType tool)
     } else if (exp) {
         exp->toolButton()->setChecked(true);
         selected = exp;
-    } else if (tool == ToolType::Lasso) {
-        m_lassoButton->setChecked(true);
-        selected = m_lassoButton;
     } else if (tool == ToolType::Pan) {
         m_panButton->setChecked(true);
         selected = m_panButton;
@@ -426,12 +429,12 @@ void Toolbar::updateTheme(bool darkMode)
     m_penSubToolbar->setDarkMode(darkMode);
     m_markerSubToolbar->setDarkMode(darkMode);
     m_eraserSubToolbar->setDarkMode(darkMode);
+    m_lassoSubToolbar->setDarkMode(darkMode);
     m_highlighterSubToolbar->setDarkMode(darkMode);
     m_ocrSubToolbar->setDarkMode(darkMode);
 
     // Update plain buttons
     m_straightLineButton->setDarkMode(darkMode);
-    m_lassoButton->setDarkMode(darkMode);
     m_objectImageButton->setDarkMode(darkMode);
     m_objectLinkButton->setDarkMode(darkMode);
     m_objectTextButton->setDarkMode(darkMode);
@@ -688,6 +691,7 @@ void Toolbar::onTabChanged(int newTabId, int oldTabId)
         m_markerSubToolbar->saveTabState(oldTabId);
         m_highlighterSubToolbar->saveTabState(oldTabId);
         m_eraserSubToolbar->saveTabState(oldTabId);
+        m_lassoSubToolbar->saveTabState(oldTabId);
         m_ocrSubToolbar->saveTabState(oldTabId);
     }
 
@@ -697,6 +701,7 @@ void Toolbar::onTabChanged(int newTabId, int oldTabId)
         m_markerSubToolbar->restoreTabState(newTabId);
         m_highlighterSubToolbar->restoreTabState(newTabId);
         m_eraserSubToolbar->restoreTabState(newTabId);
+        m_lassoSubToolbar->restoreTabState(newTabId);
         m_ocrSubToolbar->restoreTabState(newTabId);
     }
 }
@@ -707,6 +712,7 @@ void Toolbar::clearTabState(int tabId)
     m_markerSubToolbar->clearTabState(tabId);
     m_highlighterSubToolbar->clearTabState(tabId);
     m_eraserSubToolbar->clearTabState(tabId);
+    m_lassoSubToolbar->clearTabState(tabId);
     m_ocrSubToolbar->clearTabState(tabId);
 }
 

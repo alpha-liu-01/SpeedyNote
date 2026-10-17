@@ -994,6 +994,7 @@ set(UI_SOURCES
     source/ui/subtoolbars/PenSubToolbar.cpp
     source/ui/subtoolbars/MarkerSubToolbar.cpp
     source/ui/subtoolbars/EraserSubToolbar.cpp
+    source/ui/subtoolbars/LassoSubToolbar.cpp
     source/ui/subtoolbars/HighlighterSubToolbar.cpp
     source/ui/subtoolbars/OcrSubToolbar.cpp
     # Panels

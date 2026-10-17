@@ -61,6 +61,8 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QMimeData>      // For clipboard content type check (O2.4)
+#include <QSettings>      // Lasso mode persistence
+#include <QCryptographicHash>  // Universal paste clipboard fingerprint
 #include <QDragEnterEvent> // Plan D2: cross-document page-transfer drops
 #include <QDragMoveEvent>
 #include <QDragLeaveEvent>
@@ -132,6 +134,12 @@ QList<QJsonObject> DocumentViewport::s_objectClipboard;
 QMap<QString, DocumentViewport::ClipboardImageAsset>
     DocumentViewport::s_objectClipboardAssets;
 
+// Universal paste arbitration stamps (see header comment)
+qint64 DocumentViewport::s_internalClipboardStamp = 0;
+qint64 DocumentViewport::s_systemClipboardStamp = 0;
+qint64 DocumentViewport::s_internalCopyEchoGuardUntil = 0;
+QByteArray DocumentViewport::s_systemClipboardFingerprint;
+
 // ===== Thread-Local PDF Provider Cache =====
 // 
 // Each thread in the QThreadPool keeps its own cached PdfProvider to avoid
@@ -198,6 +206,14 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     setAttribute(Qt::WA_OpaquePaintEvent, true);
     setAttribute(Qt::WA_NoSystemBackground, true);
     setAutoFillBackground(false);
+    
+    // Lasso selection mode is a global preference persisted by setLassoMode()
+    // and seeded here so a fresh viewport starts in the user's chosen mode.
+    {
+        QSettings settings("SpeedyNote", "App");
+        const int mode = settings.value("lasso/mode", 0).toInt();
+        m_lassoMode = (mode == 1) ? LassoMode::Rectangle : LassoMode::Freeform;
+    }
     
     // PDF preload timer - debounces preload requests during rapid scrolling
     m_pdfPreloadTimer = new QTimer(this);
@@ -853,6 +869,10 @@ void DocumentViewport::notifyPdfChanged()
 
 void DocumentViewport::setCurrentTool(ToolType tool)
 {
+    // Any explicit tool pick (toolbar, shortcut, subtoolbar) ends the
+    // post-paste temporary state; only the paste paths keep it alive.
+    m_hasPrePasteTool = false;
+
     if (m_currentTool == tool) {
         return;
     }
@@ -1194,6 +1214,113 @@ void DocumentViewport::setEraserMode(EraserMode mode)
     m_eraserMode = mode;
     emit eraserModeChanged(mode);
     update();
+}
+
+void DocumentViewport::setLassoMode(LassoMode mode)
+{
+    if (m_lassoMode == mode) {
+        return;
+    }
+
+    // Switching mid-drag would leave the other mode's state dangling; end the
+    // in-flight gesture the same way switching tools does.
+    if (m_isDrawingLasso) {
+        m_isDrawingLasso = false;
+        m_lassoPath.clear();
+        m_pointerActive = false;
+    }
+
+    m_lassoMode = mode;
+
+    QSettings settings("SpeedyNote", "App");
+    settings.setValue("lasso/mode", static_cast<int>(mode));
+
+    emit lassoModeChanged(mode);
+    update();
+}
+
+bool DocumentViewport::returnToPrePasteTool()
+{
+    if (!m_hasPrePasteTool) {
+        return false;
+    }
+    const ToolType tool = m_prePasteTool;
+    m_hasPrePasteTool = false;
+    if (m_currentTool != tool) {
+        setCurrentTool(tool);
+        return true;
+    }
+    return false;
+}
+
+void DocumentViewport::returnToPrePasteToolAndCancelGesture()
+{
+    if (!returnToPrePasteTool()) {
+        return;
+    }
+    // The press belongs to the OLD tool's dismissal, not to the restored
+    // drawing tool. A pen keeps emitting pressure moves after this handler
+    // returns; with m_pointerActive still set, the restored tool would treat
+    // them as a stroke and leave an unwanted mark. Disarm the gesture; the
+    // eventual release falls through to the idle-cleanup path.
+    m_pointerActive = false;
+    m_activeSource = PointerEvent::Unknown;
+    m_activeDrawingPage = -1;
+}
+
+// ===== Universal Paste (clipboard arbitration) =====
+
+void DocumentViewport::noteSystemClipboardChanged()
+{
+    QClipboard* clipboard = QGuiApplication::clipboard();
+    if (!clipboard) {
+        return;
+    }
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    // Our own object copy writes plain text to the system clipboard as a
+    // side effect (cross-app paste). That echo must be fully transparent:
+    // neither stamped (it would outrank the internal clipboard it came
+    // from) nor fingerprinted (a fingerprint recorded during the guard
+    // window would swallow the next genuine external copy of the same
+    // content forever).
+    if (now < s_internalCopyEchoGuardUntil) {
+        return;
+    }
+
+    // Fingerprint the content so an activation-time re-check notices a
+    // change that happened while the window was unfocused (a dataChanged
+    // some platforms do not deliver to background applications).
+    const QMimeData* mime = clipboard->mimeData();
+    QByteArray fingerprint;
+    if (mime) {
+        const QStringList formats = mime->formats();
+        for (const QString& f : formats) {
+            fingerprint += f.toUtf8();
+            fingerprint += '\n';
+        }
+        if (mime->hasText()) {
+            fingerprint += QCryptographicHash::hash(
+                mime->text().toUtf8(), QCryptographicHash::Md5).toHex();
+        }
+        if (mime->hasImage()) {
+            const QSize imageSize = clipboard->image().size();
+            fingerprint += QByteArray::number(imageSize.width());
+            fingerprint += 'x';
+            fingerprint += QByteArray::number(imageSize.height());
+        }
+    }
+
+    // Same content as last time: keep the original stamp so re-activating
+    // the window does not make a stale external copy outrank a fresh
+    // internal one.
+    if (fingerprint == s_systemClipboardFingerprint) {
+        return;
+    }
+    s_systemClipboardFingerprint = fingerprint;
+
+    s_systemClipboardStamp = now;
 }
 
 // ===== View State Setters =====
@@ -3302,6 +3429,10 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     // P1: Use incremental rendering for O(1) per frame instead of O(n)
     if ((m_isDrawingLasso || m_isDrawingEraserLasso) && m_lassoPath.size() > 1) {
         renderLassoPathIncremental(painter);
+    } else if (m_isDrawingLasso && m_lassoMode == LassoMode::Rectangle
+               && m_lassoPath.isEmpty()) {
+        // Rectangle marquee: dashed preview between the two drag corners.
+        drawLassoRectPreview(painter);
     }
 
     // Task 2.10.3: Draw lasso selection (selected strokes + bounding box)
@@ -4523,6 +4654,16 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
             closeLinkObjectBarPopups(true);
             break;
         case QEvent::TabletMove:
+            // A tip lifted while a side button stays held can arrive as a move
+            // with LeftButton dropped, rather than as a TabletRelease. Finalize
+            // the in-flight stroke so a Hold-mapped eraser/pen does not stay
+            // stuck open until the button is released too.
+            if (m_pointerActive && m_activeSource == PointerEvent::Stylus
+                && !(event->buttons() & Qt::LeftButton)
+                && (event->buttons() & (Qt::MiddleButton | Qt::RightButton))) {
+                peType = PointerEvent::Release;
+                break;
+            }
             peType = PointerEvent::Move;
             break;
         case QEvent::TabletRelease:
@@ -4539,6 +4680,28 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
         event->accept();
         return;
     }
+
+    // Side-button-only stylus events must not draw or erase. The side/barrel
+    // button arrives as Middle/Right on a QTabletEvent with no LeftButton (the
+    // pen tip); MainWindow has already used it to switch the active tool. A
+    // real stroke always carries LeftButton in the mask (or as the changed
+    // button), so anything else here is the button alone. Without this guard,
+    // clicking a side button mapped to Toggle/OneShot would leave a stray dot.
+    {
+        // A real stroke always carries LeftButton (the pen tip) in the mask or
+        // as the changed button; the eraser end is still a tip and reports
+        // LeftButton too. Anything with a Middle/Right button but no tip is the
+        // side button alone, in whichever field the driver chose to report it.
+        const bool hasTipContact = (event->buttons() & Qt::LeftButton)
+                                   || event->button() == Qt::LeftButton;
+        const bool hasSideButton = (event->buttons() & (Qt::MiddleButton | Qt::RightButton))
+                                   || event->button() == Qt::MiddleButton
+                                   || event->button() == Qt::RightButton;
+        if (!hasTipContact && hasSideButton) {
+            event->accept();
+            return;
+        }
+    }
     
     // ===== Tablet Hover Tracking for Eraser Cursor =====
     // TabletMove events arrive even when the pen is hovering (not pressed).
@@ -4552,6 +4715,18 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
         // doing it here moves the cost to hover time, not pen-down latency.
         initEraserJni();
 #endif
+        // Some drivers do not emit a TabletPress when the tip is lowered while a
+        // side button is already held: the tip landing instead shows up as a
+        // LeftButton appearing in a TabletMove mask. Without this, a Hold-mapped
+        // eraser would switch tool on the button press but never start erasing
+        // when the tip finally touches. Synthesize the missing press.
+        if (event->buttons() & Qt::LeftButton) {
+            PointerEvent tipPress = tabletToPointerEvent(event, PointerEvent::Press);
+            handlePointerEvent(tipPress);
+            event->accept();
+            return;
+        }
+
         QPointF newPos = SN_EVENT_POS(event);
         
         // Check if stylus is within widget bounds
@@ -7050,6 +7225,32 @@ void DocumentViewport::renderLassoPathIncremental(QPainter& painter)
     painter.drawPixmap(0, 0, m_lassoPathCache);
 }
 
+// Rectangle lasso mode: dashed preview from the pressed corner to the current
+// pointer corner, in the same blue as the freeform path.
+void DocumentViewport::drawLassoRectPreview(QPainter& painter) const
+{
+    const bool isEdgeless = m_document && m_document->isEdgeless();
+    QPointF pageOrigin;
+    if (!isEdgeless && m_lassoSelection.sourcePageIndex >= 0) {
+        pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+    }
+    const QPointF vp1 = isEdgeless
+        ? documentToViewport(m_lassoRectStart)
+        : documentToViewport(m_lassoRectStart + pageOrigin);
+    const QPointF vp2 = isEdgeless
+        ? documentToViewport(m_lassoRectCurrent)
+        : documentToViewport(m_lassoRectCurrent + pageOrigin);
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    QPen lassoPen(QColor(0, 120, 215), 1.5, Qt::DashLine);
+    lassoPen.setCosmetic(true);
+    painter.setPen(lassoPen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(QRectF(vp1, vp2).normalized());
+    painter.restore();
+}
+
 void DocumentViewport::handlePointerPress_Lasso(const PointerEvent& pe)
 {
     if (!m_document) return;
@@ -7071,6 +7272,21 @@ void DocumentViewport::handlePointerPress_Lasso(const PointerEvent& pe)
         } else {
             clearLassoSelection();
         }
+        // Post-paste convenience: a click that only dismissed the pasted
+        // selection is the user saying "done" - hand the tool back. If the
+        // restored tool draws (Pen), disarm the press so the pen's trailing
+        // moves do not leave a mark.
+        returnToPrePasteToolAndCancelGesture();
+        if (!m_hasPrePasteTool && m_currentTool != ToolType::Lasso) {
+            return;
+        }
+    } else if (m_hasPrePasteTool && !m_isDrawingLasso) {
+        // A click on empty space with nothing to dismiss ends the temporary
+        // tool state instead of starting a fresh lasso.
+        returnToPrePasteToolAndCancelGesture();
+        if (!m_hasPrePasteTool && m_currentTool != ToolType::Lasso) {
+            return;
+        }
     }
     
     // Start new lasso path
@@ -7086,6 +7302,19 @@ void DocumentViewport::handlePointerPress_Lasso(const PointerEvent& pe)
         m_lassoSelection.sourcePageIndex = pe.pageHit.pageIndex;
     } else {
         return;  // No valid page hit in paged mode
+    }
+    
+    if (m_lassoMode == LassoMode::Rectangle) {
+        // Rectangle marquee: remember the first corner and preview a dashed
+        // rectangle while dragging. m_lassoPath stays empty until release,
+        // where it is filled with the four corners so the regular selection
+        // pipeline (hit testing, action bar, copy/cut) runs unchanged.
+        m_lassoRectStart = pt;
+        m_lassoRectCurrent = pt;
+        m_isDrawingLasso = true;
+        m_pointerActive = true;
+        update();
+        return;
     }
     
     m_lassoPath << pt;
@@ -7107,7 +7336,8 @@ void DocumentViewport::handlePointerMove_Lasso(const PointerEvent& pe)
     
     if (!m_isDrawingLasso) return;
     
-    // Add point to lasso path
+    // Resolve the pointer into page/document coordinates (same rules as the
+    // freeform path: extrapolate when the pointer leaves the source page).
     QPointF pt;
     if (m_document->isEdgeless()) {
         pt = viewportToDocument(pe.viewportPos);
@@ -7119,6 +7349,28 @@ void DocumentViewport::handlePointerMove_Lasso(const PointerEvent& pe)
         QPointF pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
         pt = docPos - pageOrigin;
     } else {
+        return;
+    }
+    
+    if (m_lassoMode == LassoMode::Rectangle) {
+        // Rectangle marquee: move the opposite corner and repaint the union
+        // of the old and new rectangles - a partial dirty region would leave
+        // stale dashed edges behind and smear the preview.
+        const QPointF oldCorner = m_lassoRectCurrent;
+        m_lassoRectCurrent = pt;
+        
+        const QPointF pageOrigin = m_document->isEdgeless()
+            ? QPointF()
+            : pagePosition(m_lassoSelection.sourcePageIndex);
+        const QPointF vpOld1 = documentToViewport(m_lassoRectStart + pageOrigin);
+        const QPointF vpOld2 = documentToViewport(oldCorner + pageOrigin);
+        const QPointF vpNew1 = documentToViewport(m_lassoRectStart + pageOrigin);
+        const QPointF vpNew2 = documentToViewport(pt + pageOrigin);
+        
+        QRectF dirtyRect = QRectF(vpOld1, vpOld2).normalized();
+        dirtyRect = dirtyRect.united(QRectF(vpNew1, vpNew2).normalized());
+        dirtyRect.adjust(-6, -6, 6, 6);
+        update(dirtyRect.toRect());
         return;
     }
     
@@ -7175,6 +7427,22 @@ void DocumentViewport::handlePointerRelease_Lasso(const PointerEvent& pe)
     }
     
     if (m_isDrawingLasso) {
+        if (m_lassoMode == LassoMode::Rectangle) {
+            // Rectangle marquee: build the selection polygon from the drag
+            // corners so finalizeLassoSelection() and every downstream
+            // consumer (action bar, copy/cut/delete) runs unchanged.
+            m_lassoPath.clear();
+            m_lassoPath << m_lassoRectStart;
+            m_lassoPath << QPointF(m_lassoRectCurrent.x(), m_lassoRectStart.y());
+            m_lassoPath << m_lassoRectCurrent;
+            m_lassoPath << QPointF(m_lassoRectStart.x(), m_lassoRectCurrent.y());
+            finalizeLassoSelection();
+            m_isDrawingLasso = false;
+            m_pointerActive = false;
+            update();
+            return;
+        }
+        
         // Add final point
         QPointF pt;
         if (m_document->isEdgeless()) {
@@ -7529,6 +7797,11 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
         if (!shiftHeld) {
             // Deselect all (uses API for signal emission)
             deselectAllObjects();
+            // Post-paste convenience: dismissing the pasted object returns
+            // the tool that was active before the paste. The press is
+            // disarmed so a pen's trailing moves do not draw with the
+            // restored tool.
+            returnToPrePasteToolAndCancelGesture();
         }
     }
 }
@@ -9193,6 +9466,7 @@ void DocumentViewport::copySelectedObjects()
     QMap<QString, ClipboardImageAsset> copiedAssets;
     
     // Serialize each selected object to JSON
+    QImage loneImage;   // set when the selection is exactly one image object
     for (InsertedObject* obj : m_selectedObjects) {
         if (!obj) continue;
         if (obj->type() == QStringLiteral("ocr_text")) continue;
@@ -9206,6 +9480,9 @@ void DocumentViewport::copySelectedObjects()
         
         // Cache image assets for cross-document paste
         if (auto* img = dynamic_cast<ImageObject*>(obj)) {
+            if (m_selectedObjects.size() == 1) {
+                loneImage = img->pixmap().toImage();
+            }
             if (img->isLoaded() && !img->imagePath.isEmpty()) {
                 ClipboardImageAsset asset;
                 asset.pixmap = img->pixmap();
@@ -9236,12 +9513,28 @@ void DocumentViewport::copySelectedObjects()
     
     s_objectClipboard = std::move(copied);
     s_objectClipboardAssets = std::move(copiedAssets);
-    
-    #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "copySelectedObjects: Copied" << s_objectClipboard.size() << "objects to internal clipboard";
-    #endif
 
-    // Put plain text on system clipboard for cross-app paste (Phase 2E)
+    // ===== System clipboard update (universal-paste arbitration) =====
+    //
+    // Order matters. The system clipboard is written FIRST, the internal
+    // stamp LAST, so an in-app paste resolves to the internal clipboard:
+    //
+    // - Lone image: only the system clipboard receives the image. The
+    //   internal object clipboard is deliberately left empty so Ctrl-V
+    //   pastes the picture (into this note or any other app) instead of a
+    //   duplicating object.
+    // - Text boxes: the text lands on the system clipboard (cross-app),
+    //   while the objects go to the internal clipboard - the newer stamp
+    //   makes an in-app paste reconstruct the editable objects, and the
+    //   text is what other applications see.
+    // - Mixed or other objects: objects internally, text on the system
+    //   clipboard (same as the text-box case above).
+    //
+    // The echo guard is only needed for the text/object cases where one
+    // user action writes both clipboards; a lone image write is a genuine
+    // system-clipboard event and stamps normally through dataChanged.
+    QClipboard* clipboard = QGuiApplication::clipboard();
+
     QString plainText;
     for (InsertedObject* obj : m_selectedObjects) {
         if (!obj) continue;
@@ -9251,10 +9544,47 @@ void DocumentViewport::copySelectedObjects()
             plainText += textBox->text;
         }
     }
-    if (!plainText.isEmpty()) {
-        QGuiApplication::clipboard()->setText(plainText);
+
+    const bool imageOnly = s_objectClipboard.size() == 1 && !loneImage.isNull();
+
+    if (imageOnly) {
+        // Drop the object-copy echo guard: this system write is the real
+        // copy, not a side effect of an internal one.
+        s_internalCopyEchoGuardUntil = 0;
+        clipboard->setImage(loneImage);
+        // The lone image must not be pasteable as an object, and supersedes
+        // any previously copied strokes.
+        s_objectClipboard.clear();
+        s_objectClipboardAssets.clear();
+        s_clipboard.clear();
+        emit strokeClipboardChanged(false);
+        s_internalClipboardStamp = 0;
+        // The system write above bumps the stamp asynchronously via
+        // dataChanged; stamp synchronously so an immediate Ctrl-V in THIS
+        // process already sees the new system stamp.
+        s_systemClipboardStamp = QDateTime::currentMSecsSinceEpoch();
+    } else {
+        // Text/objects: the system clipboard receives the text FIRST, then
+        // the internal clipboard is written. The internal stamp is artificially
+        // advanced past the system write (+1s) so the arbitration is decisive
+        // even though the dataChanged for the text lands inside the echo
+        // guard and never stamps the system side.
+        if (!plainText.isEmpty()) {
+            clipboard->setText(plainText);
+        }
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        s_internalClipboardStamp = now + 1000;
+        s_internalCopyEchoGuardUntil = now + 1000;
+        // Strokes and objects share one internal stamp; a fresh object copy
+        // supersedes any previously copied strokes (and vice versa).
+        s_clipboard.clear();
+        emit strokeClipboardChanged(false);
     }
-    
+
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "copySelectedObjects: Copied" << s_objectClipboard.size() << "objects to internal clipboard";
+#endif
+
     // Notify that object clipboard has content (for action bar paste button)
     emit objectClipboardChanged(!s_objectClipboard.isEmpty());
 }
@@ -11016,7 +11346,8 @@ QColor DocumentViewport::paperColorForPage(const Page* page) const
     return page->backgroundColor;
 }
 
-void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, const QPointF& viewportPos)
+void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, const QPointF& viewportPos,
+                                           const QString& initialText)
 {
     if (!m_document) return;
     Q_UNUSED(viewportPos);
@@ -11024,13 +11355,14 @@ void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, co
     auto textObj = std::make_unique<TextBoxObject>();
     textObj->position = rect.topLeft();
     textObj->size = QSizeF(qMax<qreal>(1.0, rect.width()), 1.0);
-    textObj->text = QString();
+    textObj->text = initialText;
     textObj->fontSize = TextBoxObject::DEFAULT_BASE_FONT_SIZE;
     textObj->textLayoutVersion =
         TextBoxObject::CURRENT_TEXT_LAYOUT_VERSION;
     textObj->showBorder = true;
     textObj->visible = true;
     textObj->fontColor = m_penColor;
+    // reflowToWidth() derives the box height from the (pasted) text content.
     textObj->reflowToWidth(textObj->size.width());
 
     TextBoxObject* rawPtr = textObj.get();
@@ -13933,21 +14265,158 @@ void DocumentViewport::handleCutAction()
 
 void DocumentViewport::handlePasteAction()
 {
-    // Paste behavior depends on current tool
-    switch (m_currentTool) {
-        case ToolType::Lasso:
-            if (s_clipboard.hasContent) {
-                pasteSelection();
+    if (!m_document) {
+        return;
+    }
+
+    // Universal paste: whichever clipboard was written last wins. A tie
+    // (both zero, or an internal copy that echoed to the system clipboard
+    // in the same millisecond) prefers the internal clipboard, matching
+    // the pre-universal behavior for strokes/objects.
+    const bool internalNewer = s_internalClipboardStamp >= s_systemClipboardStamp;
+
+    // Remember the tool to return to on the next empty-space click. Only the
+    // first paste of a chain records it, so pasting twice in a row then
+    // tapping empty space still lands back where the user started.
+    if (!m_hasPrePasteTool) {
+        m_hasPrePasteTool = true;
+        m_prePasteTool = m_currentTool;
+    }
+
+    if (internalNewer) {
+        if (pasteInternalClipboard()) {
+            return;
+        }
+        pasteSystemClipboard();
+    } else {
+        if (pasteSystemClipboard()) {
+            return;
+        }
+        pasteInternalClipboard();
+    }
+
+    // Nothing was pasted (empty clipboards): drop the pending return state.
+    m_hasPrePasteTool = false;
+}
+
+bool DocumentViewport::pasteInternalClipboard()
+{
+    // Strokes first: an internal copy that carries both is the common case.
+    if (s_clipboard.hasContent && !s_clipboard.strokes.isEmpty()) {
+        // Stay on the lasso tool (or switch to it): the pasted strokes are
+        // selected afterwards so they can be moved/resized right away.
+        if (m_currentTool != ToolType::Lasso) {
+            setCurrentTool(ToolType::Lasso);
+            m_hasPrePasteTool = true;  // setCurrentTool() cleared it
+        }
+        pasteSelection();
+        return true;
+    }
+    if (!s_objectClipboard.isEmpty()) {
+        if (m_currentTool != ToolType::ObjectSelect) {
+            setCurrentTool(ToolType::ObjectSelect);
+            m_hasPrePasteTool = true;  // setCurrentTool() cleared it
+        }
+        pasteObjects();
+        return true;
+    }
+    return false;
+}
+
+bool DocumentViewport::pasteSystemClipboard()
+{
+    QClipboard* clipboard = QGuiApplication::clipboard();
+    if (!clipboard || !clipboard->mimeData()) {
+        return false;
+    }
+    const QMimeData* mimeData = clipboard->mimeData();
+
+    // Images first: screenshots and copied pictures are the most common
+    // non-stroke paste source. Image insertion is the ObjectSelect/Image
+    // tool's creation path, so select it before inserting.
+    if (mimeData->hasImage()) {
+        if (m_currentTool != ToolType::ObjectSelect) {
+            setObjectInsertMode(ObjectInsertMode::Image);
+            setCurrentTool(ToolType::ObjectSelect);
+            m_hasPrePasteTool = true;  // setCurrentTool() cleared it
+        } else if (m_objectInsertMode != ObjectInsertMode::Image) {
+            setObjectInsertMode(ObjectInsertMode::Image);
+        }
+        insertImageFromClipboard();
+        return true;
+    }
+
+    // Local files (Explorer/Dolphin copies): insert the first existing file
+    // as an image object. Mirrors the URL handling in the ObjectSelect
+    // image-mode paste path.
+    if (mimeData->hasUrls()) {
+        for (const QUrl& url : mimeData->urls()) {
+            if (!url.isLocalFile()) {
+                continue;
             }
-            break;
-            
-        case ToolType::ObjectSelect:
-            pasteForObjectSelect();
-            break;
-            
-        default:
-            // No paste action for other tools
-            break;
+            const QString filePath = url.toLocalFile();
+            if (QFileInfo::exists(filePath)) {
+                if (m_currentTool != ToolType::ObjectSelect) {
+                    setObjectInsertMode(ObjectInsertMode::Image);
+                    setCurrentTool(ToolType::ObjectSelect);
+                    m_hasPrePasteTool = true;  // setCurrentTool() cleared it
+                } else if (m_objectInsertMode != ObjectInsertMode::Image) {
+                    setObjectInsertMode(ObjectInsertMode::Image);
+                }
+                insertImageFromFile(filePath);
+                return true;
+            }
+        }
+    }
+
+    // Text: the pasted box is the Text tool's object; its creation path
+    // (inline editor, formatting bar) is owned by ObjectSelect/Text.
+    if (mimeData->hasText() && !mimeData->text().trimmed().isEmpty()) {
+        if (m_currentTool != ToolType::ObjectSelect) {
+            setObjectInsertMode(ObjectInsertMode::Text);
+            setCurrentTool(ToolType::ObjectSelect);
+            m_hasPrePasteTool = true;  // setCurrentTool() cleared it
+        } else if (m_objectInsertMode != ObjectInsertMode::Text) {
+            setObjectInsertMode(ObjectInsertMode::Text);
+        }
+        pasteTextAtPointer(mimeData->text());
+        return true;
+    }
+
+    return false;
+}
+
+void DocumentViewport::pasteTextAtPointer(const QString& text)
+{
+    // Prefer the last pointer position (mouse or pen) when it is inside the
+    // viewport; fall back to the viewport center.
+    QPointF anchor = m_lastPointerPos;
+    if (!rect().contains(anchor.toPoint())) {
+        anchor = QPointF(width() / 2.0, height() / 2.0);
+    }
+
+    if (m_document->isEdgeless()) {
+        // Edgeless: document coordinates double as page coordinates. The
+        // single-point creation rect gives the same default width a click
+        // with the Text tool would produce.
+        const QPointF docPt = viewportToDocument(anchor);
+        const QRectF rect = proposedTextBoxCreationRect(docPt, docPt, -1);
+        createTextBoxAtRect(0, rect, anchor, text);
+    } else {
+        PageHit hit = viewportToPage(anchor);
+        if (!hit.valid()) {
+            // Pointer is off-page: fall back to the viewport center.
+            const QPointF centerDoc = viewportCenterInDocument();
+            hit = documentToPage(centerDoc);
+            if (!hit.valid()) {
+                return;
+            }
+            anchor = documentToViewport(
+                pagePosition(hit.pageIndex) + hit.pagePoint);
+        }
+        const QRectF rect = proposedTextBoxCreationRect(
+            hit.pagePoint, hit.pagePoint, hit.pageIndex);
+        createTextBoxAtRect(hit.pageIndex, rect, anchor, text);
     }
 }
 
@@ -14007,6 +14476,16 @@ void DocumentViewport::copySelection()
     
     // Action Bar: Notify that stroke clipboard now has content
     emit strokeClipboardChanged(true);
+    
+    // Universal paste: this internal copy is now the newest clipboard event.
+    // Strokes and objects share one internal stamp; a fresh stroke copy
+    // supersedes any previously copied objects.
+    s_internalClipboardStamp = QDateTime::currentMSecsSinceEpoch() + 1000;
+    if (!s_objectClipboard.isEmpty()) {
+        s_objectClipboard.clear();
+        s_objectClipboardAssets.clear();
+        emit objectClipboardChanged(false);
+    }
 }
 
 void DocumentViewport::cutSelection()
@@ -14049,6 +14528,12 @@ void DocumentViewport::pasteSelection()
         undoAction.type = UndoAction::AddStroke;
         undoAction.layerIndex = m_edgelessActiveLayerIndex;
 
+        // The pasted strokes become THE selection: drop whatever was selected
+        // before (the copy-source selection, or an earlier paste) so the new
+        // content is selected alone.
+        m_lassoSelection.clear();
+        m_lassoSelection.sourceLayerIndex = m_edgelessActiveLayerIndex;
+
         for (const VectorStroke& stroke : s_clipboard.strokes) {
             VectorStroke pastedStroke = stroke;
             for (StrokePoint& pt : pastedStroke.points)
@@ -14062,6 +14547,12 @@ void DocumentViewport::pasteSelection()
                 s.stroke = seg.second;
                 undoAction.segments.append(s);
             }
+            // Keep the pasted strokes selected so they can be moved or
+            // resized without re-lassoing them first. Store the DOCUMENT-
+            // coordinate stroke: the selection transform pipeline re-runs
+            // addStrokeToEdgelessTiles on these, so tile-local segments
+            // would be double-offset.
+            m_lassoSelection.selectedStrokes.append(pastedStroke);
         }
         if (!undoAction.segments.isEmpty())
             pushUndoAction(undoAction);
@@ -14076,6 +14567,11 @@ void DocumentViewport::pasteSelection()
         UndoAction undoAction;
         undoAction.type = UndoAction::AddStroke;
         undoAction.layerIndex = page->activeLayerIndex;
+
+        // Same as edgeless: the pasted strokes alone form the new selection.
+        m_lassoSelection.clear();
+        m_lassoSelection.sourcePageIndex = pageIndex;
+        m_lassoSelection.sourceLayerIndex = page->activeLayerIndex;
 
         QPointF pageOrigin = pagePosition(pageIndex);
         QPointF pageCenter = docCenter - pageOrigin;
@@ -14093,9 +14589,22 @@ void DocumentViewport::pasteSelection()
             seg.pageIndex = pageIndex;
             seg.stroke = pastedStroke;
             undoAction.segments.append(seg);
+            // Keep the pasted strokes selected so they can be moved or
+            // resized without re-lassoing them first.
+            m_lassoSelection.selectedStrokes.append(pastedStroke);
         }
         m_document->markPageDirty(pageIndex);
         pushUndoAction(undoAction);
+    }
+    
+    // The pasted strokes stay selected: recompute the selection bounds so the
+    // action bar and transform handles operate on them immediately.
+    if (m_lassoSelection.isValid()) {
+        m_lassoSelection.boundingBox = calculateSelectionBoundingBox();
+        m_lassoSelection.transformOrigin = m_lassoSelection.boundingBox.center();
+        invalidateSelectionCache();
+        m_selectionBackgroundSnapshot = QPixmap();
+        emit lassoSelectionChanged(true);
     }
     
     update();
@@ -15463,6 +15972,13 @@ void DocumentViewport::cancelOffPagePan()
 void DocumentViewport::handleOffPagePanTap()
 {
     const bool shiftHeld = (m_offPagePanModifiers & Qt::ShiftModifier);
+
+    // Post-paste convenience: a tap on the empty space around the pages ends
+    // the temporary paste tool state instead of doing the tool's tap action.
+    if (!shiftHeld && m_hasPrePasteTool) {
+        returnToPrePasteTool();
+        return;
+    }
 
     switch (m_currentTool) {
         case ToolType::Lasso:
@@ -19509,6 +20025,10 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter, const QRect& dirtyR
     // P1: Use incremental rendering for O(1) per frame instead of O(n)
     if ((m_isDrawingLasso || m_isDrawingEraserLasso) && m_lassoPath.size() > 1) {
         renderLassoPathIncremental(painter);
+    } else if (m_isDrawingLasso && m_lassoMode == LassoMode::Rectangle
+               && m_lassoPath.isEmpty()) {
+        // Rectangle marquee: dashed preview between the two drag corners.
+        drawLassoRectPreview(painter);
     }
     
     // Task 2.10.3: Draw lasso selection (edgeless mode)

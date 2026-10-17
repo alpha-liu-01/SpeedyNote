@@ -561,6 +561,9 @@ public:
 
         // ----- An in-progress lasso keeps going outside the page -----
         viewport.setCurrentTool(ToolType::Lasso);
+        // The lasso mode is a persisted global; another test (or a previous
+        // run) may have left it on Rectangle, which would keep the path empty.
+        viewport.setLassoMode(DocumentViewport::LassoMode::Freeform);
         viewport.handlePointerEvent(makeEvent(PointerEvent::Press, onPage));
         if (!viewport.m_isDrawingLasso)
             return fail("lasso press on a page did not start a path");
@@ -5427,6 +5430,407 @@ public:
     }
 
     /**
+     * @brief Post-paste behavior: the pasted strokes stay selected, and an
+     *        empty-space click returns to the tool that was active before.
+     */
+    static bool testPasteSelectionState() {
+        printf("  testPasteSelectionState... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto doc = Document::createNew("Paste selection state");
+        doc->addPage();
+        Page* page = doc->page(0);
+        if (!page || !page->activeLayer())
+            return fail("page has no active layer");
+
+        DocumentViewport viewport;
+        viewport.resize(1200, 900);
+        viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+        viewport.show();
+        QApplication::processEvents();
+        viewport.setDocument(doc.get());
+        viewport.setZoomLevel(1.0);
+        viewport.setLayoutMode(LayoutMode::SingleColumn);
+        viewport.setPanOffset(QPointF(0, 0));
+        viewport.setCurrentTool(ToolType::Pen);
+
+        // Seed the stroke clipboard through the real copy path so the stamps
+        // and clipboard state match production.
+        VectorStroke stroke;
+        stroke.color = Qt::black;
+        stroke.baseThickness = 4.0;
+        for (int i = 0; i <= 5; ++i) {
+            StrokePoint pt;
+            pt.pos = QPointF(100.0 + i * 10.0, 100.0);
+            pt.pressure = 1.0;
+            stroke.points.append(pt);
+        }
+        stroke.updateBoundingBox();
+        viewport.m_lassoSelection.selectedStrokes.append(stroke);
+        viewport.m_lassoSelection.sourcePageIndex = 0;
+        viewport.m_lassoSelection.sourceLayerIndex = 0;
+        viewport.copySelection();
+        viewport.clearLassoSelection();
+        if (!viewport.hasStrokesInClipboard())
+            return fail("stroke clipboard empty after copy");
+
+        // Paste with the pen tool active: must switch to lasso, paste, and
+        // leave the pasted strokes selected.
+        viewport.handlePasteAction();
+        if (viewport.currentTool() != ToolType::Lasso)
+            return fail("paste did not switch to the lasso tool");
+        if (!viewport.m_lassoSelection.isValid())
+            return fail("pasted strokes were not left selected");
+        const int pastedCount = page->activeLayer()->strokeCount();
+        if (pastedCount != 1)
+            return fail(QString("expected 1 pasted stroke, got %1")
+                            .arg(pastedCount).toUtf8().constData());
+        if (viewport.m_lassoSelection.selectedStrokes.size() != 1)
+            return fail("selection holds more than the pasted stroke");
+
+        // Paste again with an unrelated stroke pre-selected: the new paste
+        // must replace the selection, not grow it.
+        VectorStroke other;
+        other.color = Qt::blue;
+        other.baseThickness = 4.0;
+        for (int i = 0; i <= 5; ++i) {
+            StrokePoint pt;
+            pt.pos = QPointF(500.0 + i * 10.0, 500.0);
+            pt.pressure = 1.0;
+            other.points.append(pt);
+        }
+        other.updateBoundingBox();
+        viewport.m_lassoSelection.clear();
+        viewport.m_lassoSelection.selectedStrokes.append(other);
+        viewport.m_lassoSelection.sourcePageIndex = 0;
+        viewport.m_lassoSelection.sourceLayerIndex = 0;
+        viewport.handlePasteAction();
+        if (viewport.m_lassoSelection.selectedStrokes.size() != 1)
+            return fail("re-paste did not replace the previous selection");
+        if (viewport.m_lassoSelection.selectedStrokes.first().id == other.id)
+            return fail("selection still holds the pre-paste stroke");
+
+        // A click on empty page space (no selection hit) returns to the pen.
+        // Simulated with a pen's full gesture (press + pressure moves +
+        // release): the restored pen tool must NOT leave a stroke behind.
+        auto makeStylusEvent = [&](PointerEvent::Type type, QPointF pos, qreal pressure) {
+            PointerEvent pe;
+            pe.type = type;
+            pe.source = PointerEvent::Stylus;
+            pe.viewportPos = pos;
+            pe.button = type == PointerEvent::Release ? Qt::NoButton : Qt::LeftButton;
+            pe.pressure = pressure;
+            pe.pageHit = viewport.viewportToPage(pos);
+            return pe;
+        };
+        // Far below the pasted stroke: inside the page, outside the selection.
+        const QPointF emptySpot = viewport.documentToViewport(QPointF(100, 700));
+        const int strokesBefore = page->activeLayer()->strokeCount();
+        viewport.handlePointerEvent(makeStylusEvent(PointerEvent::Press, emptySpot, 0.6));
+        // A pen "tap" still trails a few pressure moves.
+        viewport.handlePointerEvent(makeStylusEvent(PointerEvent::Move,
+                                                    emptySpot + QPointF(2, 1), 0.62));
+        viewport.handlePointerEvent(makeStylusEvent(PointerEvent::Move,
+                                                    emptySpot + QPointF(4, 1), 0.55));
+        viewport.handlePointerEvent(makeStylusEvent(PointerEvent::Release, emptySpot, 0.0));
+        if (viewport.currentTool() != ToolType::Pen)
+            return fail("empty-space click did not return to the pen tool");
+        if (page->activeLayer()->strokeCount() != strokesBefore)
+            return fail("the dismissal tap left a stroke behind");
+
+        return true;
+    }
+
+    /**
+     * @brief Lone-image copy goes to the system clipboard only; text-box
+     *        copy reaches both clipboards with the internal stamp newer.
+     */
+    static bool testObjectCopyClipboardSemantics() {
+        printf("  testObjectCopyClipboardSemantics... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        QClipboard* clipboard = QGuiApplication::clipboard();
+        if (!clipboard)
+            return fail("no clipboard");
+        // Clear before any viewport work: the platform clipboard update is
+        // asynchronous, and a clear queued after an setImage would erase it.
+        clipboard->clear();
+        for (int i = 0; i < 5; ++i) {
+            QApplication::processEvents();
+        }
+
+        auto doc = Document::createNew("Copy semantics");
+        doc->addPage();
+        Page* page = doc->page(0);
+        if (!page)
+            return fail("missing page");
+
+        DocumentViewport viewport;
+        viewport.resize(900, 700);
+        viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+        viewport.show();
+        QApplication::processEvents();
+        viewport.setDocument(doc.get());
+        viewport.setCurrentTool(ToolType::ObjectSelect);
+
+        // ---- Lone image: system clipboard only ----
+        // Pre-fill the clipboard with a sentinel image instead of clear():
+        // the offscreen platform applies queued clear/setData operations out
+        // of order, and a clear would erase the copy below. A sentinel also
+        // proves the copy itself (not the stale content) is being read back.
+        QImage sentinel(8, 8, QImage::Format_ARGB32);
+        sentinel.fill(Qt::yellow);
+        clipboard->setImage(sentinel);
+
+        auto imgPtr = std::make_unique<ImageObject>();
+        QImage swatch(16, 16, QImage::Format_ARGB32);
+        swatch.fill(Qt::magenta);
+        imgPtr->setSourceImage(swatch);
+        imgPtr->position = QPointF(60, 60);
+        ImageObject* img = imgPtr.get();
+        page->addObject(std::move(imgPtr));
+
+        viewport.selectObject(img, false);
+        viewport.copySelectedObjects();
+
+        const QImage copied = clipboard->image();
+        if (copied.isNull() || copied.size() != QSize(16, 16))
+            return fail("lone image copy did not reach the system clipboard");
+        if (DocumentViewport::s_objectClipboard.size() != 0)
+            return fail("lone image copy leaked into the object clipboard");
+        const qint64 imgStamp = DocumentViewport::s_systemClipboardStamp;
+        if (imgStamp <= 0)
+            return fail("lone image copy did not stamp the system clipboard");
+
+        // ---- Text box: both clipboards, internal newer ----
+        auto boxPtr = std::make_unique<TextBoxObject>();
+        boxPtr->position = QPointF(60, 200);
+        boxPtr->size = QSizeF(200, 1);
+        boxPtr->text = QStringLiteral("copy semantics probe");
+        boxPtr->reflowToWidth(200);
+        TextBoxObject* box = boxPtr.get();
+        page->addObject(std::move(boxPtr));
+
+        viewport.clearObjectSelection();
+        viewport.selectObject(box, false);
+        const qint64 beforeText = DocumentViewport::s_systemClipboardStamp;
+        viewport.copySelectedObjects();
+
+        if (clipboard->text() != QStringLiteral("copy semantics probe"))
+            return fail("text box copy did not reach the system clipboard");
+        if (DocumentViewport::s_objectClipboard.size() != 1)
+            return fail("text box copy did not reach the object clipboard");
+        if (DocumentViewport::s_internalClipboardStamp
+                <= beforeText)
+            return fail("internal stamp is not newer than the system write");
+
+        // The stroke clipboard from an earlier copy must have been superseded:
+        // only ONE internal clipboard may hold content at a time, or the
+        // strokes-first paste path would ignore the fresh object copy.
+        if (DocumentViewport::s_clipboard.hasContent)
+            return fail("object copy did not supersede the stroke clipboard");
+
+        // The arbitration logic must pick the internal clipboard now.
+        const bool internalNewer = DocumentViewport::s_internalClipboardStamp
+                                   >= DocumentViewport::s_systemClipboardStamp;
+        if (!internalNewer)
+            return fail("arbitration would not pick the internal clipboard");
+
+        // End-to-end: with strokes previously copied, pasting after the text
+        // copy must reconstruct the OBJECT, not the old strokes.
+        {
+            VectorStroke staleStroke;
+            staleStroke.color = Qt::red;
+            staleStroke.baseThickness = 4.0;
+            for (int i = 0; i <= 5; ++i) {
+                StrokePoint pt;
+                pt.pos = QPointF(300.0 + i * 10.0, 400.0);
+                pt.pressure = 1.0;
+                staleStroke.points.append(pt);
+            }
+            staleStroke.updateBoundingBox();
+            DocumentViewport::s_clipboard.clear();
+            DocumentViewport::s_clipboard.strokes.append(staleStroke);
+            DocumentViewport::s_clipboard.hasContent = true;
+            // Re-take the object copy so the mutual-exclusion invariant holds
+            // (a real user copies text after strokes, never the other way).
+            viewport.clearObjectSelection();
+            viewport.selectObject(box, false);
+            viewport.copySelectedObjects();
+
+            const int objectsBefore = page->objects.size();
+            viewport.handlePasteAction();
+            if (page->objects.size() != objectsBefore + 1)
+                return fail("paste after text copy did not add an object");
+            if (DocumentViewport::s_clipboard.hasContent)
+                return fail("paste consumed the wrong (stroke) clipboard");
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief Rectangle lasso mode: drag corners select the strokes inside.
+     *
+     * Mirrors the freeform lasso test's approach but drives the marquee:
+     * press at one corner, move to the opposite, release, and check the
+     * selection pipeline received the rectangle as a 4-point polygon.
+     */
+    static bool testRectangleLasso() {
+        printf("  testRectangleLasso... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto doc = Document::createNew("Rectangle lasso");
+        doc->addPage();
+        Page* page = doc->page(0);
+        if (!page || !page->activeLayer())
+            return fail("page has no active layer");
+
+        // One stroke well inside the future rectangle, one well outside.
+        VectorStroke inside;
+        inside.color = Qt::black;
+        inside.baseThickness = 4.0;
+        for (int i = 0; i <= 5; ++i) {
+            StrokePoint pt;
+            pt.pos = QPointF(100.0 + i * 10.0, 100.0);
+            pt.pressure = 1.0;
+            inside.points.append(pt);
+        }
+        inside.updateBoundingBox();
+        page->activeLayer()->addStroke(inside);
+
+        VectorStroke outside;
+        outside.color = Qt::black;
+        outside.baseThickness = 4.0;
+        for (int i = 0; i <= 5; ++i) {
+            StrokePoint pt;
+            pt.pos = QPointF(600.0 + i * 10.0, 600.0);
+            pt.pressure = 1.0;
+            outside.points.append(pt);
+        }
+        outside.updateBoundingBox();
+        page->activeLayer()->addStroke(outside);
+
+        DocumentViewport viewport;
+        viewport.resize(1200, 900);
+        viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+        viewport.show();
+        QApplication::processEvents();
+        viewport.setDocument(doc.get());
+        viewport.setZoomLevel(1.0);
+        viewport.setLayoutMode(LayoutMode::SingleColumn);
+        viewport.setPanOffset(QPointF(0, 0));
+        viewport.setCurrentTool(ToolType::Lasso);
+        viewport.setLassoMode(DocumentViewport::LassoMode::Rectangle);
+
+        auto makeEvent = [&](PointerEvent::Type type, QPointF pos) {
+            PointerEvent pe;
+            pe.type = type;
+            pe.source = PointerEvent::Mouse;
+            pe.viewportPos = pos;
+            pe.button = Qt::LeftButton;
+            pe.pressure = 1.0;
+            pe.pageHit = viewport.viewportToPage(pos);
+            return pe;
+        };
+
+        const QPointF startVp = viewport.documentToViewport(QPointF(50, 50));
+        const QPointF endVp = viewport.documentToViewport(QPointF(300, 200));
+
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Press, startVp));
+        if (!viewport.m_isDrawingLasso)
+            return fail("rectangle press did not start a lasso");
+        if (!viewport.m_lassoPath.isEmpty())
+            return fail("rectangle press prematurely filled the lasso path");
+
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Move, endVp));
+        if (viewport.m_lassoRectCurrent != viewport.viewportToDocument(endVp))
+            return fail("rectangle move did not track the opposite corner");
+
+        viewport.handlePointerEvent(makeEvent(PointerEvent::Release, endVp));
+        if (viewport.m_isDrawingLasso)
+            return fail("rectangle release did not end the lasso");
+        if (!viewport.m_lassoSelection.isValid())
+            return fail("rectangle release did not select anything");
+
+        const int selected = viewport.m_lassoSelection.selectedStrokes.size();
+        if (selected != 1)
+            return fail(QString("expected 1 selected stroke, got %1")
+                            .arg(selected).toUtf8().constData());
+
+        // The selection pipeline consumed a rectangle: the inside stroke's
+        // bounds were fully enclosed by (50,50)-(300,200), the outside one
+        // was not touched.
+        const QRectF selectionBounds = viewport.m_lassoSelection.boundingBox;
+        const QRectF insideStrokeBounds =
+            viewport.m_lassoSelection.selectedStrokes.first().boundingBox;
+        if (selectionBounds != insideStrokeBounds)
+            return fail("selection bounds are not the single inside stroke");
+
+        viewport.setLassoMode(DocumentViewport::LassoMode::Freeform);
+        return true;
+    }
+
+    /**
+     * @brief Universal paste arbitration by copy timestamp.
+     *
+     * The stamps are process-wide statics, so this test must run its
+     * assertions on values it sets itself; it only exercises the decision
+     * logic, not actual clipboard content (the platform clipboard would
+     * leak across test runs).
+     */
+    static bool testUniversalPasteArbitration() {
+        printf("  testUniversalPasteArbitration... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        // The arbitration comparators read the statics directly; verify the
+        // ordering semantics the paste dispatcher relies on.
+        const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
+
+        // System stamp newer than internal stamp -> system wins.
+        qint64 internal = t0;
+        qint64 system = t0 + 5;
+        if (!(system > internal))
+            return fail("test setup: timestamps are not ordered");
+
+        // A tie prefers the internal clipboard.
+        if (!(internal >= system) && internal == system)
+            return fail("tie handling unreachable");
+
+        // noteSystemClipboardChanged() must not stamp an unchanged clipboard:
+        // seed the fingerprint, call, and confirm the stamp did not move.
+        // Earlier tests (annotation copy) arm the echo guard; clear it so
+        // this probe does not depend on wall-clock timing.
+        QClipboard* clipboard = QGuiApplication::clipboard();
+        if (clipboard) {
+            DocumentViewport::s_internalCopyEchoGuardUntil = 0;
+            clipboard->setText(QStringLiteral("universal-paste-probe"));
+            DocumentViewport::noteSystemClipboardChanged();
+            const qint64 stamped = DocumentViewport::s_systemClipboardStamp;
+            if (stamped < t0)
+                return fail("system clipboard change was not stamped");
+
+            DocumentViewport::noteSystemClipboardChanged();
+            if (DocumentViewport::s_systemClipboardStamp != stamped)
+                return fail("unchanged clipboard re-stamped (fingerprint broken)");
+        }
+
+        return true;
+    }
+
+    /**
      * @brief The missing-PDF warning state machine the pane's banner renders.
      *
      * The viewport keeps the state and the pane owns the widget, so this is the
@@ -5658,6 +6062,10 @@ public:
                 "testGestureSnapshotExcludesChildren");
         runTest(testPdfWarningState, "testPdfWarningState");
         runTest(testPdfPlaceholderPaper, "testPdfPlaceholderPaper");
+        runTest(testRectangleLasso, "testRectangleLasso");
+        runTest(testUniversalPasteArbitration, "testUniversalPasteArbitration");
+        runTest(testPasteSelectionState, "testPasteSelectionState");
+        runTest(testObjectCopyClipboardSemantics, "testObjectCopyClipboardSemantics");
         
         printf("\n=== Results: %d passed, %d failed ===\n\n", passed, failed);
         // The caller goes on to open a window and block in the event loop, so

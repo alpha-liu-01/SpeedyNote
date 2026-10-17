@@ -17,6 +17,7 @@
 #include "ui/subtoolbars/MarkerSubToolbar.h"
 #include "ui/subtoolbars/HighlighterSubToolbar.h"
 #include "ui/subtoolbars/EraserSubToolbar.h"
+#include "ui/subtoolbars/LassoSubToolbar.h"
 #include "ui/actionbars/ActionBarContainer.h"
 #include "ui/actionbars/LassoActionBar.h"
 #include "ui/actionbars/ObjectSelectActionBar.h"
@@ -3163,6 +3164,14 @@ void MainWindow::applyAllSubToolbarValuesToViewport(DocumentViewport* viewport)
             static_cast<DocumentViewport::EraserMode>(
                 m_toolbar->eraserSubToolbar()->currentModeIndex()));
     }
+    
+    // Apply lasso selection mode (viewport constructor already seeds from
+    // QSettings; this keeps the bar and viewport consistent if they diverge).
+    if (m_toolbar->lassoSubToolbar()) {
+        viewport->setLassoMode(
+            static_cast<DocumentViewport::LassoMode>(
+                m_toolbar->lassoSubToolbar()->currentModeIndex()));
+    }
 }
 
 void MainWindow::centerViewportContent(int tabIndex) {
@@ -6072,6 +6081,15 @@ void MainWindow::connectSubToolbarSignals()
             vp->setEraserMode(static_cast<DocumentViewport::EraserMode>(mode));
     });
 
+    // Lasso: subtoolbar mode (Freeform/Rectangle) drives the viewport; a mode
+    // changed elsewhere (e.g. a future menu item) drives the subtoolbar back.
+    if (auto* lassoST = m_toolbar->lassoSubToolbar()) {
+        connect(lassoST, &LassoSubToolbar::lassoModeChanged, this, [this](int mode) {
+            if (DocumentViewport* vp = currentViewport())
+                vp->setLassoMode(static_cast<DocumentViewport::LassoMode>(mode));
+        });
+    }
+
     // Tab changes: per-tab state management via Toolbar (keyed by unique tab IDs).
     // Also force refresh when the active pane changes (safety net in case tab IDs
     // ever collide, though globally unique IDs from Fix 3 prevent that).
@@ -6238,8 +6256,21 @@ void MainWindow::setupActionBars()
     m_actionBarContainer->setActionBar("objectSelect", m_objectSelectActionBar);
     
     // Connect clipboard changes from system clipboard
+    // Universal paste: also stamp the change time used to arbitrate between
+    // the system and internal clipboards at Ctrl+V time.
     connect(QApplication::clipboard(), &QClipboard::dataChanged,
             m_actionBarContainer, &ActionBarContainer::onClipboardChanged);
+    connect(QApplication::clipboard(), &QClipboard::dataChanged,
+            this, []() {
+                DocumentViewport::noteSystemClipboardChanged();
+            });
+    // A change made while the window was unfocused may not deliver
+    // dataChanged on every platform; re-check by fingerprint on activation.
+    connect(qApp, &QGuiApplication::applicationStateChanged, this, [](Qt::ApplicationState state) {
+        if (state == Qt::ApplicationActive) {
+            DocumentViewport::noteSystemClipboardChanged();
+        }
+    });
     
     // BUG-AB-001 FIX: Connect position update request signal
     // This ensures the container gets a fresh viewport rect before becoming visible
