@@ -1259,13 +1259,17 @@ void DocumentViewport::returnToPrePasteToolAndCancelGesture()
         return;
     }
     // The press belongs to the OLD tool's dismissal, not to the restored
-    // drawing tool. A pen keeps emitting pressure moves after this handler
-    // returns; with m_pointerActive still set, the restored tool would treat
-    // them as a stroke and leave an unwanted mark. Disarm the gesture; the
-    // eventual release falls through to the idle-cleanup path.
+    // drawing tool. Two hazards follow this handler:
+    // - a pen keeps emitting pressure moves after it returns;
+    // - several platforms deliver a real (non-synthesized) mouse press in
+    //   addition to the tablet press, and that duplicate arrives AFTER this
+    //   handler has restored the tool, looking like a brand-new press.
+    // Disarm the current gesture AND swallow everything up to the release so
+    // neither hazard can put a mark on the canvas.
     m_pointerActive = false;
     m_activeSource = PointerEvent::Unknown;
     m_activeDrawingPage = -1;
+    m_suppressUntilRelease = true;
 }
 
 // ===== Universal Paste (clipboard arbitration) =====
@@ -6192,6 +6196,14 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
 {
     if (!m_document) return;
     
+    // A post-paste dismissal press swallows the rest of this contact: a
+    // duplicate real-mouse press that some platforms deliver alongside the
+    // tablet event would otherwise reach the restored drawing tool as a
+    // fresh press and mark the canvas.
+    if (m_suppressUntilRelease) {
+        return;
+    }
+    
     // Ensure keyboard focus for shortcuts (stylus events don't auto-focus like mouse)
     if (!hasFocus()) {
         setFocus(Qt::OtherFocusReason);
@@ -6308,6 +6320,7 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
 void DocumentViewport::handlePointerMove(const PointerEvent& pe)
 {
     if (!m_document || !m_pointerActive) return;
+    if (m_suppressUntilRelease) return;
     
     // Store old position for cursor update
     QPointF oldPos = m_lastPointerPos;
@@ -6471,6 +6484,17 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
 void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
 {
     if (!m_document) return;
+    
+    // End of a swallowed post-paste dismissal contact: just clean up.
+    if (m_suppressUntilRelease) {
+        m_suppressUntilRelease = false;
+        m_pointerActive = false;
+        m_activeSource = PointerEvent::Unknown;
+        m_activeDrawingPage = -1;
+        m_hardwareEraserActive = false;
+        update();
+        return;
+    }
     
     // Off-page pan: either finish the pan, or treat a press that never moved as
     // the tap that used to clear the selection.
@@ -9595,6 +9619,10 @@ void DocumentViewport::pasteObjects()
     if (!m_document || s_objectClipboard.isEmpty()) {
         return;
     }
+    
+    // Select mode so the follow-up empty-space tap dismisses the pasted
+    // objects instead of inserting new ones.
+    setObjectActionMode(ObjectActionMode::Select);
     
     // Clear current selection - we'll select the pasted objects
     deselectAllObjects();
@@ -14333,8 +14361,11 @@ bool DocumentViewport::pasteSystemClipboard()
 
     // Images first: screenshots and copied pictures are the most common
     // non-stroke paste source. Image insertion is the ObjectSelect/Image
-    // tool's creation path, so select it before inserting.
+    // tool's creation path, so select it before inserting. Select mode (not
+    // Create) so the follow-up empty-space tap dismisses the pasted image
+    // instead of opening the insert-image file dialog.
     if (mimeData->hasImage()) {
+        setObjectActionMode(ObjectActionMode::Select);
         if (m_currentTool != ToolType::ObjectSelect) {
             setObjectInsertMode(ObjectInsertMode::Image);
             setCurrentTool(ToolType::ObjectSelect);
@@ -14356,6 +14387,7 @@ bool DocumentViewport::pasteSystemClipboard()
             }
             const QString filePath = url.toLocalFile();
             if (QFileInfo::exists(filePath)) {
+                setObjectActionMode(ObjectActionMode::Select);
                 if (m_currentTool != ToolType::ObjectSelect) {
                     setObjectInsertMode(ObjectInsertMode::Image);
                     setCurrentTool(ToolType::ObjectSelect);
@@ -14370,8 +14402,11 @@ bool DocumentViewport::pasteSystemClipboard()
     }
 
     // Text: the pasted box is the Text tool's object; its creation path
-    // (inline editor, formatting bar) is owned by ObjectSelect/Text.
+    // (inline editor, formatting bar) is owned by ObjectSelect/Text. Select
+    // mode so the follow-up empty-space tap dismisses it instead of
+    // starting a new text-box drag.
     if (mimeData->hasText() && !mimeData->text().trimmed().isEmpty()) {
+        setObjectActionMode(ObjectActionMode::Select);
         if (m_currentTool != ToolType::ObjectSelect) {
             setObjectInsertMode(ObjectInsertMode::Text);
             setCurrentTool(ToolType::ObjectSelect);

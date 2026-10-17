@@ -5541,6 +5541,51 @@ public:
         if (page->activeLayer()->strokeCount() != strokesBefore)
             return fail("the dismissal tap left a stroke behind");
 
+        // Paste again, then reproduce the DOUBLE-PRESS sequence seen in the
+        // field: some platforms deliver a real (non-synthesized) mouse press
+        // alongside the tablet press. The duplicate arrives after the
+        // dismissal handler restored the pen, and used to start a stroke.
+        viewport.copySelection();
+        viewport.setCurrentTool(ToolType::Pen);
+        viewport.m_lassoSelection.clear();
+        viewport.handlePasteAction();
+        if (viewport.currentTool() != ToolType::Lasso)
+            return fail("second paste did not switch to the lasso tool");
+
+        auto makeMouseEvent = [&](PointerEvent::Type type, QPointF pos) {
+            PointerEvent pe;
+            pe.type = type;
+            pe.source = PointerEvent::Mouse;
+            pe.viewportPos = pos;
+            pe.button = type == PointerEvent::Release ? Qt::NoButton : Qt::LeftButton;
+            pe.pressure = 1.0;
+            pe.pageHit = viewport.viewportToPage(pos);
+            return pe;
+        };
+        // Tablet press (dismisses) + trailing stylus moves + the duplicate
+        // mouse press at the same spot + release. Nothing may be drawn.
+        const int strokesAfterSecondPaste = page->activeLayer()->strokeCount();
+        viewport.handlePointerEvent(makeStylusEvent(PointerEvent::Press, emptySpot, 0.6));
+        viewport.handlePointerEvent(makeStylusEvent(PointerEvent::Move,
+                                                    emptySpot + QPointF(2, 1), 0.62));
+        viewport.handlePointerEvent(makeMouseEvent(PointerEvent::Press, emptySpot));
+        viewport.handlePointerEvent(makeMouseEvent(PointerEvent::Move,
+                                                   emptySpot + QPointF(3, 0)));
+        viewport.handlePointerEvent(makeMouseEvent(PointerEvent::Release, emptySpot));
+        viewport.handlePointerEvent(makeStylusEvent(PointerEvent::Release, emptySpot, 0.0));
+        if (page->activeLayer()->strokeCount() != strokesAfterSecondPaste)
+            return fail("the duplicate mouse press left a stroke behind");
+        if (viewport.currentTool() != ToolType::Pen)
+            return fail("the dismissal sequence did not end on the pen tool");
+
+        // The swallow state must reset: a fresh press afterwards draws again.
+        viewport.handlePointerEvent(makeStylusEvent(PointerEvent::Press,
+                                                    viewport.documentToViewport(QPointF(100, 650)), 0.6));
+        viewport.handlePointerEvent(makeStylusEvent(PointerEvent::Release,
+                                                    viewport.documentToViewport(QPointF(110, 650)), 0.0));
+        if (page->activeLayer()->strokeCount() != strokesAfterSecondPaste + 1)
+            return fail("swallow state leaked past the release");
+
         return true;
     }
 

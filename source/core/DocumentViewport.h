@@ -3809,6 +3809,11 @@ private:
     // ===== Input State (Task 1.3.8) =====
     int m_activeDrawingPage = -1;       ///< Page currently receiving strokes (-1 = none)
     bool m_pointerActive = false;       ///< True if pointer is pressed
+    // Set when a dismissal press hands the tool back post-paste: swallows
+    // every remaining event of this physical contact (duplicate presses some
+    // platforms send alongside the tablet event, moves, the release) so the
+    // restored drawing tool cannot turn them into a stroke.
+    bool m_suppressUntilRelease = false;
     PointerEvent::Source m_activeSource = PointerEvent::Unknown;  ///< Active input source
     GestureState m_gestureState;        ///< Multi-touch gesture state
     QPointF m_lastPointerPos;           ///< Last pointer position (for delta calculation)
