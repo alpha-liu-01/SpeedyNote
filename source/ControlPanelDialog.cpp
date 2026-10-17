@@ -172,9 +172,7 @@ ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, QWidget *parent)
 
     createThemeTab();
     createLanguageTab();
-#ifdef Q_OS_LINUX
     createStylusTab();
-#endif
     createCacheTab();
     createAboutTab();
     
@@ -2070,23 +2068,24 @@ void ControlPanelDialog::createLanguageTab() {
 }
 
 
-// ===== Stylus Tab (Linux Only) =====
+// ===== Stylus Tab =====
+// Side-button mapping is available on every platform; palm rejection is a
+// Linux-only concern because Windows/macOS/Android/iOS reject palms natively.
 
-#ifdef Q_OS_LINUX
 void ControlPanelDialog::createStylusTab() {
     stylusTab = new QWidget(this);
     QVBoxLayout *layout = new QVBoxLayout(stylusTab);
-    
-    // Palm rejection section
+
+#ifdef Q_OS_LINUX
+    // --- Palm rejection section (Linux only) ---
     QLabel *palmRejectionSectionLabel = new QLabel(tr("Palm Rejection"), stylusTab);
     palmRejectionSectionLabel->setStyleSheet("font-weight: bold; font-size: 14px;");
     layout->addWidget(palmRejectionSectionLabel);
-    
+
     palmRejectionCheckbox = new QCheckBox(tr("Disable touch gestures when stylus is active"), stylusTab);
     palmRejectionCheckbox->setChecked(mainWindowRef->isPalmRejectionEnabled());
     layout->addWidget(palmRejectionCheckbox);
-    
-    // Delay spinbox row
+
     QHBoxLayout *palmDelayLayout = new QHBoxLayout();
     QLabel *palmDelayLabel = new QLabel(tr("Restore delay:"), stylusTab);
     palmRejectionDelaySpinBox = new QSpinBox(stylusTab);
@@ -2099,7 +2098,7 @@ void ControlPanelDialog::createStylusTab() {
     palmDelayLayout->addWidget(palmRejectionDelaySpinBox);
     palmDelayLayout->addStretch();
     layout->addLayout(palmDelayLayout);
-    
+
     QLabel *palmRejectionNote = new QLabel(
         tr("When enabled, touch gestures are temporarily disabled while the stylus is "
            "hovering or touching the screen. After the stylus leaves, touch gestures are "
@@ -2109,23 +2108,222 @@ void ControlPanelDialog::createStylusTab() {
     palmRejectionNote->setWordWrap(true);
     palmRejectionNote->setStyleSheet("color: gray; font-size: 10px;");
     layout->addWidget(palmRejectionNote);
-    
-    // Connect checkbox to enable/disable delay spinbox
+
     connect(palmRejectionCheckbox, &QCheckBox::toggled, palmRejectionDelaySpinBox, &QSpinBox::setEnabled);
-    
-    // Apply settings immediately when changed
     connect(palmRejectionCheckbox, &QCheckBox::toggled, this, [this](bool checked) {
         mainWindowRef->setPalmRejectionEnabled(checked);
     });
-    
     connect(palmRejectionDelaySpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int value) {
         mainWindowRef->setPalmRejectionDelay(value);
     });
-    
+
+    // Separator before the cross-platform side-button section.
+    QFrame *palmSeparator = new QFrame(stylusTab);
+    palmSeparator->setFrameShape(QFrame::HLine);
+    palmSeparator->setFrameShadow(QFrame::Sunken);
+    layout->addSpacing(8);
+    layout->addWidget(palmSeparator);
+    layout->addSpacing(8);
+#endif
+
+    // --- Stylus side buttons (barrel buttons) ---
+    QLabel *sideButtonSectionLabel = new QLabel(tr("Stylus Side Buttons"), stylusTab);
+    sideButtonSectionLabel->setStyleSheet("font-weight: bold; font-size: 14px;");
+    layout->addWidget(sideButtonSectionLabel);
+
+    stylusButtonMappingCheckbox =
+        new QCheckBox(tr("Enable stylus side button tool switching"), stylusTab);
+    stylusButtonMappingCheckbox->setChecked(mainWindowRef->isStylusButtonMappingEnabled());
+    layout->addWidget(stylusButtonMappingCheckbox);
+
+    // Tool choices, indexed to match ToolType (Pen=0 ... Pan=6).
+    QStringList toolOptions = {
+        tr("Pen"), tr("Marker"), tr("Eraser"), tr("Highlighter"),
+        tr("Lasso"), tr("Object Select"), tr("Pan")
+    };
+    QStringList modeOptions = {
+        tr("Hold (release returns to previous tool)"),
+        tr("Toggle (press again to switch back)"),
+        tr("One-shot (switch and stay)")
+    };
+
+    // Button A row
+    QHBoxLayout *buttonALayout = new QHBoxLayout();
+    stylusButtonALabel = new QLabel(
+        tr("Button A (%1):").arg(mainWindowRef->getStylusButtonAQt() == Qt::MiddleButton
+                                     ? tr("Middle") : tr("Right")),
+        stylusTab);
+    stylusButtonALabel->setMinimumWidth(110);
+    buttonALayout->addWidget(stylusButtonALabel);
+
+    stylusButtonAToolCombo = new QComboBox(stylusTab);
+    stylusButtonAToolCombo->addItems(toolOptions);
+    stylusButtonAToolCombo->setCurrentIndex(mainWindowRef->getStylusButtonActionA());
+    buttonALayout->addWidget(stylusButtonAToolCombo, 1);
+
+    stylusButtonAModeCombo = new QComboBox(stylusTab);
+    stylusButtonAModeCombo->addItems(modeOptions);
+    stylusButtonAModeCombo->setCurrentIndex(static_cast<int>(mainWindowRef->getStylusButtonModeA()));
+    buttonALayout->addWidget(stylusButtonAModeCombo, 2);
+
+    QPushButton *detectAButton = new QPushButton(tr("Detect"), stylusTab);
+    detectAButton->setFixedWidth(70);
+    buttonALayout->addWidget(detectAButton);
+    layout->addLayout(buttonALayout);
+
+    // Button B row
+    QHBoxLayout *buttonBLayout = new QHBoxLayout();
+    stylusButtonBLabel = new QLabel(
+        tr("Button B (%1):").arg(mainWindowRef->getStylusButtonBQt() == Qt::MiddleButton
+                                     ? tr("Middle") : tr("Right")),
+        stylusTab);
+    stylusButtonBLabel->setMinimumWidth(110);
+    buttonBLayout->addWidget(stylusButtonBLabel);
+
+    stylusButtonBToolCombo = new QComboBox(stylusTab);
+    stylusButtonBToolCombo->addItems(toolOptions);
+    stylusButtonBToolCombo->setCurrentIndex(mainWindowRef->getStylusButtonActionB());
+    buttonBLayout->addWidget(stylusButtonBToolCombo, 1);
+
+    stylusButtonBModeCombo = new QComboBox(stylusTab);
+    stylusButtonBModeCombo->addItems(modeOptions);
+    stylusButtonBModeCombo->setCurrentIndex(static_cast<int>(mainWindowRef->getStylusButtonModeB()));
+    buttonBLayout->addWidget(stylusButtonBModeCombo, 2);
+
+    QPushButton *detectBButton = new QPushButton(tr("Detect"), stylusTab);
+    detectBButton->setFixedWidth(70);
+    buttonBLayout->addWidget(detectBButton);
+    layout->addLayout(buttonBLayout);
+
+    // Swap-buttons helper (many tablets report the side buttons in the
+    // opposite order, or with an unconventional Qt button).
+    QPushButton *swapButtonsButton = new QPushButton(tr("Swap A / B"), stylusTab);
+    swapButtonsButton->setFixedWidth(120);
+    QHBoxLayout *swapLayout = new QHBoxLayout();
+    swapLayout->addWidget(swapButtonsButton);
+    swapLayout->addStretch();
+    layout->addLayout(swapLayout);
+
+    QLabel *sideButtonNote = new QLabel(
+        tr("Maps the stylus barrel/side buttons to a tool. Hold: the tool is active only "
+           "while the button is pressed. Toggle: press once to switch, press again to "
+           "switch back. One-shot: press to switch and stay.\n\n"
+           "If the buttons appear swapped, use \"Swap A / B\". Side button reporting may "
+           "vary by tablet and driver; the mapping only affects stylus input, not the "
+           "mouse."), stylusTab);
+    sideButtonNote->setWordWrap(true);
+    sideButtonNote->setStyleSheet("color: gray; font-size: 10px;");
+    layout->addWidget(sideButtonNote);
+
+    // --- Apply immediately ---
+    connect(stylusButtonMappingCheckbox, &QCheckBox::toggled, this, [this](bool checked) {
+        mainWindowRef->setStylusButtonMappingEnabled(checked);
+    });
+    connect(stylusButtonAToolCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int index) { mainWindowRef->setStylusButtonActionA(index); });
+    connect(stylusButtonBToolCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int index) { mainWindowRef->setStylusButtonActionB(index); });
+    connect(stylusButtonAModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int index) {
+                mainWindowRef->setStylusButtonModeA(static_cast<StylusButtonMode>(index));
+            });
+    connect(stylusButtonBModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int index) {
+                mainWindowRef->setStylusButtonModeB(static_cast<StylusButtonMode>(index));
+            });
+    connect(swapButtonsButton, &QPushButton::clicked, this, [this]() {
+        const Qt::MouseButton a = mainWindowRef->getStylusButtonAQt();
+        mainWindowRef->setStylusButtonAQt(mainWindowRef->getStylusButtonBQt());
+        mainWindowRef->setStylusButtonBQt(a);
+        stylusButtonALabel->setText(
+            tr("Button A (%1):").arg(mainWindowRef->getStylusButtonAQt() == Qt::MiddleButton
+                                         ? tr("Middle") : tr("Right")));
+        stylusButtonBLabel->setText(
+            tr("Button B (%1):").arg(mainWindowRef->getStylusButtonBQt() == Qt::MiddleButton
+                                         ? tr("Middle") : tr("Right")));
+    });
+    connect(detectAButton, &QPushButton::clicked, this, [this]() { detectStylusButton(true); });
+    connect(detectBButton, &QPushButton::clicked, this, [this]() { detectStylusButton(false); });
+
     layout->addStretch();
     tabWidget->addTab(stylusTab, tr("Stylus"));
 }
-#endif
+
+void ControlPanelDialog::detectStylusButton(bool isButtonA) {
+    QDialog detectDialog(this);
+    detectDialog.setWindowTitle(isButtonA ? tr("Detect Button A") : tr("Detect Button B"));
+    detectDialog.setMinimumSize(360, 190);
+
+    QVBoxLayout *detectLayout = new QVBoxLayout(&detectDialog);
+
+    QLabel *instructionLabel = new QLabel(
+        tr("Press and hold a stylus side button while the pen is near the tablet.\n\n"
+           "The button you press is assigned to %1.")
+            .arg(isButtonA ? tr("Button A") : tr("Button B")),
+        &detectDialog);
+    instructionLabel->setAlignment(Qt::AlignCenter);
+    instructionLabel->setWordWrap(true);
+    detectLayout->addWidget(instructionLabel);
+
+    QLabel *statusLabel = new QLabel(tr("Waiting for stylus button press..."), &detectDialog);
+    statusLabel->setAlignment(Qt::AlignCenter);
+    statusLabel->setStyleSheet("font-weight: bold; color: #3498db;");
+    detectLayout->addWidget(statusLabel);
+
+    QPushButton *cancelButton = new QPushButton(tr("Cancel"), &detectDialog);
+    detectLayout->addWidget(cancelButton);
+    connect(cancelButton, &QPushButton::clicked, &detectDialog, &QDialog::reject);
+
+    // Catch the next tablet press that carries a barrel button. MiddleButton /
+    // RightButton in the mask identify which physical side button it is.
+    class TabletButtonProbe : public QObject {
+    public:
+        QDialog *dialog;
+        QLabel *statusLabel;
+        bool wantButtonA;
+        Qt::MouseButton detected = Qt::NoButton;
+        TabletButtonProbe(QDialog *d, QLabel *l, bool wantA)
+            : dialog(d), statusLabel(l), wantButtonA(wantA) {}
+
+        bool eventFilter(QObject *, QEvent *event) override {
+            if (event->type() != QEvent::TabletPress) return false;
+            auto *te = static_cast<QTabletEvent *>(event);
+            Qt::MouseButton b = te->button();
+            if (b != Qt::MiddleButton && b != Qt::RightButton) {
+                const Qt::MouseButtons mask = te->buttons();
+                if (mask & Qt::MiddleButton) b = Qt::MiddleButton;
+                else if (mask & Qt::RightButton) b = Qt::RightButton;
+            }
+            if (b == Qt::MiddleButton || b == Qt::RightButton) {
+                detected = b;
+                statusLabel->setText(b == Qt::MiddleButton ? tr("Detected: Middle button")
+                                                           : tr("Detected: Right button"));
+                QTimer::singleShot(250, dialog, &QDialog::accept);
+            }
+            return false;  // never consume
+        }
+    };
+
+    TabletButtonProbe probe(&detectDialog, statusLabel, isButtonA);
+    qApp->installEventFilter(&probe);
+
+    if (detectDialog.exec() == QDialog::Accepted
+        && probe.detected != Qt::NoButton) {
+        if (isButtonA) {
+            mainWindowRef->setStylusButtonAQt(probe.detected);
+            stylusButtonALabel->setText(
+                tr("Button A (%1):").arg(probe.detected == Qt::MiddleButton
+                                             ? tr("Middle") : tr("Right")));
+        } else {
+            mainWindowRef->setStylusButtonBQt(probe.detected);
+            stylusButtonBLabel->setText(
+                tr("Button B (%1):").arg(probe.detected == Qt::MiddleButton
+                                             ? tr("Middle") : tr("Right")));
+        }
+    }
+
+    qApp->removeEventFilter(&probe);
+}
 
 /*
 // ===== Compatibility Tab =====

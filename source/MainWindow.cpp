@@ -47,6 +47,7 @@
 #include <windows.h>  // For MSG struct in nativeEvent (theme change detection)
 #endif
 #include <QGuiApplication>
+#include <QTabletEvent>   // Stylus side-button (barrel button) detection in eventFilter
 #include <QLineEdit>
 #include <QTextBrowser>
 #include <QTextEdit>
@@ -5119,6 +5120,20 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
     }
 #endif
 
+    // Stylus side buttons (barrel buttons). The filter is installed on every
+    // viewport, so this runs before DocumentViewport::tabletEvent and the tool
+    // it selects is the one that draws the very same event. Never consume the
+    // event: the viewport still needs it.
+    if (event->type() == QEvent::TabletPress
+        || event->type() == QEvent::TabletRelease
+        || event->type() == QEvent::TabletMove) {
+        if (auto* te = static_cast<QTabletEvent*>(event)) {
+            handleStylusTabletButtons(te->buttons(), te->button(),
+                                      event->type() == QEvent::TabletPress,
+                                      qobject_cast<DocumentViewport*>(obj));
+        }
+    }
+
     // Pan tool hold: cancel if application loses focus (KeyRelease won't arrive)
     if (m_panHoldActive && event->type() == QEvent::ApplicationDeactivate) {
         if (auto* vp = currentViewport()) {
@@ -5675,6 +5690,9 @@ void MainWindow::loadUserSettings() {
     m_palmRejectionEnabled = settings.value("palmRejection/enabled", false).toBool();
     m_palmRejectionDelayMs = settings.value("palmRejection/delayMs", 500).toInt();
 #endif
+
+    // Load stylus side-button mappings (all platforms)
+    loadStylusButtonSettings();
     
     // Load theme settings
     loadThemeSettings();
@@ -5739,6 +5757,232 @@ void MainWindow::onStylusProximityLeave() {
     m_palmRejectionTimer->start(m_palmRejectionDelayMs);
 }
 #endif
+
+// ==================== Stylus Side Buttons ====================
+//
+// The side/barrel button of a stylus does not arrive as a PointerEvent flag:
+// Qt reports it as an ordinary QTabletEvent button (MiddleButton or
+// RightButton, depending on the driver). We watch for those button transitions
+// here, in the viewport event filter, and swap the viewport's active tool
+// accordingly. The viewport then draws/erases with whatever tool is selected
+// by the time it processes the same event, so a Hold-mapped eraser erases on
+// the very first contact.
+
+void MainWindow::loadStylusButtonSettings() {
+    QSettings settings("SpeedyNote", "App");
+    m_stylusButtonMappingEnabled =
+        settings.value("stylus/sideButtonMappingEnabled", false).toBool();
+
+    // Range-check every enum read back from disk: a hand-edited or stale
+    // settings value must not cast into an out-of-range ToolType/Mode.
+    const int toolMax = static_cast<int>(ToolType::Pan);
+    const int modeMax = static_cast<int>(StylusButtonMode::OneShot);
+
+    const int aTool = settings.value("stylus/buttonA/tool", static_cast<int>(ToolType::Eraser)).toInt();
+    const int bTool = settings.value("stylus/buttonB/tool", static_cast<int>(ToolType::Eraser)).toInt();
+    m_stylusButtonATool = (aTool >= 0 && aTool <= toolMax) ? static_cast<ToolType>(aTool)
+                                                           : ToolType::Eraser;
+    m_stylusButtonBTool = (bTool >= 0 && bTool <= toolMax) ? static_cast<ToolType>(bTool)
+                                                           : ToolType::Eraser;
+
+    const int aMode = settings.value("stylus/buttonA/mode", static_cast<int>(StylusButtonMode::Hold)).toInt();
+    const int bMode = settings.value("stylus/buttonB/mode", static_cast<int>(StylusButtonMode::Hold)).toInt();
+    m_stylusButtonAMode = (aMode >= 0 && aMode <= modeMax) ? static_cast<StylusButtonMode>(aMode)
+                                                           : StylusButtonMode::Hold;
+    m_stylusButtonBMode = (bMode >= 0 && bMode <= modeMax) ? static_cast<StylusButtonMode>(bMode)
+                                                           : StylusButtonMode::Hold;
+
+    const int aQt = settings.value("stylus/buttonA/qtButton", static_cast<int>(Qt::MiddleButton)).toInt();
+    const int bQt = settings.value("stylus/buttonB/qtButton", static_cast<int>(Qt::RightButton)).toInt();
+    m_stylusButtonAQt = (aQt == static_cast<int>(Qt::MiddleButton)
+                         || aQt == static_cast<int>(Qt::RightButton))
+                            ? static_cast<Qt::MouseButton>(aQt) : Qt::MiddleButton;
+    m_stylusButtonBQt = (bQt == static_cast<int>(Qt::MiddleButton)
+                         || bQt == static_cast<int>(Qt::RightButton))
+                            ? static_cast<Qt::MouseButton>(bQt) : Qt::RightButton;
+
+    // Sanitise: two mappings may not share one physical button.
+    if (m_stylusButtonAQt == m_stylusButtonBQt) {
+        m_stylusButtonBQt = (m_stylusButtonAQt == Qt::RightButton) ? Qt::MiddleButton
+                                                                  : Qt::RightButton;
+    }
+}
+
+void MainWindow::saveStylusButtonSettings() {
+    QSettings settings("SpeedyNote", "App");
+    settings.setValue("stylus/sideButtonMappingEnabled", m_stylusButtonMappingEnabled);
+    settings.setValue("stylus/buttonA/tool", static_cast<int>(m_stylusButtonATool));
+    settings.setValue("stylus/buttonB/tool", static_cast<int>(m_stylusButtonBTool));
+    settings.setValue("stylus/buttonA/mode", static_cast<int>(m_stylusButtonAMode));
+    settings.setValue("stylus/buttonB/mode", static_cast<int>(m_stylusButtonBMode));
+    settings.setValue("stylus/buttonA/qtButton", static_cast<int>(m_stylusButtonAQt));
+    settings.setValue("stylus/buttonB/qtButton", static_cast<int>(m_stylusButtonBQt));
+}
+
+void MainWindow::setStylusButtonMappingEnabled(bool enabled) {
+    m_stylusButtonMappingEnabled = enabled;
+
+    // Turning the feature off while a mapping is applied must not strand the
+    // viewport on the temporary tool.
+    if (!enabled) {
+        if (m_stylusButtonAActive) revertStylusButtonMapping(m_stylusButtonAQt);
+        if (m_stylusButtonBActive) revertStylusButtonMapping(m_stylusButtonBQt);
+    }
+    saveStylusButtonSettings();
+}
+
+void MainWindow::setStylusButtonActionA(int toolIndex) {
+    m_stylusButtonATool = static_cast<ToolType>(toolIndex);
+    saveStylusButtonSettings();
+}
+
+void MainWindow::setStylusButtonActionB(int toolIndex) {
+    m_stylusButtonBTool = static_cast<ToolType>(toolIndex);
+    saveStylusButtonSettings();
+}
+
+void MainWindow::setStylusButtonModeA(StylusButtonMode mode) {
+    m_stylusButtonAMode = mode;
+    saveStylusButtonSettings();
+}
+
+void MainWindow::setStylusButtonModeB(StylusButtonMode mode) {
+    m_stylusButtonBMode = mode;
+    saveStylusButtonSettings();
+}
+
+void MainWindow::setStylusButtonAQt(Qt::MouseButton button) {
+    if (button != Qt::MiddleButton && button != Qt::RightButton) return;
+    // Two mappings cannot share one physical button.
+    if (button == m_stylusButtonBQt) {
+        m_stylusButtonBQt = (button == Qt::RightButton) ? Qt::MiddleButton : Qt::RightButton;
+    }
+    m_stylusButtonAQt = button;
+    saveStylusButtonSettings();
+}
+
+void MainWindow::setStylusButtonBQt(Qt::MouseButton button) {
+    if (button != Qt::MiddleButton && button != Qt::RightButton) return;
+    if (button == m_stylusButtonAQt) {
+        m_stylusButtonAQt = (button == Qt::RightButton) ? Qt::MiddleButton : Qt::RightButton;
+    }
+    m_stylusButtonBQt = button;
+    saveStylusButtonSettings();
+}
+
+void MainWindow::applyStylusButtonMapping(Qt::MouseButton button, DocumentViewport* viewport) {
+    if (button == Qt::NoButton) return;
+
+    const bool isA = (button == m_stylusButtonAQt);
+    const bool isB = (button == m_stylusButtonBQt);
+    if (!isA && !isB) return;
+
+    const bool active = isA ? m_stylusButtonAActive : m_stylusButtonBActive;
+    if (active) return;
+
+    DocumentViewport* vp = viewport ? viewport : currentViewport();
+    if (!vp) return;
+    m_stylusButtonMappedViewport = vp;
+
+    const ToolType targetTool = isA ? m_stylusButtonATool : m_stylusButtonBTool;
+
+    // Remember what to restore. For OneShot there is no automatic restore, but
+    // keeping the value costs nothing and simplifies the code paths.
+    if (isA) {
+        m_stylusButtonAPreviousTool = vp->currentTool();
+        m_stylusButtonAActive = true;
+    } else {
+        m_stylusButtonBPreviousTool = vp->currentTool();
+        m_stylusButtonBActive = true;
+    }
+
+    if (vp->currentTool() != targetTool) {
+        vp->setCurrentTool(targetTool);
+    }
+}
+
+void MainWindow::revertStylusButtonMapping(Qt::MouseButton button) {
+    if (button == Qt::NoButton) return;
+
+    const bool isA = (button == m_stylusButtonAQt);
+    const bool isB = (button == m_stylusButtonBQt);
+    if (!isA && !isB) return;
+
+    const bool active = isA ? m_stylusButtonAActive : m_stylusButtonBActive;
+    if (!active) return;
+
+    DocumentViewport* vp = m_stylusButtonMappedViewport;
+    const ToolType previous = isA ? m_stylusButtonAPreviousTool : m_stylusButtonBPreviousTool;
+
+    if (isA) {
+        m_stylusButtonAActive = false;
+    } else {
+        m_stylusButtonBActive = false;
+    }
+
+    if (vp && vp->currentTool() != previous) {
+        vp->setCurrentTool(previous);
+    }
+}
+
+void MainWindow::handleStylusTabletButtons(Qt::MouseButtons buttons,
+                                           Qt::MouseButton changedButton,
+                                           bool isPress,
+                                           DocumentViewport* viewport) {
+    Q_UNUSED(changedButton);
+    Q_UNUSED(isPress);
+    if (!m_stylusButtonMappingEnabled) return;
+
+    // Derive the currently-down state of each mapped button from the full
+    // button mask, then compare with the previous event's state to find edges.
+    // Using the mask (rather than press/release event types) also catches a
+    // side button pressed or released mid-stroke, which arrives as a
+    // TabletMove with a changed buttons() value.
+    const bool aDown = (buttons & m_stylusButtonAQt) != 0;
+    const bool bDown = (buttons & m_stylusButtonBQt) != 0;
+
+    const bool aPressEdge = aDown && !m_stylusButtonAHeld;
+    const bool aReleaseEdge = !aDown && m_stylusButtonAHeld;
+    const bool bPressEdge = bDown && !m_stylusButtonBHeld;
+    const bool bReleaseEdge = !bDown && m_stylusButtonBHeld;
+
+    m_stylusButtonAHeld = aDown;
+    m_stylusButtonBHeld = bDown;
+
+    if (!aPressEdge && !aReleaseEdge && !bPressEdge && !bReleaseEdge) return;
+
+    auto processButton = [this, viewport](bool isA, bool pressEdge, bool releaseEdge) {
+        const StylusButtonMode mode = isA ? m_stylusButtonAMode : m_stylusButtonBMode;
+        const Qt::MouseButton qtButton = isA ? m_stylusButtonAQt : m_stylusButtonBQt;
+        const bool active = isA ? m_stylusButtonAActive : m_stylusButtonBActive;
+
+        switch (mode) {
+            case StylusButtonMode::Hold:
+                if (pressEdge && !active) {
+                    applyStylusButtonMapping(qtButton, viewport);
+                } else if (releaseEdge && active) {
+                    revertStylusButtonMapping(qtButton);
+                }
+                break;
+
+            case StylusButtonMode::Toggle:
+                // Act on the press edge only; ignore the release.
+                if (!pressEdge) break;
+                if (active) revertStylusButtonMapping(qtButton);
+                else        applyStylusButtonMapping(qtButton, viewport);
+                break;
+
+            case StylusButtonMode::OneShot:
+                // Press once to switch; stays until the user switches back
+                // manually. Never auto-reverts on release or re-press.
+                if (pressEdge) applyStylusButtonMapping(qtButton, viewport);
+                break;
+        }
+    };
+
+    processButton(true, aPressEdge, aReleaseEdge);
+    processButton(false, bPressEdge, bReleaseEdge);
+}
 
 void MainWindow::wheelEvent(QWheelEvent *event) {
     // MW2.2: Forward to base class - dial wheel handling removed
