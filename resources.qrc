@@ -8,6 +8,8 @@
     <file>resources/icons/marker_reversed.png</file>
     <file>resources/icons/eraser.png</file>
     <file>resources/icons/eraser_reversed.png</file>
+    <file>resources/icons/eraser_partial.png</file>
+    <file>resources/icons/eraser_partial_reversed.png</file>
     <file>resources/icons/save_reversed.png</file>
     <file>resources/icons/save.png</file>
     <file>resources/icons/pdf.png</file>

@@ -70,6 +70,7 @@ struct UndoAction {
         RemoveMultiple,
         TransformSelection,
         RecolorStrokes,         ///< In-place color change for a set of strokes (preserves z-order, alpha)
+        ErasePartial,           ///< Split eraser: original stroke replaced by its surviving fragments
 
         // ===== Object types =====
         ObjectInsert,
@@ -401,7 +402,8 @@ public:
      * Lasso: draw a freeform region, delete all strokes inside on release.
      */
     enum class EraserMode {
-        Normal,  ///< Point-based stroke eraser (default)
+        Normal,  ///< Whole-stroke eraser: touching a stroke deletes all of it
+        Partial, ///< Split eraser: removes only the stretch the disc covered
         Lasso    ///< Draw a region, delete all strokes inside on release
     };
     Q_ENUM(EraserMode)
@@ -4808,6 +4810,17 @@ private:
      * @return Rect in viewport coordinates, clamped to this widget's bounds.
      */
     QRectF removedStrokeViewportRect(const VectorStroke& stroke, int pageIndex) const;
+    
+    /**
+     * @brief Erase only the covered stretch of each stroke (部分擦除).
+     * @param pe The pointer event containing hit information.
+     *
+     * Used when EraserMode::Partial is selected: instead of deleting a stroke
+     * the moment the disc touches it, the swept capsule is subtracted from the
+     * stroke and whatever the disc missed stays in the layer. Handles both
+     * paged and edgeless documents, and pushes one undo action per event.
+     */
+    void erasePartialAt(const PointerEvent& pe);
     
     /**
      * @brief Erase strokes in edgeless mode (Phase E4).

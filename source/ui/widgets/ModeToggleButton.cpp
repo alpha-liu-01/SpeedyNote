@@ -5,14 +5,44 @@
 
 ModeToggleButton::ModeToggleButton(QWidget* parent)
     : QWidget(parent)
+    , m_icons(2)
+    , m_iconBaseNames(2)
+    , m_toolTips(2)
 {
     setFixedSize(BUTTON_SIZE, BUTTON_SIZE);
     setCursor(Qt::PointingHandCursor);
     setAttribute(Qt::WA_Hover, true);
 }
 
+void ModeToggleButton::setModeCount(int count)
+{
+    count = qBound(2, count, kMaxModes);
+    if (count == modeCount()) {
+        return;
+    }
+    m_icons.resize(count);
+    m_iconBaseNames.resize(count);
+    m_toolTips.resize(count);
+    if (m_currentMode >= count) {
+        m_currentMode = count - 1;
+    }
+    updateToolTip();
+    update();
+}
+
+void ModeToggleButton::setModeIcons(const QVector<QIcon>& icons)
+{
+    setModeCount(icons.size());
+    for (int i = 0; i < modeCount() && i < icons.size(); ++i) {
+        m_icons[i] = icons[i];
+        m_iconBaseNames[i].clear();  // Direct icons win over base names
+    }
+    update();
+}
+
 void ModeToggleButton::setModeIcons(const QIcon& mode0Icon, const QIcon& mode1Icon)
 {
+    setModeCount(2);
     m_icons[0] = mode0Icon;
     m_icons[1] = mode1Icon;
     m_iconBaseNames[0].clear();  // Clear base names since we're using direct icons
@@ -20,8 +50,18 @@ void ModeToggleButton::setModeIcons(const QIcon& mode0Icon, const QIcon& mode1Ic
     update();
 }
 
+void ModeToggleButton::setModeIconNames(const QStringList& baseNames)
+{
+    setModeCount(baseNames.size());
+    for (int i = 0; i < modeCount() && i < baseNames.size(); ++i) {
+        m_iconBaseNames[i] = baseNames[i];
+    }
+    updateIcons();
+}
+
 void ModeToggleButton::setModeIconNames(const QString& mode0BaseName, const QString& mode1BaseName)
 {
+    setModeCount(2);
     m_iconBaseNames[0] = mode0BaseName;
     m_iconBaseNames[1] = mode1BaseName;
     updateIcons();
@@ -37,7 +77,7 @@ void ModeToggleButton::setDarkMode(bool darkMode)
 
 void ModeToggleButton::updateIcons()
 {
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < modeCount(); ++i) {
         if (!m_iconBaseNames[i].isEmpty()) {
             QString path = m_darkMode
                 ? QString(":/resources/icons/%1_reversed.png").arg(m_iconBaseNames[i])
@@ -48,8 +88,18 @@ void ModeToggleButton::updateIcons()
     update();
 }
 
+void ModeToggleButton::setModeToolTips(const QStringList& toolTips)
+{
+    setModeCount(toolTips.size());
+    for (int i = 0; i < modeCount() && i < toolTips.size(); ++i) {
+        m_toolTips[i] = toolTips[i];
+    }
+    updateToolTip();
+}
+
 void ModeToggleButton::setModeToolTips(const QString& mode0Tip, const QString& mode1Tip)
 {
+    setModeCount(2);
     m_toolTips[0] = mode0Tip;
     m_toolTips[1] = mode1Tip;
     updateToolTip();
@@ -63,7 +113,7 @@ int ModeToggleButton::currentMode() const
 void ModeToggleButton::setCurrentMode(int mode)
 {
     // Clamp to valid range
-    mode = qBound(0, mode, 1);
+    mode = qBound(0, mode, modeCount() - 1);
     
     if (m_currentMode != mode) {
         m_currentMode = mode;
@@ -137,8 +187,8 @@ void ModeToggleButton::mouseReleaseEvent(QMouseEvent* event)
         
         // Check if release is within button bounds
         if (rect().contains(event->pos())) {
-            // Toggle between mode 0 and mode 1
-            setCurrentMode(m_currentMode == 0 ? 1 : 0);
+            // Advance to the next mode, wrapping at the end.
+            setCurrentMode((m_currentMode + 1) % modeCount());
         } else {
             update();
         }
@@ -172,7 +222,8 @@ QColor ModeToggleButton::backgroundColor() const
 
 void ModeToggleButton::updateToolTip()
 {
-    if (!m_toolTips[m_currentMode].isEmpty()) {
+    if (m_currentMode >= 0 && m_currentMode < m_toolTips.size()
+        && !m_toolTips[m_currentMode].isEmpty()) {
         setToolTip(m_toolTips[m_currentMode]);
     }
 }

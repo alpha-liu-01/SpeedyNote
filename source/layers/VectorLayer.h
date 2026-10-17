@@ -102,6 +102,36 @@ public:
     }
     
     /**
+     * @brief Replace a stroke with zero or more fragments, in place.
+     * @param strokeId ID of the stroke to replace.
+     * @param replacements Fragments that take its place (may be empty).
+     * @return True if the stroke was found and replaced.
+     *
+     * Used by the partial eraser. Inserting the fragments at the original index
+     * keeps drawing order intact: appending them at the end would lift a cut
+     * stroke above everything drawn after it, which shows up when strokes
+     * overlap in different colours.
+     */
+    bool replaceStroke(const QString& strokeId, const QVector<VectorStroke>& replacements) {
+        for (int i = 0; i < m_strokes.size(); ++i) {
+            if (m_strokes[i].id != strokeId) {
+                continue;
+            }
+            QRectF affected = m_strokes[i].boundingBox;
+            m_strokes.removeAt(i);
+            for (int j = 0; j < replacements.size(); ++j) {
+                affected = affected.united(replacements[j].boundingBox);
+                m_strokes.insert(i + j, replacements[j]);
+            }
+            // Clears `affected` and re-renders every stroke overlapping it, so
+            // both the fragments coming in and the ink cut away are handled.
+            patchCacheAfterRemoval(affected);
+            return true;
+        }
+        return false;
+    }
+    
+    /**
      * @brief Get all strokes (const reference).
      * @return Vector of strokes in this layer.
      */

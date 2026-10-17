@@ -17,7 +17,10 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QLineF>
+#include <QPair>
 #include <QUuid>
+
+#include <cmath>
 
 /**
  * @brief A complete vector stroke consisting of multiple points.
@@ -190,6 +193,135 @@ struct VectorStroke {
     }
     
     /**
+     * @brief Split this stroke around an eraser sweep, keeping what it missed.
+     *
+     * "Partial" erasing: instead of deleting the whole stroke when the eraser
+     * touches it, remove only the covered stretch and keep the remainder. The
+     * eraser is modelled as a disc of `radius` dragged from `a` to `b`, so the
+     * removed set is the capsule (stadium) around that path.
+     *
+     * Reach is measured to the stroke's centre line, with no half-width term.
+     * Adding the half-width would match whole-stroke mode's trigger, but a cut
+     * is a topological change: letting a graze of a thick stroke's edge slice
+     * it in two looks wrong. Requiring the disc to cover the centre line keeps
+     * a nick on the edge from severing the stroke.
+     *
+     * @param a Start of the eraser motion path.
+     * @param b End of the eraser motion path.
+     * @param radius Eraser radius in the same units as the stroke points.
+     * @return Surviving fragments. Returns this stroke unchanged (same id) when
+     *         the sweep missed it entirely, and an empty list when nothing
+     *         survived.
+     */
+    QVector<VectorStroke> subtractEraserSweep(const QPointF& a, const QPointF& b,
+                                              qreal radius) const {
+        if (points.isEmpty() || radius <= 0.0) {
+            return {*this};
+        }
+        
+        // A dot either survives whole or not at all - there is no stretch to cut.
+        if (points.size() == 1) {
+            if (distanceToSegment(points[0].pos, a, b) < radius) {
+                return {};
+            }
+            return {*this};
+        }
+        
+        // Broad phase: skip the per-segment work when the stroke's outline is
+        // nowhere near the swept capsule. Padded by the stroke's half-width so a
+        // graze is never culled here; the exact test is per segment below.
+        const qreal pad = radius + maxHalfWidth();
+        const QRectF sweepRect = QRectF(a, b).normalized()
+                                    .adjusted(-pad, -pad, pad, pad);
+        if (!boundingBox.adjusted(-pad, -pad, pad, pad).intersects(sweepRect)) {
+            return {*this};
+        }
+        
+        // Walk each original segment, keeping the parameter ranges the capsule
+        // did not cover. Pieces that meet at a shared vertex are stitched back
+        // into a single fragment below.
+        struct Piece {
+            int segment = 0;   ///< Index of the source segment (points[i]..points[i+1])
+            qreal t0 = 0.0;    ///< Start parameter along that segment
+            qreal t1 = 1.0;    ///< End parameter along that segment
+        };
+        QVector<Piece> pieces;
+        
+        for (int i = 1; i < points.size(); ++i) {
+            const QPointF& p = points[i - 1].pos;
+            const QPointF& q = points[i].pos;
+            for (const auto& iv : survivingIntervals(p, q, a, b, radius)) {
+                pieces.append(Piece{i - 1, iv.first, iv.second});
+            }
+        }
+        
+        if (pieces.isEmpty()) {
+            return {};
+        }
+        
+        // Group pieces into fragments. Two consecutive pieces belong to the same
+        // fragment when they are adjacent in the same segment, or when the first
+        // starts a segment exactly where the previous one ended the prior one.
+        QVector<QVector<Piece>> runs;
+        for (const Piece& piece : pieces) {
+            bool continuesPrevious = false;
+            if (!runs.isEmpty()) {
+                const Piece& prev = runs.last().last();
+                const bool sameSegment = (piece.segment == prev.segment)
+                                         && (piece.t0 <= prev.t1 + 1e-9);
+                const bool adjacentSegments = (piece.segment == prev.segment + 1)
+                                              && (prev.t1 >= 1.0 - 1e-9)
+                                              && (piece.t0 <= 1e-9);
+                continuesPrevious = sameSegment || adjacentSegments;
+            }
+            if (continuesPrevious) {
+                runs.last().append(piece);
+            } else {
+                runs.append(QVector<Piece>{piece});
+            }
+        }
+        
+        // Materialise each run as a stroke. The untouched case (a single run
+        // spanning the whole polyline) returns the original stroke as-is so
+        // callers can detect "nothing happened" by the unchanged id.
+        if (runs.size() == 1 && runs.first().size() == points.size() - 1
+            && qFuzzyIsNull(runs.first().first().t0)
+            && qFuzzyCompare(runs.first().last().t1, 1.0)) {
+            return {*this};
+        }
+        
+        QVector<VectorStroke> fragments;
+        fragments.reserve(runs.size());
+        for (const QVector<Piece>& run : runs) {
+            VectorStroke fragment = *this;
+            fragment.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            fragment.points.clear();
+            
+            bool haveLast = false;
+            for (const Piece& piece : run) {
+                const StrokePoint& p = points[piece.segment];
+                const StrokePoint& q = points[piece.segment + 1];
+                if (!haveLast || piece.t0 > 1e-9) {
+                    if (!haveLast) {
+                        fragment.points.append(interpolatePoint(p, q, piece.t0));
+                    }
+                }
+                fragment.points.append(interpolatePoint(p, q, piece.t1));
+                haveLast = true;
+            }
+            
+            // A single interpolated point would render as a dot, which reads as
+            // debris left behind by the cut. Drop such slivers.
+            if (fragment.points.size() < 2) {
+                continue;
+            }
+            fragment.updateBoundingBox();
+            fragments.append(fragment);
+        }
+        return fragments;
+    }
+    
+    /**
      * @brief Serialize to JSON.
      * @return JSON object containing id, color, thickness, and points array.
      */
@@ -238,6 +370,92 @@ private:
      * @param b End of segment.
      * @return Distance from p to the nearest point on segment ab.
      */
+    /**
+     * @brief Linear interpolation of position and pressure along a segment.
+     */
+    static StrokePoint interpolatePoint(const StrokePoint& p, const StrokePoint& q, qreal t) {
+        StrokePoint out;
+        out.pos = p.pos + (q.pos - p.pos) * t;
+        out.pressure = p.pressure + (q.pressure - p.pressure) * t;
+        // Timestamps are only used for velocity heuristics at capture time; a
+        // synthesised point has no meaningful one, so leave it at 0.
+        return out;
+    }
+    
+    /**
+     * @brief Parameter ranges of segment p->q that lie outside an eraser capsule.
+     *
+     * Returns the surviving parts of one stroke segment, as [t0, t1] pairs in
+     * increasing order with 0 <= t0 < t1 <= 1. Boundaries are refined by
+     * bisection so the cut lands within a fraction of a unit of where the disc
+     * actually ends, rather than at a coarse sample position.
+     */
+    static QVector<QPair<qreal, qreal>> survivingIntervals(const QPointF& p, const QPointF& q,
+                                                           const QPointF& a, const QPointF& b,
+                                                           qreal radius) {
+        auto distAt = [&](qreal t) {
+            return distanceToSegment(p + (q - p) * t, a, b);
+        };
+        
+        // distance() is convex along the segment, so its maximum is at an
+        // endpoint. Both endpoints covered means the whole segment is covered.
+        if (distAt(0.0) < radius && distAt(1.0) < radius) {
+            return {};
+        }
+        
+        // Sampling density: fine enough to catch a shallow graze, which can be
+        // a very short stretch, without scanning a long segment point by point.
+        const qreal len = QLineF(p, q).length();
+        const int samples = qBound(2, static_cast<int>(std::ceil(len / 1.0)) + 1, 512);
+        
+        QVector<QPair<qreal, qreal>> result;
+        qreal runStart = -1.0;   // Start of the current surviving run, or -1
+        qreal prevT = 0.0;
+        bool prevInside = distAt(0.0) < radius;
+        if (!prevInside) {
+            runStart = 0.0;
+        }
+        
+        for (int i = 1; i <= samples; ++i) {
+            const qreal t = static_cast<qreal>(i) / samples;
+            const bool inside = distAt(t) < radius;
+            
+            if (inside != prevInside) {
+                // Refine the crossing by bisection: the classification of the
+                // midpoint decides which half holds the boundary.
+                qreal lo = prevT;
+                qreal hi = t;
+                const bool loInside = prevInside;
+                for (int it = 0; it < 24; ++it) {
+                    const qreal mid = 0.5 * (lo + hi);
+                    if ((distAt(mid) < radius) == loInside) {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                const qreal boundary = 0.5 * (lo + hi);
+                if (inside) {
+                    // Entering the capsule: close the surviving run here.
+                    if (runStart >= 0.0 && boundary > runStart) {
+                        result.append({runStart, boundary});
+                    }
+                    runStart = -1.0;
+                } else {
+                    // Leaving the capsule: begin a new surviving run.
+                    runStart = boundary;
+                }
+                prevInside = inside;
+            }
+            prevT = t;
+        }
+        
+        if (runStart >= 0.0 && prevT > runStart) {
+            result.append({runStart, 1.0});
+        }
+        return result;
+    }
+    
     static qreal distanceToSegment(const QPointF& p, const QPointF& a, const QPointF& b) {
         QPointF ab = b - a;
         QPointF ap = p - a;

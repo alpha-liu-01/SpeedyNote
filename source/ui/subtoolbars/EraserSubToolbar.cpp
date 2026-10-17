@@ -10,6 +10,7 @@ const QString EraserSubToolbar::SETTINGS_GROUP = "eraser";
 const QString EraserSubToolbar::KEY_SIZE_PREFIX = "size";
 const QString EraserSubToolbar::KEY_SELECTED_SIZE = "selectedSize";
 const QString EraserSubToolbar::KEY_ERASER_MODE = "eraserMode";
+const QString EraserSubToolbar::KEY_MODE_VERSION = "eraserModeVersion";
 
 EraserSubToolbar::EraserSubToolbar(QWidget* parent)
     : SubToolbar(parent)
@@ -23,14 +24,17 @@ void EraserSubToolbar::createWidgets()
 {
     bool dark = isDarkMode();
 
-    // Mode toggle (Normal / Lasso) as the first widget
+    // Mode toggle (Whole / Partial / Lasso) as the first widget.
+    // The display order matches DocumentViewport::EraserMode, so the toggle's
+    // mode index is used directly as the enum value.
     m_modeToggle = new ModeToggleButton(this);
-    m_modeToggle->setModeIconNames("eraser", "rope");
+    m_modeToggle->setModeIconNames(QStringList{"eraser", "eraser_partial", "rope"});
     m_modeToggle->setDarkMode(dark);
-    m_modeToggle->setModeToolTips(
-        tr("Normal eraser (click to switch to Lasso)"),
-        tr("Lasso eraser (click to switch to Normal)")
-    );
+    m_modeToggle->setModeToolTips(QStringList{
+        tr("Whole-stroke eraser (click for partial erase)"),
+        tr("Partial eraser - erase only what you touch (click for lasso)"),
+        tr("Lasso eraser (click to switch to whole-stroke)")
+    });
     addWidget(m_modeToggle);
 
     addSeparator();
@@ -84,8 +88,18 @@ void EraserSubToolbar::loadFromSettings()
     // Clamp to valid range [0, NUM_PRESETS-1] to handle corrupted settings
     m_selectedSizeIndex = qBound(0, loadedIndex, NUM_PRESETS - 1);
 
-    // Load eraser mode (0 = Normal, 1 = Lasso)
-    m_eraserModeIndex = qBound(0, settings.value(KEY_ERASER_MODE, 0).toInt(), 1);
+    // Load eraser mode. Display order is now Whole(0) / Partial(1) / Lasso(2),
+    // while the pre-partial builds stored Lasso as 1. KEY_MODE_VERSION records
+    // which scheme a value came from so an old "1" is not silently reinterpreted
+    // as Partial; without the marker the saved mode is reset to Whole.
+    const int storedMode = settings.value(KEY_ERASER_MODE, 0).toInt();
+    const int modeVersion = settings.value(KEY_MODE_VERSION, 1).toInt();
+    if (modeVersion < 2) {
+        m_eraserModeIndex = (storedMode == 1) ? static_cast<int>(DocumentViewport::EraserMode::Lasso)
+                                             : static_cast<int>(DocumentViewport::EraserMode::Normal);
+    } else {
+        m_eraserModeIndex = qBound(0, storedMode, NUM_MODES - 1);
+    }
     
     settings.endGroup();
     
@@ -112,8 +126,9 @@ void EraserSubToolbar::saveToSettings()
     // Save selection
     settings.setValue(KEY_SELECTED_SIZE, m_selectedSizeIndex);
 
-    // Save eraser mode
+    // Save eraser mode, stamped with the scheme version that produced it.
     settings.setValue(KEY_ERASER_MODE, m_eraserModeIndex);
+    settings.setValue(KEY_MODE_VERSION, 2);
     
     settings.endGroup();
 }
@@ -150,7 +165,7 @@ int EraserSubToolbar::currentModeIndex() const
 
 void EraserSubToolbar::setModeState(int mode)
 {
-    m_eraserModeIndex = qBound(0, mode, 1);
+    m_eraserModeIndex = qBound(0, mode, NUM_MODES - 1);
     m_modeToggle->blockSignals(true);
     m_modeToggle->setCurrentMode(m_eraserModeIndex);
     m_modeToggle->blockSignals(false);

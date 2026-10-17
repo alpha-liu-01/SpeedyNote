@@ -57,13 +57,14 @@ public:
     void cycleSize();
 
     /**
-     * @brief Get the current eraser mode index (0 = Normal, 1 = Lasso).
+     * @brief Get the current eraser mode index.
+     * @return The DocumentViewport::EraserMode value (0 = Whole, 1 = Partial, 2 = Lasso).
      */
     int currentModeIndex() const;
 
     /**
      * @brief Set the eraser mode from external source without emitting signal.
-     * @param mode 0 = Normal, 1 = Lasso.
+     * @param mode A DocumentViewport::EraserMode value.
      */
     void setModeState(int mode);
 
@@ -102,7 +103,7 @@ private:
     
     // Current state
     int m_selectedSizeIndex = 1;  // Default: medium (index 1)
-    int m_eraserModeIndex = 0;    // 0 = Normal, 1 = Lasso
+    int m_eraserModeIndex = 0;    // DocumentViewport::EraserMode value
     
     // Per-tab state storage
     struct TabState {
@@ -114,6 +115,8 @@ private:
     
     // Default values
     static constexpr int NUM_PRESETS = 3;
+    /// Number of eraser modes: whole-stroke, partial, lasso.
+    static constexpr int NUM_MODES = 3;
     static constexpr qreal DEFAULT_SIZES[NUM_PRESETS] = {5.0, 15.0, 40.0};
     /// Bounds come from DocumentViewport so the picker cannot offer a size the
     /// viewport would clamp (and therefore draw at a different radius).
@@ -128,6 +131,9 @@ private:
     static const QString KEY_SIZE_PREFIX;
     static const QString KEY_SELECTED_SIZE;
     static const QString KEY_ERASER_MODE;
+    /// Marks which mode numbering KEY_ERASER_MODE was written with. Version 1
+    /// had Whole=0 / Lasso=1; version 2 added Partial in the middle.
+    static const QString KEY_MODE_VERSION;
 };
 
 #endif // ERASERSUBTOOLBAR_H
