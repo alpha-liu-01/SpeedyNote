@@ -136,13 +136,35 @@ public:
     /**
      * @brief Find all strokes that contain a given point (for eraser).
      * @param pt The point to test.
-     * @param tolerance Additional radius around the point.
+     * @param radius Eraser radius, measured to the stroke centre line.
      * @return List of stroke IDs that contain the point.
      */
-    QVector<QString> strokesAtPoint(const QPointF& pt, qreal tolerance) const {
+    QVector<QString> strokesAtPoint(const QPointF& pt, qreal radius) const {
         QVector<QString> result;
         for (const auto& stroke : m_strokes) {
-            if (stroke.containsPoint(pt, tolerance)) {
+            if (stroke.containsPoint(pt, radius)) {
+                result.append(stroke.id);
+            }
+        }
+        return result;
+    }
+    
+    /**
+     * @brief Find all strokes an eraser disc swept from `a` to `b` touches.
+     *
+     * Covers the gap left by sampling: eraseAt() only sees discrete pointer
+     * positions, so a fast swipe would otherwise skip strokes it visibly
+     * crossed. See VectorStroke::intersectsEraserSweep().
+     *
+     * @param a Start of the eraser motion path.
+     * @param b End of the eraser motion path.
+     * @param radius Eraser radius, measured to the stroke centre line.
+     * @return List of stroke IDs touched by the swept disc.
+     */
+    QVector<QString> strokesInEraserSweep(const QPointF& a, const QPointF& b, qreal radius) const {
+        QVector<QString> result;
+        for (const auto& stroke : m_strokes) {
+            if (stroke.intersectsEraserSweep(a, b, radius)) {
                 result.append(stroke.id);
             }
         }
