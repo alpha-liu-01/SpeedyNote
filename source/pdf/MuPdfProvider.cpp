@@ -253,6 +253,67 @@ QSizeF MuPdfProvider::pageSize(int pageIndex) const
 // Rendering
 // ============================================================================
 
+namespace {
+
+/**
+ * @brief The pixel/axis budget for a single rasterisation.
+ *
+ * Guards the raster backend against pathological page or region geometries.
+ * It is applied to whatever is being rasterised -- a whole page in the
+ * non-tiled path, one visible region in the tiled path -- so the tiled path can
+ * afford a much higher DPI without ever approaching this ceiling.
+ */
+constexpr int    kMaxRasterAxis   = 30000;              // raster-backend safe
+constexpr qint64 kMaxRasterPixels = 64LL * 1024 * 1024; // ~64 MP (~256 MB BGRA)
+
+bool rasterWithinBudget(int width, int height)
+{
+    if (width <= 0 || height <= 0)
+        return false;
+    if (width > kMaxRasterAxis || height > kMaxRasterAxis)
+        return false;
+    return qint64(width) * qint64(height) <= kMaxRasterPixels;
+}
+
+/**
+ * @brief Copy a BGRA MuPDF pixmap row by row into a fresh QImage.
+ *
+ * Fills @p out and throws (via fz_throw) on failure, so it must be called
+ * inside an fz_try block -- it cannot return a value early without skipping the
+ * enclosing fz_always cleanup.
+ */
+void pixmapToQImageInto(fz_context* ctx, fz_pixmap* pix, QImage& out)
+{
+    const int width = fz_pixmap_width(ctx, pix);
+    const int height = fz_pixmap_height(ctx, pix);
+    const int stride = fz_pixmap_stride(ctx, pix);
+    unsigned char* samples = fz_pixmap_samples(ctx, pix);
+
+    // Verify data is valid before copy
+    if (!samples || stride < width * 4) {
+        qWarning() << "MuPdfProvider: Invalid pixmap data - samples:" << (samples ? "valid" : "null")
+                   << "stride:" << stride << "expected:" << (width * 4);
+        fz_throw(ctx, FZ_ERROR_GENERIC, "Invalid pixmap data");
+    }
+
+    // Use Format_ARGB32 which matches BGRA byte order on little-endian (ARM)
+    out = QImage(width, height, QImage::Format_ARGB32);
+    if (out.isNull()) {
+        qWarning() << "MuPdfProvider: Failed to allocate QImage" << width << "x" << height;
+        fz_throw(ctx, FZ_ERROR_GENERIC, "Failed to allocate QImage");
+    }
+
+    // Copy row by row, using QImage's bytesPerLine for destination stride
+    for (int y = 0; y < height; ++y) {
+        unsigned char* dst = out.scanLine(y);
+        const unsigned char* src = samples + y * stride;
+        // Use memmove instead of memcpy for safety with potential overlap/alignment
+        memmove(dst, src, width * 4);
+    }
+}
+
+} // namespace
+
 QImage MuPdfProvider::renderPageToImage(int pageIndex, qreal dpi) const
 {
     // Thread safety: MuPDF context is not thread-safe, so we need to serialize access
@@ -275,6 +336,7 @@ QImage MuPdfProvider::renderPageToImage(int pageIndex, qreal dpi) const
     
     fz_page* page = nullptr;
     fz_pixmap* pix = nullptr;
+    fz_device* dev = nullptr;
     QImage result;
     
     fz_try(m_ctx) {
@@ -299,12 +361,7 @@ QImage MuPdfProvider::renderPageToImage(int pageIndex, qreal dpi) const
         // >120% zoom; we keep full resolution so clarity is preserved.
         const int imgWidth  = bbox.x1 - bbox.x0;
         const int imgHeight = bbox.y1 - bbox.y0;
-        constexpr int    kMaxAxis   = 30000;                  // raster-backend safe
-        constexpr qint64 kMaxPixels = 64LL * 1024 * 1024;     // ~64 MP (~256 MB BGRA)
-        const qint64 totalPixels = qint64(imgWidth) * qint64(imgHeight);
-        if (imgWidth <= 0 || imgHeight <= 0 ||
-            imgWidth > kMaxAxis || imgHeight > kMaxAxis ||
-            totalPixels > kMaxPixels) {
+        if (!rasterWithinBudget(imgWidth, imgHeight)) {
             qWarning() << "MuPdfProvider: Invalid page bounds" << imgWidth << "x" << imgHeight;
             fz_throw(m_ctx, FZ_ERROR_GENERIC, "Invalid page bounds");
         }
@@ -317,44 +374,21 @@ QImage MuPdfProvider::renderPageToImage(int pageIndex, qreal dpi) const
         fz_clear_pixmap_with_value(m_ctx, pix, 255); // White background
         
         // Render page to pixmap
-        fz_device* dev = fz_new_draw_device(m_ctx, ctm, pix);
+        dev = fz_new_draw_device(m_ctx, ctm, pix);
         if (!dev) {
             fz_throw(m_ctx, FZ_ERROR_GENERIC, "Failed to create draw device");
         }
         fz_run_page(m_ctx, page, dev, fz_identity, nullptr);
         fz_close_device(m_ctx, dev);
         fz_drop_device(m_ctx, dev);
+        dev = nullptr;
         
         // Convert to QImage
-        int width = fz_pixmap_width(m_ctx, pix);
-        int height = fz_pixmap_height(m_ctx, pix);
-        int stride = fz_pixmap_stride(m_ctx, pix);
-        unsigned char* samples = fz_pixmap_samples(m_ctx, pix);
-        
-        // Verify data is valid before copy
-        if (!samples || stride < width * 4) {
-            qWarning() << "MuPdfProvider: Invalid pixmap data - samples:" << (samples ? "valid" : "null")
-                       << "stride:" << stride << "expected:" << (width * 4);
-            fz_throw(m_ctx, FZ_ERROR_GENERIC, "Invalid pixmap data");
-        }
-        
-        // Create QImage and copy data
-        // Use Format_ARGB32 which matches BGRA byte order on little-endian (ARM)
-        result = QImage(width, height, QImage::Format_ARGB32);
-        if (result.isNull()) {
-            qWarning() << "MuPdfProvider: Failed to allocate QImage" << width << "x" << height;
-            fz_throw(m_ctx, FZ_ERROR_GENERIC, "Failed to allocate QImage");
-        }
-        
-        // Copy row by row, using QImage's bytesPerLine for destination stride
-        for (int y = 0; y < height; ++y) {
-            unsigned char* dst = result.scanLine(y);
-            const unsigned char* src = samples + y * stride;
-            // Use memmove instead of memcpy for safety with potential overlap/alignment
-            memmove(dst, src, width * 4);
-        }
+        pixmapToQImageInto(m_ctx, pix, result);
     }
     fz_always(m_ctx) {
+        // Drop the device here too: a throw from fz_run_page() used to leak it.
+        if (dev) fz_drop_device(m_ctx, dev);
         if (pix) fz_drop_pixmap(m_ctx, pix);
         if (page) fz_drop_page(m_ctx, page);
     }
@@ -364,6 +398,99 @@ QImage MuPdfProvider::renderPageToImage(int pageIndex, qreal dpi) const
         return QImage();
     }
     
+    return result;
+}
+
+QImage MuPdfProvider::renderPageRegionToImage(int pageIndex, qreal dpi,
+                                              const QRectF& clipRegionPt) const
+{
+    // Same serialisation rules as the whole-page render: one MuPDF context is
+    // not thread-safe, and tiles are rendered on worker threads while the main
+    // thread may render synchronously.
+    QMutexLocker locker(&m_mutex);
+
+    if (!isValid() || pageIndex < 0 || pageIndex >= m_pageCount) {
+        return QImage();
+    }
+    if (clipRegionPt.width() <= 0.0 || clipRegionPt.height() <= 0.0) {
+        return QImage();
+    }
+    if (!m_ctx || !m_doc) {
+        qWarning() << "MuPdfProvider: Context or document is null";
+        return QImage();
+    }
+
+    const float scale = static_cast<float>(dpi / 72.0);
+
+    fz_page* page = nullptr;
+    fz_pixmap* pix = nullptr;
+    fz_device* dev = nullptr;
+    QImage result;
+
+    fz_try(m_ctx) {
+        page = fz_load_page(m_ctx, m_doc, pageIndex);
+        if (!page) {
+            fz_throw(m_ctx, FZ_ERROR_GENERIC, "Failed to load page %d", pageIndex);
+        }
+
+        // fz_bound_page() returns the page rectangle in MuPDF page space, which
+        // is Y-down; our clip is relative to that rectangle's top-left corner.
+        const fz_rect bounds = fz_bound_page(m_ctx, page);
+        fz_rect clip = fz_make_rect(
+            bounds.x0 + static_cast<float>(clipRegionPt.x()),
+            bounds.y0 + static_cast<float>(clipRegionPt.y()),
+            bounds.x0 + static_cast<float>(clipRegionPt.x() + clipRegionPt.width()),
+            bounds.y0 + static_cast<float>(clipRegionPt.y() + clipRegionPt.height()));
+        clip = fz_intersect_rect(clip, bounds);
+        if (fz_is_empty_rect(clip)) {
+            fz_throw(m_ctx, FZ_ERROR_GENERIC, "Clip region is empty or outside the page");
+        }
+
+        // Scale first, then shift the requested region's top-left corner onto
+        // the origin -- so the pixmap only ever holds that region.
+        fz_matrix ctm = fz_scale(scale, scale);
+        ctm.e -= clip.x0 * scale;
+        ctm.f -= clip.y0 * scale;
+
+        const fz_irect bbox = fz_round_rect(fz_transform_rect(clip, ctm));
+        const int imgWidth  = bbox.x1 - bbox.x0;
+        const int imgHeight = bbox.y1 - bbox.y0;
+        // The budget applies to this region instead of the whole page, which is
+        // exactly why the tiled path can render far above the whole-page DPI cap.
+        if (!rasterWithinBudget(imgWidth, imgHeight)) {
+            qWarning() << "MuPdfProvider: Region too large" << imgWidth << "x" << imgHeight
+                       << "at" << dpi << "DPI";
+            fz_throw(m_ctx, FZ_ERROR_GENERIC, "Region exceeds the raster budget");
+        }
+
+        pix = fz_new_pixmap_with_bbox(m_ctx, fz_device_bgr(m_ctx), bbox, nullptr, 1);
+        if (!pix) {
+            fz_throw(m_ctx, FZ_ERROR_GENERIC, "Failed to create pixmap");
+        }
+        fz_clear_pixmap_with_value(m_ctx, pix, 255); // White background
+
+        dev = fz_new_draw_device(m_ctx, ctm, pix);
+        if (!dev) {
+            fz_throw(m_ctx, FZ_ERROR_GENERIC, "Failed to create draw device");
+        }
+        fz_run_page(m_ctx, page, dev, fz_identity, nullptr);
+        fz_close_device(m_ctx, dev);
+        fz_drop_device(m_ctx, dev);
+        dev = nullptr;
+
+        pixmapToQImageInto(m_ctx, pix, result);
+    }
+    fz_always(m_ctx) {
+        if (dev) fz_drop_device(m_ctx, dev);
+        if (pix) fz_drop_pixmap(m_ctx, pix);
+        if (page) fz_drop_page(m_ctx, page);
+    }
+    fz_catch(m_ctx) {
+        qWarning() << "MuPdfProvider: Region render failed for page" << pageIndex
+                   << "at" << dpi << "DPI -" << fz_caught_message(m_ctx);
+        return QImage();
+    }
+
     return result;
 }
 

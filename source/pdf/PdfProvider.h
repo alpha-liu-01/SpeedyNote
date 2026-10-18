@@ -211,6 +211,64 @@ public:
         QImage img = renderPageToImage(pageIndex, dpi);
         return img.isNull() ? QPixmap() : QPixmap::fromImage(img);
     }
+
+    /**
+     * @brief Render a REGION of a page to a QImage (high-DPI tiled rendering).
+     *
+     * Rationale: rasterising a whole page at the DPI the screen needs explodes
+     * for large pages -- a 1024x1366 pt page is ~24 MP (~97 MB) at 300 DPI
+     * already, and more than 64 MP is rejected outright. Capping the whole-page
+     * DPI is what makes zoomed-in PDFs look soft: beyond the cap the screen is
+     * showing a stretched bitmap.
+     *
+     * Instead, callers rasterise only the region the user can see, at the DPI
+     * the screen actually needs. Peak memory then tracks the window size rather
+     * than the page size, so zoom quality no longer has to be capped.
+     *
+     * @param pageIndex 0-based page index.
+     * @param dpi Resolution in dots per inch.
+     * @param clipRegionPt Region to render, in PDF points measured from the
+     *        page's TOP-LEFT corner with Y increasing downwards -- the same
+     *        origin and orientation as the image returned by
+     *        renderPageToImage(), whose pixel (0,0) is that corner. (A backend
+     *        adds the page's own bounds offset internally; it is usually 0,0.)
+     * @return An image covering exactly @p clipRegionPt at @p dpi, i.e.
+     *         clipRegionPt.size() * dpi / 72 pixels (rounded), or a null QImage
+     *         on error. Callers are expected to pass a pixel-aligned region (see
+     *         PdfTileGeometry) so the result lands 1:1 on screen.
+     *
+     * The default implementation renders the whole page and crops: correct, but
+     * as expensive as the non-tiled path and therefore of no benefit. Backends
+     * should override it with a true clipped render.
+     */
+    virtual QImage renderPageRegionToImage(int pageIndex, qreal dpi,
+                                           const QRectF& clipRegionPt) const {
+        if (clipRegionPt.width() <= 0 || clipRegionPt.height() <= 0) {
+            return QImage();
+        }
+        const QImage full = renderPageToImage(pageIndex, dpi);
+        if (full.isNull()) {
+            return QImage();
+        }
+        const QSizeF ps = pageSize(pageIndex);
+        if (ps.width() <= 0 || ps.height() <= 0) {
+            return QImage();
+        }
+        // The full-page image maps the page's bounds onto its pixels, so a
+        // point of the page maps to (image size / page size) pixels.
+        const qreal pxPerPtX = full.width() / ps.width();
+        const qreal pxPerPtY = full.height() / ps.height();
+        const QRect crop = QRectF(clipRegionPt.x() * pxPerPtX,
+                                  clipRegionPt.y() * pxPerPtY,
+                                  clipRegionPt.width() * pxPerPtX,
+                                  clipRegionPt.height() * pxPerPtY)
+                               .toAlignedRect()
+                               .intersected(full.rect());
+        if (crop.isEmpty()) {
+            return QImage();
+        }
+        return full.copy(crop);
+    }
     
     // ===== Image Region Detection (for dark-mode inversion masking) =====
 

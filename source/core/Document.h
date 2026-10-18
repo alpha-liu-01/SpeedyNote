@@ -1118,6 +1118,24 @@ public:
     QImage renderPdfPageToImage(const QString& sourceId, int pageIndex, qreal dpi = 96.0) const;
     
     /**
+     * @brief Render a REGION of a PDF page from a specific source.
+     *
+     * Tiled high-DPI path: instead of rasterising the whole page at a capped
+     * DPI (which is what makes zoomed-in PDFs look soft), callers ask for just
+     * the visible region at the DPI the screen needs. Memory then tracks the
+     * window rather than the page size.
+     *
+     * @param sourceId Source id (empty = primary source).
+     * @param pageIndex 0-based ORIGINAL page index within that source.
+     * @param dpi Rendering DPI (uncapped; the backend only bounds pixels).
+     * @param clipRegionPt Region in PDF points from the page's top-left corner,
+     *        Y down -- see PdfProvider::renderPageRegionToImage().
+     * @return Rendered region, or a null image if the source/page is unavailable.
+     */
+    QImage renderPdfPageRegionToImage(const QString& sourceId, int pageIndex, qreal dpi,
+                                      const QRectF& clipRegionPt) const;
+    
+    /**
      * @brief Render a PDF page to a pixmap.
      * @param pageIndex 0-based page index.
      * @param dpi Rendering DPI (default 96 for screen).

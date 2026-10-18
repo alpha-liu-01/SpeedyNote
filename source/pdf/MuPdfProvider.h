@@ -65,6 +65,8 @@ public:
     
     // ===== Rendering =====
     QImage renderPageToImage(int pageIndex, qreal dpi) const override;
+    QImage renderPageRegionToImage(int pageIndex, qreal dpi,
+                                   const QRectF& clipRegionPt) const override;
     QVector<QRect> imageRegions(int pageIndex, qreal dpi) const override;
     void trimStore() const override;
     
