@@ -10,6 +10,8 @@
 #include "ToolbarButtons.h"
 #include "Toolbar.h"
 #include "widgets/ExpandableToolButton.h"
+#include "widgets/IconPresetButton.h"
+#include "subtoolbars/EraserSubToolbar.h"
 
 /**
  * Unit tests for ToolbarButton classes.
@@ -267,6 +269,54 @@ private slots:
         toolbar.setCurrentTool(ToolType::Pen);
         QVERIFY(pen->isExpanded());
         QCOMPARE(pen->sizeHint().width(), expandedWidth);
+    }
+
+    // The eraser mode picker must be three side-by-side choices, with exactly
+    // one selected - not a single button that cycles through hidden states.
+    void testEraserModeButtons() {
+        EraserSubToolbar bar;
+
+        const QList<IconPresetButton*> buttons = bar.findChildren<IconPresetButton*>();
+        QCOMPARE(buttons.size(), 3);
+
+        auto selectedCount = [&]() {
+            int count = 0;
+            for (IconPresetButton* button : buttons) {
+                if (button->isSelected()) {
+                    ++count;
+                }
+            }
+            return count;
+        };
+
+        // Whole-stroke is the default and must be the visible selection.
+        QCOMPARE(bar.currentModeIndex(), 0);
+        QCOMPARE(selectedCount(), 1);
+        QVERIFY(buttons.at(0)->isSelected());
+
+        // Picking a mode selects it, deselects the rest, and reports the change.
+        for (int mode : {1, 2, 0}) {
+            QSignalSpy spy(&bar, &EraserSubToolbar::eraserModeChanged);
+            QTest::mouseClick(buttons.at(mode), Qt::LeftButton);
+            QCOMPARE(bar.currentModeIndex(), mode);
+            QCOMPARE(spy.count(), 1);
+            QCOMPARE(spy.first().first().toInt(), mode);
+            QCOMPARE(selectedCount(), 1);
+            QVERIFY(buttons.at(mode)->isSelected());
+        }
+
+        // Clicking the already-active mode is a no-op, not a toggle-off.
+        QSignalSpy repeat(&bar, &EraserSubToolbar::eraserModeChanged);
+        QTest::mouseClick(buttons.at(0), Qt::LeftButton);
+        QCOMPARE(repeat.count(), 0);
+        QCOMPARE(bar.currentModeIndex(), 0);
+        QCOMPARE(selectedCount(), 1);
+
+        // External state changes (e.g. shortcut) move the ring with them.
+        bar.setModeState(2);
+        QCOMPARE(bar.currentModeIndex(), 2);
+        QCOMPARE(selectedCount(), 1);
+        QVERIFY(buttons.at(2)->isSelected());
     }
 };
 

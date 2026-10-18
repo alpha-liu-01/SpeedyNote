@@ -4,23 +4,18 @@
 #include <QWidget>
 #include <QIcon>
 #include <QString>
-#include <QStringList>
-#include <QVector>
 
 /**
- * @brief A cycling toggle button that shows a different icon per mode.
- *
- * Each click advances to the next mode, wrapping at the end. It ships with two
- * modes (0 and 1) and the original two-mode API is unchanged; call
- * setModeCount() first if a caller needs more.
- *
+ * @brief A two-state toggle button that shows different icons based on current mode.
+ * 
+ * Click toggles between mode 0 and mode 1.
+ * 
  * Usage examples:
  * - Insert mode: Image (0) ↔ Link (1)
  * - Action mode: Select (0) ↔ Create (1)
- * - Eraser mode: Whole (0) → Partial (1) → Lasso (2)
- *
+ * 
  * Size: 28×28 logical pixels, round
- *
+ * 
  * Supports dark/light mode icon switching via setDarkMode().
  */
 class ModeToggleButton : public QWidget {
@@ -29,26 +24,6 @@ class ModeToggleButton : public QWidget {
 
 public:
     explicit ModeToggleButton(QWidget* parent = nullptr);
-    
-    /**
-     * @brief Set how many modes the button cycles through.
-     * @param count Number of modes (at least 2, at most kMaxModes).
-     *
-     * Resetting the count clamps currentMode and drops any icons / tooltips
-     * that no longer fit. Call this before the per-mode setters.
-     */
-    void setModeCount(int count);
-    
-    /**
-     * @brief Get the number of modes the button cycles through.
-     */
-    int modeCount() const { return static_cast<int>(m_icons.size()); }
-    
-    /**
-     * @brief Set the icons for all modes at once (no dark mode switching).
-     * @param icons One icon per mode, in mode order.
-     */
-    void setModeIcons(const QVector<QIcon>& icons);
     
     /**
      * @brief Set the icons for both modes directly (no dark mode switching).
@@ -63,19 +38,6 @@ public:
      * @param mode1BaseName Base name for mode 1 icon.
      */
     void setModeIconNames(const QString& mode0BaseName, const QString& mode1BaseName);
-    
-    /**
-     * @brief Set the icons for all modes by base name (enables dark mode switching).
-     * @param baseNames One icon base name per mode, in mode order (e.g. "eraser"
-     *        loads eraser.png or eraser_reversed.png).
-     */
-    void setModeIconNames(const QStringList& baseNames);
-    
-    /**
-     * @brief Set the tooltips for all modes.
-     * @param toolTips One tooltip per mode, in mode order.
-     */
-    void setModeToolTips(const QStringList& toolTips);
     
     /**
      * @brief Set dark mode and update icons accordingly.
@@ -150,11 +112,10 @@ private:
     bool m_pressed = false;
     bool m_hovered = false;
     bool m_darkMode = false;
-    QVector<QIcon> m_icons;
-    QVector<QString> m_iconBaseNames;
-    QVector<QString> m_toolTips;
+    QIcon m_icons[2];
+    QString m_iconBaseNames[2];
+    QString m_toolTips[2];
     
-    static constexpr int kMaxModes = 8;
     static constexpr int BUTTON_SIZE = 24;
     static constexpr int BORDER_RADIUS = BUTTON_SIZE / 2;
     static constexpr int ICON_SIZE = 16;

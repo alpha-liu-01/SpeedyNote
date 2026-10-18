@@ -2,17 +2,19 @@
 #define ERASERSUBTOOLBAR_H
 
 #include "SubToolbar.h"
-#include "../widgets/ModeToggleButton.h"
 #include "../../core/DocumentViewport.h"
 #include <QColor>
 #include <QHash>
 
 class ThicknessPresetButton;
+class IconPresetButton;
 
 /**
  * @brief Subtoolbar for the Eraser tool.
  * 
- * Layout:
+ * Layout (mirrors the Pen subtoolbar: a row of round preset buttons):
+ * - 3 mode buttons: whole-stroke / partial / lasso (exactly one selected)
+ * - separator
  * - 3 size preset buttons (5, 15, 40 defaults)
  * 
  * Features:
@@ -98,8 +100,11 @@ private:
     void selectSizePreset(int index);
 
     // Widgets
-    ModeToggleButton* m_modeToggle = nullptr;
+    IconPresetButton* m_modeButtons[3] = {nullptr, nullptr, nullptr};
     ThicknessPresetButton* m_sizeButtons[3] = {nullptr, nullptr, nullptr};
+
+    /// Show the accent ring on the active mode button only.
+    void updateModeButtonSelection();
     
     // Current state
     int m_selectedSizeIndex = 1;  // Default: medium (index 1)

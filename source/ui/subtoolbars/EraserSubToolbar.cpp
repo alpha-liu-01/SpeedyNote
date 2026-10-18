@@ -1,5 +1,6 @@
 #include "EraserSubToolbar.h"
 #include "../widgets/ThicknessPresetButton.h"
+#include "../widgets/IconPresetButton.h"
 
 #include <QSettings>
 
@@ -24,18 +25,24 @@ void EraserSubToolbar::createWidgets()
 {
     bool dark = isDarkMode();
 
-    // Mode toggle (Whole / Partial / Lasso) as the first widget.
-    // The display order matches DocumentViewport::EraserMode, so the toggle's
-    // mode index is used directly as the enum value.
-    m_modeToggle = new ModeToggleButton(this);
-    m_modeToggle->setModeIconNames(QStringList{"eraser", "eraser_partial", "rope"});
-    m_modeToggle->setDarkMode(dark);
-    m_modeToggle->setModeToolTips(QStringList{
-        tr("Whole-stroke eraser (click for partial erase)"),
-        tr("Partial eraser - erase only what you touch (click for lasso)"),
-        tr("Lasso eraser (click to switch to whole-stroke)")
-    });
-    addWidget(m_modeToggle);
+    // Mode buttons first: three side-by-side choices rather than one button
+    // that cycles. A cycle hides what the alternatives are and where you are in
+    // the list, and getting back to a mode meant clicking through the others.
+    // This is the same "row of presets" the Pen subtoolbar uses.
+    static const char* const kModeIcons[NUM_MODES] = {"eraser", "eraser_partial", "rope"};
+    const QString modeTips[NUM_MODES] = {
+        tr("Whole-stroke eraser - touching a stroke removes all of it"),
+        tr("Partial eraser - removes only the part you touch"),
+        tr("Lasso eraser - draw a region to remove everything inside it")
+    };
+
+    for (int i = 0; i < NUM_MODES; ++i) {
+        m_modeButtons[i] = new IconPresetButton(this);
+        m_modeButtons[i]->setDarkMode(dark);
+        m_modeButtons[i]->setIconName(QString::fromLatin1(kModeIcons[i]));
+        m_modeButtons[i]->setToolTip(modeTips[i]);
+        addWidget(m_modeButtons[i]);
+    }
 
     addSeparator();
 
@@ -51,12 +58,18 @@ void EraserSubToolbar::createWidgets()
 
 void EraserSubToolbar::setupConnections()
 {
-    // Mode toggle connection
-    connect(m_modeToggle, &ModeToggleButton::modeChanged, this, [this](int mode) {
-        m_eraserModeIndex = mode;
-        saveToSettings();
-        emit eraserModeChanged(mode);
-    });
+    // Mode buttons: picking one selects it and deselects the rest.
+    for (int i = 0; i < NUM_MODES; ++i) {
+        connect(m_modeButtons[i], &IconPresetButton::clicked, this, [this, i]() {
+            if (m_eraserModeIndex == i) {
+                return;
+            }
+            m_eraserModeIndex = i;
+            updateModeButtonSelection();
+            saveToSettings();
+            emit eraserModeChanged(i);
+        });
+    }
 
     // Size button connections
     for (int i = 0; i < NUM_PRESETS; ++i) {
@@ -106,10 +119,8 @@ void EraserSubToolbar::loadFromSettings()
     // Apply selection
     selectSizePreset(m_selectedSizeIndex);
 
-    // Apply mode toggle state
-    m_modeToggle->blockSignals(true);
-    m_modeToggle->setCurrentMode(m_eraserModeIndex);
-    m_modeToggle->blockSignals(false);
+    // Apply the selected mode
+    updateModeButtonSelection();
 }
 
 void EraserSubToolbar::saveToSettings()
@@ -166,9 +177,16 @@ int EraserSubToolbar::currentModeIndex() const
 void EraserSubToolbar::setModeState(int mode)
 {
     m_eraserModeIndex = qBound(0, mode, NUM_MODES - 1);
-    m_modeToggle->blockSignals(true);
-    m_modeToggle->setCurrentMode(m_eraserModeIndex);
-    m_modeToggle->blockSignals(false);
+    updateModeButtonSelection();
+}
+
+void EraserSubToolbar::updateModeButtonSelection()
+{
+    for (int i = 0; i < NUM_MODES; ++i) {
+        if (m_modeButtons[i]) {
+            m_modeButtons[i]->setSelected(i == m_eraserModeIndex);
+        }
+    }
 }
 
 qreal EraserSubToolbar::currentSize() const
