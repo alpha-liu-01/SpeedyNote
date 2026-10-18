@@ -34,6 +34,7 @@ enum class TouchGestureMode {
 #include "../strokes/VectorStroke.h"
 #include "../pdf/PdfProvider.h"
 #include "../pdf/PdfSearchEngine.h"
+#include <functional>
 #include <QStack>
 #include <QMap>
 #include <QSet>
@@ -407,7 +408,9 @@ public:
      * @brief Eraser mode for the Eraser tool.
      *
      * Normal: point-based stroke eraser (original behavior).
+     * Partial: disc eraser that cuts strokes instead of deleting them.
      * Lasso: draw a freeform region, delete all strokes inside on release.
+     * LassoPartial: the same region, but strokes are cut at its edge.
      */
     enum class EraserMode {
         Normal,       ///< Whole-stroke eraser: touching a stroke deletes all of it
@@ -4861,8 +4864,8 @@ private:
      * @brief Eraser radius in document units - the single source of truth.
      *
      * Hit testing, the on-screen cursor circle and every dirty-rect estimate
-     * derive from this, so what the user aims at is exactly what gets erased.
-     * Dividing by the zoom yields the radius in viewport pixels.
+     * derive from this, so the circle the user aims with is the disc the hit
+     * tests use. Multiplying by the zoom yields the radius in viewport pixels.
      */
     qreal eraserRadiusDocUnits() const { return m_eraserSize; }
     
@@ -4890,6 +4893,14 @@ private:
      */
     void eraseAt(const PointerEvent& pe);
     
+    /**
+     * @brief Viewport-space rect covering a document-space rect, for repaints.
+     * @param docRect Rect in document coordinates (add the page/tile origin first).
+     * @param padPx Extra viewport pixels on every side (antialiasing bleed).
+     * @return Rect in viewport coordinates, clamped to this widget's bounds.
+     */
+    QRectF docRectToViewportRect(const QRectF& docRect, qreal padPx = 0.0) const;
+
     /**
      * @brief Viewport-space rect covering a page stroke, for repaint requests.
      * @param stroke The stroke, in page-local coordinates.
@@ -4958,6 +4969,50 @@ private:
      *         removedSegments means nothing changed.
      */
     UndoAction buildErasePartialUndo(const QVector<EraserLayerSnapshot>& snapshots) const;
+
+    /**
+     * @brief One container (page or edgeless tile) a partial erase can touch.
+     *
+     * Strokes live in container-local coordinates; localToDoc is the offset
+     * that maps them into document space (page position, or tile origin).
+     */
+    struct EraserTarget {
+        Page* container = nullptr;
+        QPointF localToDoc;
+        Document::TileCoord tile = {0, 0};
+        int pageIndex = -1;       ///< -1 for edgeless tiles
+        int layerIndex = 0;       ///< Layer the eraser acts on in this container
+        bool edgeless = false;
+    };
+
+    /**
+     * @brief Containers a partial erase over `docRegion` can reach.
+     * @param docRegion Document-space area the eraser covers.
+     * @param pageIndex Page to erase on; ignored in edgeless mode.
+     *
+     * Paged: that page. Edgeless: every existing tile within the region grown
+     * by EDGELESS_STROKE_MARGIN, since a stroke bulges past its own tile.
+     */
+    QVector<EraserTarget> resolveEraserTargets(const QRectF& docRegion, int pageIndex) const;
+
+    /// Cuts one stroke: returns its fragments and, via the pointer, the
+    /// container-local region whose rendering changed (see VectorStroke).
+    using StrokeCutFn = std::function<QVector<VectorStroke>(const VectorStroke&, QRectF*)>;
+
+    /**
+     * @brief Cut the candidate strokes of one target's layer in place.
+     * @param candidates IDs to try (collected first: cutting mutates the layer).
+     * @param dirtyDocRects Optional out: document-space region of each cut.
+     * @return Number of strokes that were actually cut.
+     */
+    int cutStrokesInTarget(const EraserTarget& target, const QVector<QString>& candidates,
+                           const StrokeCutFn& cut, QVector<QRectF>* dirtyDocRects);
+
+    /**
+     * @brief Bookkeeping after cuts: dirty flags, OCR, and freeing emptied tiles.
+     * @param cutTargets The targets in which at least one stroke was cut.
+     */
+    void finishEraserCuts(const QVector<EraserTarget>& cutTargets);
 
     /**
      * @brief Turn the buffered eraser actions into undo entries.

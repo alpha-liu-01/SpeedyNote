@@ -72,7 +72,8 @@ public:
 
     /**
      * @brief Get the current eraser mode index.
-     * @return The DocumentViewport::EraserMode value (0 = Whole, 1 = Partial, 2 = Lasso).
+     * @return The DocumentViewport::EraserMode value (0 = Whole, 1 = Partial,
+     *         2 = Lasso, 3 = LassoPartial).
      */
     int currentModeIndex() const;
 
@@ -133,9 +134,10 @@ private:
     void selectSizePreset(int index);
 
     /**
-     * @brief Size slot for a mode: 0 = whole-stroke, 1 = partial, -1 = lasso.
+     * @brief Size slot for a mode: 0 = whole-stroke, 1 = partial, -1 = none.
      *
-     * Both lasso modes draw a region and therefore have no size.
+     * Both lasso modes draw a region and therefore have no size (this follows
+     * DocumentViewport::eraserModeUsesDisc()).
      */
     static int sizeSlotForMode(int mode);
 
@@ -156,7 +158,7 @@ private:
     void updateModeButtonSelection();
 
     // Widgets
-    IconPresetButton* m_modeButtons[NUM_MODES] = {nullptr, nullptr, nullptr};
+    IconPresetButton* m_modeButtons[NUM_MODES] = {};
     ThicknessPresetButton* m_sizeButtons[NUM_PRESETS] = {nullptr, nullptr, nullptr};
     QFrame* m_sizeSeparator = nullptr;
     

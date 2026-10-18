@@ -17036,16 +17036,20 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
 
 // ===== Eraser Tool (Task 2.4) =====
 
+QRectF DocumentViewport::docRectToViewportRect(const QRectF& docRect, qreal padPx) const
+{
+    const QRectF vpRect = QRectF(documentToViewport(docRect.topLeft()),
+                                 documentToViewport(docRect.bottomRight())).normalized()
+                              .adjusted(-padPx, -padPx, padPx, padPx);
+    // Intersect with the widget so a huge rect does not make update() walk an
+    // area far larger than anything that can be on screen.
+    return vpRect.intersected(QRectF(rect()));
+}
+
 QRectF DocumentViewport::removedStrokeViewportRect(const VectorStroke& stroke, int pageIndex) const
 {
-    // Strokes are stored page-local; shift to document space, then to viewport.
-    const QPointF origin = pagePosition(pageIndex);
-    const QRectF docRect = stroke.boundingBox.translated(origin);
-    const QRectF vpRect = QRectF(documentToViewport(docRect.topLeft()),
-                                 documentToViewport(docRect.bottomRight())).normalized();
-    // Intersect with the widget so a huge stroke does not make update() walk a
-    // rect far larger than anything that can be on screen.
-    return vpRect.intersected(QRectF(rect()));
+    // Strokes are stored page-local; shift to document space first.
+    return docRectToViewportRect(stroke.boundingBox.translated(pagePosition(pageIndex)));
 }
 
 void DocumentViewport::eraseAt(const PointerEvent& pe)
@@ -17172,16 +17176,15 @@ void DocumentViewport::erasePartialAt(const PointerEvent& pe)
     
     const qreal radius = eraserRadiusDocUnits();
     const bool edgeless = m_document->isEdgeless();
-    
+
+    // Everything below is in document space; each target converts to its own
+    // container-local coordinates.
     int pageIndex = -1;
-    int layerIndex = 0;
-    QPointF docPt;          // Position in the target's own coordinate space
-    QPointF sweepFromDoc;   // Previous sample, same coordinate space
+    QPointF docPt;          // Current sample
+    QPointF sweepFromDoc;   // Previous sample
     bool haveSweep = false;
-    
+
     if (edgeless) {
-        pageIndex = -1;
-        layerIndex = m_edgelessActiveLayerIndex;
         docPt = viewportToDocument(pe.viewportPos);
         if (m_eraserSweepValid) {
             sweepFromDoc = m_eraserSweepFrom;
@@ -17190,80 +17193,41 @@ void DocumentViewport::erasePartialAt(const PointerEvent& pe)
     } else {
         if (!pe.pageHit.valid()) return;
         pageIndex = pe.pageHit.pageIndex;
-        Page* page = m_document->page(pageIndex);
-        if (!page) return;
-        layerIndex = page->activeLayerIndex;
-        docPt = pe.pageHit.pagePoint;
-        if (m_eraserSweepValid) {
-            const QPointF prevViewportDoc = m_eraserSweepFrom;
-            // Same containment guard as whole-stroke mode: a previous sample
-            // taken on another page maps to unrelated page-local coordinates.
-            if (pageAtPoint(prevViewportDoc) == pageIndex) {
-                sweepFromDoc = prevViewportDoc - pagePosition(pageIndex);
-                haveSweep = (sweepFromDoc != docPt);
-            }
+        docPt = pe.pageHit.pagePoint + pagePosition(pageIndex);
+        // Same containment guard as whole-stroke mode: a previous sample taken
+        // on another page maps to unrelated page-local coordinates.
+        if (m_eraserSweepValid && pageAtPoint(m_eraserSweepFrom) == pageIndex) {
+            sweepFromDoc = m_eraserSweepFrom;
+            haveSweep = (sweepFromDoc != docPt);
         }
     }
-    
-    // Resolve the containers this gesture can touch. In edgeless mode a stroke
-    // belongs to a tile, so every tile the capsule reaches has to be visited.
-    struct Target {
-        Page* container = nullptr;
-        QPointF origin;           ///< Tile origin in document coords (0,0 when paged)
-        Document::TileCoord tile = {0, 0};
-    };
-    QVector<Target> targets;
-    
-    if (edgeless) {
-        const int tileSize = Document::EDGELESS_TILE_SIZE;
-        const qreal pad = radius + EDGELESS_STROKE_MARGIN;
-        const QRectF swept = (haveSweep ? QRectF(sweepFromDoc, docPt).normalized()
-                                       : QRectF(docPt, docPt))
-                                 .adjusted(-pad, -pad, pad, pad);
-        const int minTx = static_cast<int>(std::floor(swept.left() / tileSize));
-        const int maxTx = static_cast<int>(std::floor(swept.right() / tileSize));
-        const int minTy = static_cast<int>(std::floor(swept.top() / tileSize));
-        const int maxTy = static_cast<int>(std::floor(swept.bottom() / tileSize));
-        for (int tx = minTx; tx <= maxTx; ++tx) {
-            for (int ty = minTy; ty <= maxTy; ++ty) {
-                Page* tile = m_document->getTile(tx, ty);
-                if (!tile) continue;
-                if (layerIndex >= tile->layerCount()) continue;
-                Target t;
-                t.container = tile;
-                t.tile = {tx, ty};
-                t.origin = QPointF(tx * tileSize, ty * tileSize);
-                targets.append(t);
-            }
-        }
-    } else {
-        Target t;
-        t.container = m_document->page(pageIndex);
-        targets.append(t);
+    if (!haveSweep) {
+        sweepFromDoc = docPt;
     }
-    
-    UndoAction undoAction;
-    undoAction.type = UndoAction::ErasePartial;
-    undoAction.layerIndex = layerIndex;
-    QVector<QRectF> dirtyDocRects;  ///< Per-stroke changed regions, document coords
-    
-    for (const Target& target : targets) {
-        if (!target.container) continue;
-        VectorLayer* layer = target.container->layer(layerIndex);
+
+    const QRectF swept = QRectF(sweepFromDoc, docPt).normalized()
+                             .adjusted(-radius, -radius, radius, radius);
+    const QVector<EraserTarget> targets = resolveEraserTargets(swept, pageIndex);
+
+    QVector<QRectF> dirtyDocRects;      ///< Per-stroke changed regions, document coords
+    QVector<EraserTarget> cutTargets;
+
+    for (const EraserTarget& target : targets) {
+        VectorLayer* layer = target.container->layer(target.layerIndex);
         if (!layer || layer->locked || layer->isEmpty()) continue;
-        
-        const QPointF localPt = docPt - target.origin;
-        const QPointF localFrom = sweepFromDoc - target.origin;
-        
+
+        const QPointF localPt = docPt - target.localToDoc;
+        const QPointF localFrom = sweepFromDoc - target.localToDoc;
+
         // Capture the layer's pre-gesture contents before the first cut. The
         // commit step diffs against this, because successive moves keep cutting
         // the fragments the previous move produced.
         if (m_eraserGestureActive) {
-            snapshotLayerForEraserGesture(target.container, layerIndex, pageIndex,
-                                          target.tile, edgeless);
+            snapshotLayerForEraserGesture(target.container, target.layerIndex,
+                                          target.pageIndex, target.tile, target.edgeless);
         }
 
-        // Collect first: replaceStroke() mutates the list being iterated.
+        // Collect first: cutting mutates the list being iterated.
         QVector<QString> candidates;
         for (const VectorStroke& stroke : layer->strokes()) {
             const bool touched = haveSweep
@@ -17274,74 +17238,29 @@ void DocumentViewport::erasePartialAt(const PointerEvent& pe)
             }
         }
         if (candidates.isEmpty()) continue;
-        
-        for (const QString& id : candidates) {
-            const VectorStroke* original = nullptr;
-            for (const VectorStroke& stroke : layer->strokes()) {
-                if (stroke.id == id) { original = &stroke; break; }
-            }
-            if (!original) continue;
-            
-            QRectF changed;
-            const QVector<VectorStroke> fragments = haveSweep
-                ? original->subtractEraserSweep(localFrom, localPt, radius, &changed)
-                : original->subtractEraserSweep(localPt, localPt, radius, &changed);
-            
-            // Subtracting may leave the stroke untouched (the sweep test is
-            // deliberately generous), in which case keep it and push no undo.
-            if (fragments.size() == 1 && fragments.first().id == original->id) {
-                continue;
-            }
-            
-            UndoAction::StrokeSegment removedSeg;
-            removedSeg.stroke = *original;
-            removedSeg.tileCoord = target.tile;
-            removedSeg.pageIndex = pageIndex;
-            undoAction.removedSegments.append(removedSeg);
-            
-            for (const VectorStroke& fragment : fragments) {
-                UndoAction::StrokeSegment addedSeg;
-                addedSeg.stroke = fragment;
-                addedSeg.tileCoord = target.tile;
-                addedSeg.pageIndex = pageIndex;
-                undoAction.addedSegments.append(addedSeg);
-            }
-            
-            // Only `changed` needs repainting, not the whole stroke: a long
-            // stroke nicked at one end would otherwise repaint its full bounds.
-            if (changed.isNull()) {
-                changed = original->boundingBox;
-            }
-            dirtyDocRects.append(changed.translated(target.origin
-                                                    + (edgeless ? QPointF() : pagePosition(pageIndex))));
-            layer->replaceStroke(id, fragments, changed);
-            if (edgeless) m_document->markTileDirty(target.tile);
+
+        const int cut = cutStrokesInTarget(target, candidates,
+            [&](const VectorStroke& stroke, QRectF* changed) {
+                return stroke.subtractEraserSweep(localFrom, localPt, radius, changed);
+            }, &dirtyDocRects);
+        if (cut > 0) {
+            cutTargets.append(target);
         }
     }
-    
-    if (undoAction.removedSegments.isEmpty()) {
+
+    if (cutTargets.isEmpty()) {
         return;
     }
-    
-    if (edgeless) {
-        for (const UndoAction::StrokeSegment& seg : undoAction.removedSegments) {
-            m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
-        }
-        markOcrDirtyTiles(undoAction);
-    } else {
-        m_document->markPageDirty(pageIndex);
-        m_ocrDirtyPages.insert(pageIndex);
-    }
-    // One entry per pass comes from the snapshot diff in commitEraserGesture();
-    // recording each move here would bury the history (and, because the cuts
-    // chain, restore a half-cut state).
+
+    finishEraserCuts(cutTargets);
+    // One undo entry per pass comes from the snapshot diff in
+    // commitEraserGesture(); recording each move here would bury the history
+    // (and, because the cuts chain, restore a half-cut state).
     m_eraserGesturePartial = true;
     emit strokesChanged();
     emit documentModified();
-    
-    // Repaint the cursor plus every region that changed. removedSegments holds
-    // the originals and addedSegments the fragments, so the union covers both
-    // the ink that disappeared and the ink that moved.
+
+    // Repaint the cursor plus every region that changed.
     const qreal eraserRadius = eraserRadiusViewportPixels() + ERASER_CURSOR_REPAINT_PAD;
     QRegion dirtyRegion(QRectF(pe.viewportPos.x() - eraserRadius,
                               pe.viewportPos.y() - eraserRadius,
@@ -17349,14 +17268,108 @@ void DocumentViewport::erasePartialAt(const PointerEvent& pe)
                         QRegion::Ellipse);
     for (const QRectF& docRect : dirtyDocRects) {
         // Grown by a pixel or two: antialiased edges bleed past the geometry.
-        const QRectF vpRect =
-            QRectF(documentToViewport(docRect.topLeft()),
-                   documentToViewport(docRect.bottomRight())).normalized()
-                .adjusted(-2, -2, 2, 2)
-                .intersected(QRectF(rect()));
-        dirtyRegion += vpRect.toAlignedRect();
+        dirtyRegion += docRectToViewportRect(docRect, 2.0).toAlignedRect();
     }
     update(dirtyRegion);
+}
+
+QVector<DocumentViewport::EraserTarget>
+DocumentViewport::resolveEraserTargets(const QRectF& docRegion, int pageIndex) const
+{
+    QVector<EraserTarget> targets;
+    if (!m_document) {
+        return targets;
+    }
+
+    if (m_document->isEdgeless()) {
+        const QRectF region = docRegion.adjusted(-EDGELESS_STROKE_MARGIN, -EDGELESS_STROKE_MARGIN,
+                                                 EDGELESS_STROKE_MARGIN, EDGELESS_STROKE_MARGIN);
+        for (const Document::TileCoord& coord : m_document->tilesInRect(region)) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (!tile || m_edgelessActiveLayerIndex < 0
+                || m_edgelessActiveLayerIndex >= tile->layerCount()) {
+                continue;
+            }
+            EraserTarget target;
+            target.container = tile;
+            target.tile = coord;
+            target.edgeless = true;
+            target.layerIndex = m_edgelessActiveLayerIndex;
+            target.localToDoc = QPointF(coord.first * Document::EDGELESS_TILE_SIZE,
+                                        coord.second * Document::EDGELESS_TILE_SIZE);
+            targets.append(target);
+        }
+        return targets;
+    }
+
+    Page* page = (pageIndex >= 0 && pageIndex < m_document->pageCount())
+        ? m_document->page(pageIndex) : nullptr;
+    if (!page || page->activeLayerIndex < 0 || page->activeLayerIndex >= page->layerCount()) {
+        return targets;
+    }
+    EraserTarget target;
+    target.container = page;
+    target.pageIndex = pageIndex;
+    target.layerIndex = page->activeLayerIndex;
+    target.localToDoc = pagePosition(pageIndex);
+    targets.append(target);
+    return targets;
+}
+
+int DocumentViewport::cutStrokesInTarget(const EraserTarget& target,
+                                         const QVector<QString>& candidates,
+                                         const StrokeCutFn& cutStroke,
+                                         QVector<QRectF>* dirtyDocRects)
+{
+    VectorLayer* layer = target.container ? target.container->layer(target.layerIndex) : nullptr;
+    if (!layer) {
+        return 0;
+    }
+
+    int cut = 0;
+    for (const QString& id : candidates) {
+        const VectorStroke* original = nullptr;
+        for (const VectorStroke& stroke : layer->strokes()) {
+            if (stroke.id == id) { original = &stroke; break; }
+        }
+        if (!original) continue;
+
+        QRectF changed;
+        const QVector<VectorStroke> fragments = cutStroke(*original, &changed);
+        // The hit test is deliberately generous, so the cut may find nothing to
+        // remove. The unchanged stroke comes back with its own id: keep it.
+        if (fragments.size() == 1 && fragments.first().id == original->id) {
+            continue;
+        }
+
+        // Only `changed` needs repainting, not the whole stroke: a long stroke
+        // nicked at one end would otherwise repaint its full bounds.
+        if (changed.isNull()) {
+            changed = original->boundingBox;
+        }
+        if (dirtyDocRects) {
+            dirtyDocRects->append(changed.translated(target.localToDoc));
+        }
+        // `original` dies with this call; nothing may touch it afterwards.
+        layer->replaceStroke(id, fragments, changed);
+        ++cut;
+    }
+    return cut;
+}
+
+void DocumentViewport::finishEraserCuts(const QVector<EraserTarget>& cutTargets)
+{
+    for (const EraserTarget& target : cutTargets) {
+        if (target.edgeless) {
+            m_document->markTileDirty(target.tile);
+            m_ocrDirtyTiles.insert(target.tile);
+            // The cut may have emptied the tile; this frees it.
+            m_document->removeTileIfEmpty(target.tile.first, target.tile.second);
+        } else {
+            m_document->markPageDirty(target.pageIndex);
+            m_ocrDirtyPages.insert(target.pageIndex);
+        }
+    }
 }
 
 void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
@@ -17454,12 +17467,8 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
         for (const UndoAction::StrokeSegment& seg : undoAction.segments) {
             const QPointF tileOrigin(seg.tileCoord.first * Document::EDGELESS_TILE_SIZE,
                                      seg.tileCoord.second * Document::EDGELESS_TILE_SIZE);
-            const QRectF docRect = seg.stroke.boundingBox.translated(tileOrigin);
-            const QRectF vpRect =
-                QRectF(documentToViewport(docRect.topLeft()),
-                       documentToViewport(docRect.bottomRight())).normalized()
-                    .intersected(QRectF(rect()));
-            dirtyRegion += vpRect.toAlignedRect();
+            dirtyRegion += docRectToViewportRect(
+                seg.stroke.boundingBox.translated(tileOrigin)).toAlignedRect();
         }
         update(dirtyRegion);
     }
@@ -17572,8 +17581,10 @@ void DocumentViewport::drawEraserCursor(QPainter& painter)
     
     // Draw eraser circle at last pointer position (in viewport coordinates)
     // The radius comes from the same helper hit testing uses, so the circle is
-    // exactly the region the eraser removes - it used to be drawn smaller than
-    // the real reach because containsPoint() added the stroke's half-width.
+    // the eraser disc itself. Whole-stroke mode removes a stroke once the disc
+    // touches its drawn outline (the stroke's half-width counts, see
+    // VectorStroke::containsPoint()); partial mode cuts only what the disc
+    // covers of the centre line (see VectorStroke::subtractEraserSweep()).
     painter.setRenderHint(QPainter::Antialiasing, false);
     painter.setPen(QPen(Qt::gray, 1, Qt::DashLine));
     painter.setBrush(Qt::NoBrush);
@@ -17719,66 +17730,30 @@ void DocumentViewport::finalizeEraserLassoPartial()
     // Same region and same hit test as the whole-stroke lasso, but strokes are
     // split along the polygon instead of deleted, so a stroke that merely
     // passes through the region keeps everything outside it.
-    const bool edgeless = m_document->isEdgeless();
-
-    struct Target {
-        Page* container = nullptr;
-        QPointF origin;                        ///< Tile origin (0,0 when paged)
-        Document::TileCoord tile = {0, 0};
-        bool edgeless = false;
-    };
-    QVector<Target> targets;
-
-    if (edgeless) {
-        const QRectF lassoBounds = m_lassoPath.boundingRect();
-        const auto tiles = m_document->tilesInRect(
-            lassoBounds.adjusted(-EDGELESS_STROKE_MARGIN, -EDGELESS_STROKE_MARGIN,
-                                 EDGELESS_STROKE_MARGIN, EDGELESS_STROKE_MARGIN));
-        for (const auto& coord : tiles) {
-            Page* tile = m_document->getTile(coord.first, coord.second);
-            if (!tile) continue;
-            Target target;
-            target.container = tile;
-            target.tile = coord;
-            target.edgeless = true;
-            target.origin = QPointF(coord.first * Document::EDGELESS_TILE_SIZE,
-                                    coord.second * Document::EDGELESS_TILE_SIZE);
-            targets.append(target);
-        }
-    } else {
-        if (m_eraserLassoPageIndex < 0 || m_eraserLassoPageIndex >= m_document->pageCount()) return;
-        Page* page = m_document->page(m_eraserLassoPageIndex);
-        if (!page) return;
-        Target target;
-        target.container = page;
-        targets.append(target);
-    }
+    const QRectF lassoBounds = m_lassoPath.boundingRect();
+    const QVector<EraserTarget> targets = resolveEraserTargets(lassoBounds, m_eraserLassoPageIndex);
 
     // The undo entry is a diff of each touched layer against its state before
     // the cuts (same mechanism as the disc eraser), which also records every
     // stroke's draw-order slot so undo restores the stacking.
     m_eraserGestureSnapshots.clear();
 
-    for (const Target& target : targets) {
-        Page* container = target.container;
-        if (!container) continue;
-
-        const int layerIdx = edgeless ? m_edgelessActiveLayerIndex
-                                      : container->activeLayerIndex;
-        if (layerIdx < 0 || layerIdx >= container->layerCount()) continue;
-        VectorLayer* layer = container->layer(layerIdx);
+    QVector<EraserTarget> cutTargets;
+    for (const EraserTarget& target : targets) {
+        VectorLayer* layer = target.container->layer(target.layerIndex);
         if (!layer || layer->locked || layer->isEmpty()) continue;
 
-        snapshotLayerForEraserGesture(container, layerIdx,
-                                      edgeless ? -1 : m_eraserLassoPageIndex,
-                                      target.tile, edgeless);
+        snapshotLayerForEraserGesture(target.container, target.layerIndex,
+                                      target.pageIndex, target.tile, target.edgeless);
 
         // Strokes live in page/tile-local coordinates, so the polygon has to be
-        // shifted into the same space. A zero origin makes this a no-op.
-        const QPolygonF localPath = m_lassoPath.translated(-target.origin);
+        // shifted into the same space. The lasso path itself is stored in
+        // page-local coordinates when paged, and in document space when edgeless.
+        const QPointF pathToLocal = target.edgeless ? -target.localToDoc : QPointF();
+        const QPolygonF localPath = m_lassoPath.translated(pathToLocal);
         const QRectF localBounds = localPath.boundingRect();
 
-        // Collect first: replaceStroke() mutates the list being iterated.
+        // Collect first: cutting mutates the list being iterated.
         QVector<QString> candidates;
         for (const VectorStroke& stroke : layer->strokes()) {
             if (stroke.boundingBox.intersects(localBounds)) {
@@ -17790,47 +17765,26 @@ void DocumentViewport::finalizeEraserLassoPartial()
         // No cache repair here: replaceStroke() patches the region the cut
         // changed (see VectorStroke::subtractWhere), which covers the ink that
         // disappeared (inside the lasso) and the ink that got reshaped.
-        for (const QString& id : candidates) {
-            const VectorStroke* original = nullptr;
-            for (const VectorStroke& stroke : layer->strokes()) {
-                if (stroke.id == id) { original = &stroke; break; }
-            }
-            if (!original) continue;
-
-            QRectF changed;
-            const QVector<VectorStroke> fragments = original->subtractPolygon(localPath, &changed);
-            // Unchanged (the region only touched its bounding box): keep it.
-            if (fragments.size() == 1 && fragments.first().id == original->id) {
-                continue;
-            }
-
-            layer->replaceStroke(id, fragments, changed);
-        }
-
-        if (edgeless) {
-            m_document->markTileDirty(target.tile);
-        } else {
-            m_document->markPageDirty(m_eraserLassoPageIndex);
+        const int cut = cutStrokesInTarget(target, candidates,
+            [&](const VectorStroke& stroke, QRectF* changed) {
+                return stroke.subtractPolygon(localPath, changed);
+            }, nullptr);
+        if (cut > 0) {
+            cutTargets.append(target);
         }
     }
 
     const QVector<EraserLayerSnapshot> snapshots = std::move(m_eraserGestureSnapshots);
     m_eraserGestureSnapshots.clear();
-    const UndoAction undoAction = buildErasePartialUndo(snapshots);
-    if (undoAction.removedSegments.isEmpty()) {
+    if (cutTargets.isEmpty()) {
         return;
     }
 
-    if (edgeless) {
-        markOcrDirtyTiles(undoAction);
-        for (const auto& seg : undoAction.removedSegments) {
-            m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
-        }
-    } else {
-        m_ocrDirtyPages.insert(m_eraserLassoPageIndex);
+    finishEraserCuts(cutTargets);
+    const UndoAction undoAction = buildErasePartialUndo(snapshots);
+    if (!undoAction.removedSegments.isEmpty()) {
+        pushUndoAction(undoAction);
     }
-
-    pushUndoAction(undoAction);
     emit strokesChanged();
     emit documentModified();
 }

@@ -28,7 +28,7 @@ void EraserSubToolbar::createWidgets()
 {
     bool dark = isDarkMode();
 
-    // Mode buttons first: three side-by-side choices rather than one button
+    // Mode buttons first: four side-by-side choices rather than one button
     // that cycles. A cycle hides what the alternatives are and where you are in
     // the list, and getting back to a mode meant clicking through the others.
     // This is the same "row of presets" the Pen subtoolbar uses.
@@ -104,13 +104,12 @@ void EraserSubToolbar::setupConnections()
 
 int EraserSubToolbar::sizeSlotForMode(int mode)
 {
-    switch (static_cast<DocumentViewport::EraserMode>(mode)) {
-    case DocumentViewport::EraserMode::Normal:       return 0;
-    case DocumentViewport::EraserMode::Partial:      return 1;
-    case DocumentViewport::EraserMode::Lasso:        return -1;
-    case DocumentViewport::EraserMode::LassoPartial: return -1;
+    const auto eraserMode = static_cast<DocumentViewport::EraserMode>(mode);
+    // Only disc-based modes own a size; the viewport decides which those are.
+    if (!DocumentViewport::eraserModeUsesDisc(eraserMode)) {
+        return -1;
     }
-    return 0;
+    return eraserMode == DocumentViewport::EraserMode::Partial ? 1 : 0;
 }
 
 void EraserSubToolbar::flushButtonsToActiveSlot()
