@@ -254,7 +254,10 @@ struct VectorStroke {
             return {*this};
         }
         
-        return subtractWhere([&](const QPointF& p, const QPointF& q) {
+        // Reach is to the centre line, so the capsule's own bounds suffice.
+        const QRectF reach = QRectF(a, b).normalized()
+                                .adjusted(-radius, -radius, radius, radius);
+        return subtractWhere(reach, [&](const QPointF& p, const QPointF& q) {
             return survivingIntervals(p, q, a, b, radius);
         }, changedBounds);
     }
@@ -298,7 +301,7 @@ struct VectorStroke {
             return {*this};
         }
 
-        return subtractWhere([&](const QPointF& p, const QPointF& q) {
+        return subtractWhere(polyBounds, [&](const QPointF& p, const QPointF& q) {
             return survivingIntervalsWhere(p, q, inside);
         }, changedBounds);
     }
@@ -306,6 +309,10 @@ struct VectorStroke {
     /**
      * @brief Rebuild this stroke from the parts an erase predicate left alone.
      *
+     * @param reach Bounds of everything the predicate can erase. A segment
+     *        whose own bounds miss it is kept whole without being sampled,
+     *        which makes cutting a long stroke cost O(points) cheap tests
+     *        rather than O(length) predicate calls.
      * @param intervalsForSegment Maps one source segment to the parameter
      *        ranges [t0,t1] that survive, in increasing order.
      * @param changedBounds Optional out. Set to the region where the rendered
@@ -318,12 +325,8 @@ struct VectorStroke {
      *        stroke was actually cut.
      */
     template <typename IntervalsFn>
-    QVector<VectorStroke> subtractWhere(IntervalsFn intervalsForSegment,
+    QVector<VectorStroke> subtractWhere(const QRectF& reach, IntervalsFn intervalsForSegment,
                                         QRectF* changedBounds = nullptr) const {
-        if (points.size() < 2) {
-            return {*this};
-        }
-
         struct Piece {
             int segment = 0;   ///< Index of the source segment (points[i]..points[i+1])
             qreal t0 = 0.0;    ///< Start parameter along that segment
@@ -335,6 +338,15 @@ struct VectorStroke {
         for (int i = 1; i < points.size(); ++i) {
             const QPointF& p = points[i - 1].pos;
             const QPointF& q = points[i].pos;
+            // Inclusive overlap test: QRectF::intersects() rejects the
+            // zero-height rect of a horizontal segment.
+            const bool segmentMissesReach =
+                qMax(p.x(), q.x()) < reach.left() || qMin(p.x(), q.x()) > reach.right()
+                || qMax(p.y(), q.y()) < reach.top() || qMin(p.y(), q.y()) > reach.bottom();
+            if (segmentMissesReach) {
+                pieces.append(Piece{i - 1, 0.0, 1.0});
+                continue;
+            }
             const auto intervals = intervalsForSegment(p, q);
             for (const auto& iv : intervals) {
                 pieces.append(Piece{i - 1, iv.first, iv.second});
@@ -399,18 +411,24 @@ struct VectorStroke {
             for (const Piece& piece : run) {
                 const StrokePoint& p = points[piece.segment];
                 const StrokePoint& q = points[piece.segment + 1];
-                if (!haveLast || piece.t0 > 1e-9) {
-                    if (!haveLast) {
-                        fragment.points.append(interpolatePoint(p, q, piece.t0));
-                    }
+                // Only the first piece contributes its start; later pieces of a
+                // run begin exactly where the previous one ended.
+                if (!haveLast) {
+                    fragment.points.append(interpolatePoint(p, q, piece.t0));
                 }
                 fragment.points.append(interpolatePoint(p, q, piece.t1));
                 haveLast = true;
             }
             
-            // A single interpolated point would render as a dot, which reads as
-            // debris left behind by the cut. Drop such slivers.
-            if (fragment.points.size() < 2) {
+            // A sliver renders as a round-capped blob as wide as the stroke,
+            // which reads as debris left by the cut. That includes a single
+            // point and a stretch far shorter than any visible mark.
+            qreal fragmentLength = 0.0;
+            for (int k = 1; k < fragment.points.size(); ++k) {
+                fragmentLength += QLineF(fragment.points[k - 1].pos,
+                                         fragment.points[k].pos).length();
+            }
+            if (fragment.points.size() < 2 || fragmentLength < MIN_FRAGMENT_LENGTH) {
                 continue;
             }
             fragment.updateBoundingBox();
@@ -505,13 +523,9 @@ struct VectorStroke {
     }
     
 private:
-    /**
-     * @brief Calculate distance from a point to a line segment.
-     * @param p The point to test.
-     * @param a Start of segment.
-     * @param b End of segment.
-     * @return Distance from p to the nearest point on segment ab.
-     */
+    /// Cuts leaving less path than this (document units) are discarded.
+    static constexpr qreal MIN_FRAGMENT_LENGTH = 0.5;
+
     /**
      * @brief Linear interpolation of position and pressure along a segment.
      */
@@ -610,6 +624,13 @@ private:
         return result;
     }
     
+    /**
+     * @brief Calculate distance from a point to a line segment.
+     * @param p The point to test.
+     * @param a Start of segment.
+     * @param b End of segment.
+     * @return Distance from p to the nearest point on segment ab.
+     */
     static qreal distanceToSegment(const QPointF& p, const QPointF& a, const QPointF& b) {
         QPointF ab = b - a;
         QPointF ap = p - a;

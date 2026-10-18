@@ -1175,7 +1175,8 @@ private:
     
     /**
      * @brief How far the clear-and-redraw patch reaches past the changed
-     *        bounds, in cache pixels (see patchMargin() for the unit conversion).
+     *        bounds: the minimum margin, in logical units and in cache pixels
+     *        (see patchMargin()).
      *
      * A patch clears a rectangle and then redraws the strokes inside a clip of
      * the same rectangle. Without this margin the two edges land on the same
@@ -1192,13 +1193,15 @@ private:
      * @brief The patch margin in logical units for a cache of the given scale.
      * @param pixelsPerUnit Cache pixels per logical unit (zoom * dpr / divisor).
      *
-     * The seam is a cache-pixel effect, so the margin is CACHE_PATCH_MARGIN
-     * cache pixels, converted to logical units. A fixed 2-unit margin was
-     * 2 pixels at 1x, but 0.5 pixel at 0.25x (seam returns on zoomed-out
-     * pages) and 8+ pixels of needless redraw at 4x.
+     * The seam is a cache-pixel effect, so the margin must cover at least
+     * CACHE_PATCH_MARGIN cache pixels. A fixed 2-unit margin is 0.5 pixel at
+     * 0.25x, where the seam comes back on zoomed-out pages, so the margin
+     * grows as the cache gets coarser. It never drops below
+     * CACHE_PATCH_MARGIN units, which is the margin the seam fix was
+     * verified with at high zoom.
      */
     static qreal patchMargin(qreal pixelsPerUnit) {
-        return CACHE_PATCH_MARGIN / qMax(pixelsPerUnit, 0.01);
+        return qMax(CACHE_PATCH_MARGIN, CACHE_PATCH_MARGIN / qMax(pixelsPerUnit, 0.01));
     }
 
     /**

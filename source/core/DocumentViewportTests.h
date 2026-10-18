@@ -6106,6 +6106,84 @@ public:
     }
 
 /**
+     * @brief Cuts land on the right spot, skip far segments, and leave no debris.
+     *
+     * - The cut position is exact (bisection), also for the lasso polygon.
+     * - Segments outside the eraser's reach are skipped without sampling and
+     *   must come through untouched.
+     * - A remnant far shorter than any visible mark is dropped instead of
+     *   being kept as a round-capped blob.
+     */
+    static bool testPartialCutPositionsAndSlivers()
+    {
+        printf("  testPartialCutPositionsAndSlivers... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        // Horizontal line, 5 units between points, y = 50, x = 0..1000.
+        VectorStroke line;
+        line.id = QStringLiteral("line");
+        line.color = Qt::black;
+        line.baseThickness = 6.0;
+        for (int i = 0; i <= 200; ++i) {
+            StrokePoint pt;
+            pt.pos = QPointF(i * 5.0, 50.0);
+            pt.pressure = 1.0;
+            line.points.append(pt);
+        }
+        line.updateBoundingBox();
+
+        // Disc nick: erased x in (493, 507).
+        QVector<VectorStroke> pieces = line.subtractEraserSweep(QPointF(500, 50), QPointF(500, 50), 7.0);
+        if (pieces.size() != 2) return fail("nick should split the line in two");
+        if (qAbs(pieces[0].points.last().pos.x() - 493.0) > 0.01 ||
+            qAbs(pieces[1].points.first().pos.x() - 507.0) > 0.01) {
+            return fail("disc cut is not at the capsule boundary");
+        }
+        // Every segment away from the nick is carried over verbatim.
+        // 99 original points (x = 0..490) plus the cut point, and the mirror.
+        if (pieces[0].points.size() != 100 || pieces[1].points.size() != 100) {
+            return fail("far segments were not kept as-is");
+        }
+
+        // Lasso over x in (493, 507) cuts at the same place.
+        const QPolygonF lasso(QVector<QPointF>{QPointF(493, 0), QPointF(507, 0),
+                                               QPointF(507, 100), QPointF(493, 100)});
+        pieces = line.subtractPolygon(lasso);
+        if (pieces.size() != 2) return fail("lasso should split the line in two");
+        if (qAbs(pieces[0].points.last().pos.x() - 493.0) > 0.01 ||
+            qAbs(pieces[1].points.first().pos.x() - 507.0) > 0.01) {
+            return fail("lasso cut is not at the polygon edge");
+        }
+
+        // Missing entirely: the original comes back with its id.
+        pieces = line.subtractEraserSweep(QPointF(500, 400), QPointF(500, 400), 7.0);
+        if (pieces.size() != 1 || pieces.first().id != line.id) {
+            return fail("a miss must return the stroke unchanged");
+        }
+
+        // Leaves 0.2 units at the start: a sliver, not a stroke.
+        pieces = line.subtractEraserSweep(QPointF(20.2, 50), QPointF(20.2, 50), 20.0);
+        if (pieces.size() != 1) {
+            printf("FAILED: expected only the long remainder, got %lld fragments\n",
+                   static_cast<long long>(pieces.size()));
+            return false;
+        }
+        if (pieces.first().points.first().pos.x() < 40.0) {
+            return fail("the long remainder should start at the cut");
+        }
+
+        // A normal short remainder (3 units) survives.
+        pieces = line.subtractEraserSweep(QPointF(23, 50), QPointF(23, 50), 20.0);
+        if (pieces.size() != 2) return fail("a 3-unit remainder is a real mark and must stay");
+
+        printf("PASSED\n");
+        return true;
+    }
+
+/**
      * @brief One eraser pass must cost one undo entry.
      *
      * The eraser fires on press and on every move, and each call used to push
@@ -6900,6 +6978,7 @@ public:
         runTest(testPartialEraseUndoKeepsDrawOrder, "testPartialEraseUndoKeepsDrawOrder");
         runTest(testEraserUndoAcrossPagesKeepsLayers, "testEraserUndoAcrossPagesKeepsLayers");
         runTest(testPartialEraseDirtyHintIsLocalAndExact, "testPartialEraseDirtyHintIsLocalAndExact");
+        runTest(testPartialCutPositionsAndSlivers, "testPartialCutPositionsAndSlivers");
 
         runTest(testPdfPlaceholderPaper, "testPdfPlaceholderPaper");
         
