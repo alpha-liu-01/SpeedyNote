@@ -5721,6 +5721,757 @@ public:
 
     // ===== Run All Unit Tests =====
     
+/**
+     * @brief A partial repaint after erasing must match a full repaint.
+     *
+     * Reproduces the "thin white square/broken stroke" seen while erasing.
+     * Qt paints only the damaged region, with the painter clipped to it, so any
+     * pixel inside that region which the render tiers do NOT paint ends up
+     * showing paper colour only. Comparing a clipped repaint against a fresh
+     * full repaint catches that, whatever the underlying cause.
+     */
+    static bool testEraserPartialRepaintMatchesFull()
+    {
+        printf("  testEraserPartialRepaintMatchesFull... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        // 1.0 exercises the capped cache; 6.0 exceeds MAX_STROKE_CACHE_DIM and
+        // switches to the viewport-clipped Focus tier.
+        const qreal zooms[] = {1.0, 6.0};
+
+        for (qreal zoom : zooms) {
+            auto doc = Document::createNew("Repaint");
+            Page* page = doc->page(0);
+            if (!page || !page->activeLayer())
+                return fail("page has no active layer");
+
+            auto addLine = [&](QPointF a, QPointF b, const char* id) {
+                VectorStroke stroke;
+                stroke.id = QString::fromLatin1(id);
+                stroke.color = Qt::black;
+                stroke.baseThickness = 8.0;
+                for (int i = 0; i <= 40; ++i) {
+                    StrokePoint pt;
+                    pt.pos = a + (b - a) * (i / 40.0);
+                    pt.pressure = 1.0;
+                    stroke.points.append(pt);
+                }
+                stroke.updateBoundingBox();
+                page->activeLayer()->addStroke(stroke);
+            };
+            addLine(QPointF(40, 200), QPointF(760, 200), "long");
+            addLine(QPointF(80, 120), QPointF(720, 300), "diag");
+
+            DocumentViewport viewport;
+            viewport.resize(900, 700);
+            viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+            viewport.show();
+            QApplication::processEvents();
+            viewport.setDocument(doc.get());
+            viewport.setZoomLevel(zoom);
+            viewport.setLayoutMode(LayoutMode::SingleColumn);
+            QApplication::processEvents();
+
+            // Paint the whole widget into an image, optionally clipped the way
+            // Qt clips a partial update.
+            auto renderInto = [&](QImage* target, const QRegion* clip) {
+                QPainter painter(target);
+                if (clip) {
+                    painter.setClipRegion(*clip);
+                }
+                viewport.render(&painter);
+            };
+            auto renderFull = [&](QImage* target) { renderInto(target, nullptr); };
+
+            // Two identical full renders must agree, or nothing below is sound.
+            QImage probeA(viewport.size(), QImage::Format_ARGB32_Premultiplied);
+            probeA.fill(Qt::transparent);
+            renderFull(&probeA);
+            QImage probeB(viewport.size(), QImage::Format_ARGB32_Premultiplied);
+            probeB.fill(Qt::transparent);
+            renderFull(&probeB);
+            if (probeA != probeB) {
+                printf("FAILED: full renders are not deterministic at zoom %.2f\n", zoom);
+                return false;
+            }
+
+            // The frame the user is looking at before the erase.
+            QImage before = probeB;
+
+            // Erase a bite out of the long stroke.
+            const QRectF page0 = viewport.pageRect(0);
+            const QPointF hit =
+                viewport.documentToViewport(QPointF(page0.center().x(), 200.0));
+            PointerEvent pe;
+            pe.type = PointerEvent::Press;
+            pe.source = PointerEvent::Stylus;
+            pe.viewportPos = hit;
+            pe.button = Qt::LeftButton;
+            pe.pressure = 1.0;
+            pe.pageHit = viewport.viewportToPage(hit);
+
+            viewport.setCurrentTool(ToolType::Eraser);
+            viewport.setEraserMode(DocumentViewport::EraserMode::Partial);
+            viewport.setEraserSize(25.0);
+            viewport.handlePointerEvent(pe);
+
+            // The region the erase asked to repaint: the cursor disc plus the
+            // removed stroke's padded bounds, clipped to the widget (this
+            // mirrors DocumentViewport::removedStrokeViewportRect).
+            const qreal pad = 25.0 * zoom + 40.0;
+            QRegion region(QRectF(hit.x() - pad, hit.y() - pad, pad * 2, pad * 2)
+                               .toAlignedRect());
+            if (const VectorLayer* layer = page->activeLayer()) {
+                const QPointF origin = viewport.pagePosition(0);
+                for (const VectorStroke& stroke : layer->strokes()) {
+                    const QRectF docRect = stroke.boundingBox.translated(origin);
+                    const QRectF vpRect =
+                        QRectF(viewport.documentToViewport(docRect.topLeft()),
+                               viewport.documentToViewport(docRect.bottomRight()))
+                            .normalized()
+                            .intersected(QRectF(viewport.rect()));
+                    region += vpRect.toAlignedRect();
+                }
+            }
+
+            // A clipped repaint on top of the previous frame, which is exactly
+            // what Qt does when only part of the widget is damaged.
+            QImage partial = before;
+            renderInto(&partial, &region);
+
+            // Ground truth: the same layer state painted from scratch.
+            for (int i = 0; i < doc->pageCount(); ++i) {
+                Page* p = doc->page(i);
+                if (!p) continue;
+                for (int l = 0; l < p->layerCount(); ++l) {
+                    if (VectorLayer* layer = p->layer(l)) {
+                        layer->invalidateStrokeCache();
+                    }
+                }
+            }
+            QImage reference(viewport.size(), QImage::Format_ARGB32_Premultiplied);
+            reference.fill(Qt::transparent);
+            renderFull(&reference);
+
+            int diff = 0;
+            QRect diffBounds;
+            for (int y = 0; y < reference.height(); ++y) {
+                for (int x = 0; x < reference.width(); ++x) {
+                    if (partial.pixel(x, y) == reference.pixel(x, y)) {
+                        continue;
+                    }
+                    ++diff;
+                    diffBounds = diffBounds.isNull() ? QRect(x, y, 1, 1)
+                                                     : diffBounds.united(QRect(x, y, 1, 1));
+                }
+            }
+            if (diff > 0) {
+                partial.save(QStringLiteral("/tmp/sn_partial_%1.png").arg(zoom));
+                reference.save(QStringLiteral("/tmp/sn_ref_%1.png").arg(zoom));
+                printf("FAILED: zoom %.2f left %d pixel(s) differing, bbox=(%d,%d %dx%d)\n",
+                       zoom, diff, diffBounds.x(), diffBounds.y(),
+                       diffBounds.width(), diffBounds.height());
+                return false;
+            }
+        }
+
+        printf("PASSED\n");
+        return true;
+    }
+
+/**
+     * @brief Patching the focus cache must not leave a hairline seam.
+     *
+     * Regression for the thin background-coloured line that appeared along the
+     * erased area at high zoom: the focus-cache patch cleared an *antialiased*
+     * rect (bleeding half a pixel outwards) and then redrew clipped to the
+     * exact same edge, so the bleed was left neither cleared nor redrawn.
+     * Comparing a patched cache against a rebuilt one catches any such seam.
+     */
+    static bool testFocusCachePatchHasNoSeam()
+    {
+        printf("  testFocusCachePatchHasNoSeam... ");
+
+        const QSizeF pageSize(1000, 1200);
+        const qreal zoom = 6.0;
+        const qreal dpr = 1.0;
+        // Deliberately fractional: integer edges hide the class of bug below.
+        const QRectF focusRect(200.3, 300.7, 300.5, 300.9);
+
+        auto makeLine = [](QPointF a, QPointF b, const char* id) {
+            VectorStroke stroke;
+            stroke.id = QString::fromLatin1(id);
+            stroke.color = Qt::black;
+            stroke.baseThickness = 8.0;
+            for (int i = 0; i <= 60; ++i) {
+                StrokePoint pt;
+                pt.pos = a + (b - a) * (i / 60.0);
+                pt.pressure = 1.0;
+                stroke.points.append(pt);
+            }
+            stroke.updateBoundingBox();
+            return stroke;
+        };
+
+        VectorLayer layer;
+        const VectorStroke horizontal = makeLine({60, 450}, {940, 450}, "h");
+        layer.addStroke(horizontal);
+        // Crosses the erased stroke's padded bounds, which is where the seam
+        // shows up: ink cut off by the patch boundary.
+        layer.addStroke(makeLine({100, 300}, {900, 600}, "d"));
+
+        auto renderFocus = [&](VectorLayer& target) {
+            QImage image(qRound(pageSize.width() * zoom), qRound(pageSize.height() * zoom),
+                         QImage::Format_ARGB32_Premultiplied);
+            image.fill(Qt::white);
+            QPainter painter(&image);
+            painter.scale(zoom, zoom);
+            target.renderTiered(painter, pageSize, zoom, dpr,
+                                VectorLayer::RenderTier::Focus, focusRect);
+            painter.end();
+            return image;
+        };
+
+        renderFocus(layer);   // Build the focus cache.
+
+        const QVector<VectorStroke> fragments =
+            horizontal.subtractEraserSweep(QPointF(350, 450), QPointF(350, 450), 30.0);
+        if (fragments.size() != 2) {
+            printf("FAILED: expected the stroke to be split in two, got %lld\n",
+                   static_cast<long long>(fragments.size()));
+            return false;
+        }
+        if (!layer.replaceStroke(horizontal.id, fragments)) {
+            printf("FAILED: replaceStroke did not find the stroke\n");
+            return false;
+        }
+        const QImage patched = renderFocus(layer);
+
+        layer.releaseFocusCache();   // Force a clean rebuild of the same state.
+        const QImage rebuilt = renderFocus(layer);
+
+        int diff = 0;
+        QRect diffBounds;
+        for (int y = 0; y < patched.height(); ++y) {
+            for (int x = 0; x < patched.width(); ++x) {
+                if (patched.pixel(x, y) == rebuilt.pixel(x, y)) {
+                    continue;
+                }
+                ++diff;
+                diffBounds = diffBounds.isNull() ? QRect(x, y, 1, 1)
+                                                 : diffBounds.united(QRect(x, y, 1, 1));
+            }
+        }
+        if (diff > 0) {
+            printf("FAILED: patched focus cache differs from a rebuild in %d pixel(s), "
+                   "bbox=(%d,%d %dx%d)\n", diff, diffBounds.x(), diffBounds.y(),
+                   diffBounds.width(), diffBounds.height());
+            return false;
+        }
+
+        printf("PASSED\n");
+        return true;
+    }
+
+/**
+     * @brief One eraser pass must cost one undo entry.
+     *
+     * The eraser fires on press and on every move, and each call used to push
+     * its own action. A single sweep therefore filled MAX_UNDO and pushed real
+     * earlier work out of reach, and undoing the sweep took dozens of Ctrl+Z.
+     *
+     * Partial mode is always one entry per pass (its fragments only make sense
+     * together with the stroke they replaced). Whole-stroke mode follows the
+     * grouping setting, which this also pins down.
+     */
+    static bool testEraserUndoIsOnePerGesture()
+    {
+        printf("  testEraserUndoIsOnePerGesture... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto buildDoc = [](int strokeCount, const char* name) {
+            auto doc = Document::createNew(name);
+            Page* page = doc->page(0);
+            if (!page || !page->activeLayer())
+                return doc;
+            for (int i = 0; i < strokeCount; ++i) {
+                VectorStroke stroke;
+                stroke.id = QStringLiteral("%1-%2").arg(QLatin1String(name)).arg(i);
+                stroke.color = Qt::black;
+                stroke.baseThickness = 8.0;
+                const qreal y = 120.0 + i * 60.0;
+                for (int k = 0; k <= 40; ++k) {
+                    StrokePoint pt;
+                    pt.pos = QPointF(60.0 + k * 18.0, y);
+                    pt.pressure = 1.0;
+                    stroke.points.append(pt);
+                }
+                stroke.updateBoundingBox();
+                page->activeLayer()->addStroke(stroke);
+            }
+            return doc;
+        };
+
+        // ---- Partial eraser: one pass over one stroke, many move events ----
+        {
+            auto doc = buildDoc(1, "PartialUndo");
+            DocumentViewport viewport;
+            viewport.resize(1000, 700);
+            viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+            viewport.show();
+            QApplication::processEvents();
+            viewport.setDocument(doc.get());
+            viewport.setZoomLevel(1.0);
+            viewport.setLayoutMode(LayoutMode::SingleColumn);
+            QApplication::processEvents();
+
+            viewport.setCurrentTool(ToolType::Eraser);
+            viewport.setEraserMode(DocumentViewport::EraserMode::Partial);
+            viewport.setEraserSize(20.0);
+
+            const QRectF page0 = viewport.pageRect(0);
+            auto event = [&](PointerEvent::Type type, qreal pageX) {
+                PointerEvent pe;
+                pe.type = type;
+                pe.source = PointerEvent::Stylus;
+                pe.viewportPos = viewport.documentToViewport(
+                    QPointF(pageX, page0.center().y() - page0.height() / 2 + 120.0));
+                pe.button = Qt::LeftButton;
+                pe.pressure = 1.0;
+                pe.pageHit = viewport.viewportToPage(pe.viewportPos);
+                return pe;
+            };
+
+            viewport.handlePointerEvent(event(PointerEvent::Press, 300.0));
+            for (int i = 1; i <= 12; ++i) {
+                viewport.handlePointerEvent(event(PointerEvent::Move, 300.0 + i * 12.0));
+            }
+            viewport.handlePointerEvent(event(PointerEvent::Release, 300.0 + 12 * 12.0));
+
+            Page* page = doc->page(0);
+            const int afterErase = page->activeLayer()->strokeCount();
+            if (afterErase <= 1) {
+                printf("FAILED: the partial erase did not cut the stroke (layers=%d)\n",
+                       afterErase);
+                return false;
+            }
+
+            viewport.undo();
+            if (page->activeLayer()->strokeCount() != 1) {
+                printf("FAILED: one undo did not restore the original stroke "
+                       "(have %d strokes)\n", page->activeLayer()->strokeCount());
+                return false;
+            }
+            if (viewport.canUndo()) {
+                printf("FAILED: the pass left extra undo entries behind\n");
+                return false;
+            }
+        }
+
+        // ---- Whole-stroke, PerGesture: one sweep over 3 strokes, one undo ----
+        {
+            auto doc = buildDoc(3, "GroupUndo");
+            DocumentViewport::setEraserUndoGrouping(
+                DocumentViewport::EraserUndoGrouping::PerGesture);
+            DocumentViewport viewport;
+            viewport.resize(1000, 700);
+            viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+            viewport.show();
+            QApplication::processEvents();
+            viewport.setDocument(doc.get());
+            viewport.setZoomLevel(1.0);
+            viewport.setLayoutMode(LayoutMode::SingleColumn);
+            QApplication::processEvents();
+
+            viewport.setCurrentTool(ToolType::Eraser);
+            viewport.setEraserMode(DocumentViewport::EraserMode::Normal);
+            viewport.setEraserSize(40.0);
+
+            const QRectF page0 = viewport.pageRect(0);
+            auto event = [&](PointerEvent::Type type, qreal pageY) {
+                PointerEvent pe;
+                pe.type = type;
+                pe.source = PointerEvent::Stylus;
+                pe.viewportPos = viewport.documentToViewport(
+                    QPointF(page0.center().x(), page0.top() + pageY));
+                pe.button = Qt::LeftButton;
+                pe.pressure = 1.0;
+                pe.pageHit = viewport.viewportToPage(pe.viewportPos);
+                return pe;
+            };
+
+            // Sweep down across all three strokes (y = 120, 180, 240).
+            viewport.handlePointerEvent(event(PointerEvent::Press, 110.0));
+            for (int i = 1; i <= 8; ++i) {
+                viewport.handlePointerEvent(event(PointerEvent::Move, 110.0 + i * 20.0));
+            }
+            viewport.handlePointerEvent(event(PointerEvent::Release, 270.0));
+
+            Page* page = doc->page(0);
+            if (page->activeLayer()->strokeCount() != 0) {
+                printf("FAILED: the sweep did not erase all strokes (%d left)\n",
+                       page->activeLayer()->strokeCount());
+                return false;
+            }
+            viewport.undo();
+            if (page->activeLayer()->strokeCount() != 3) {
+                printf("FAILED: PerGesture undo restored %d of 3 strokes\n",
+                       page->activeLayer()->strokeCount());
+                return false;
+            }
+            if (viewport.canUndo()) {
+                printf("FAILED: PerGesture left extra undo entries behind\n");
+                return false;
+            }
+        }
+
+        // ---- Whole-stroke, PerStroke: same sweep, three separate undos ----
+        {
+            auto doc = buildDoc(3, "PerStrokeUndo");
+            DocumentViewport::setEraserUndoGrouping(
+                DocumentViewport::EraserUndoGrouping::PerStroke);
+            DocumentViewport viewport;
+            viewport.resize(1000, 700);
+            viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+            viewport.show();
+            QApplication::processEvents();
+            viewport.setDocument(doc.get());
+            viewport.setZoomLevel(1.0);
+            viewport.setLayoutMode(LayoutMode::SingleColumn);
+            QApplication::processEvents();
+
+            viewport.setCurrentTool(ToolType::Eraser);
+            viewport.setEraserMode(DocumentViewport::EraserMode::Normal);
+            viewport.setEraserSize(40.0);
+
+            const QRectF page0 = viewport.pageRect(0);
+            auto event = [&](PointerEvent::Type type, qreal pageY) {
+                PointerEvent pe;
+                pe.type = type;
+                pe.source = PointerEvent::Stylus;
+                pe.viewportPos = viewport.documentToViewport(
+                    QPointF(page0.center().x(), page0.top() + pageY));
+                pe.button = Qt::LeftButton;
+                pe.pressure = 1.0;
+                pe.pageHit = viewport.viewportToPage(pe.viewportPos);
+                return pe;
+            };
+
+            viewport.handlePointerEvent(event(PointerEvent::Press, 110.0));
+            for (int i = 1; i <= 8; ++i) {
+                viewport.handlePointerEvent(event(PointerEvent::Move, 110.0 + i * 20.0));
+            }
+            viewport.handlePointerEvent(event(PointerEvent::Release, 270.0));
+
+            Page* page = doc->page(0);
+            if (page->activeLayer()->strokeCount() != 0) {
+                printf("FAILED: the sweep did not erase all strokes (%d left)\n",
+                       page->activeLayer()->strokeCount());
+                return false;
+            }
+
+            // Each Ctrl+Z brings back exactly one stroke.
+            for (int restored = 1; restored <= 3; ++restored) {
+                viewport.undo();
+                if (page->activeLayer()->strokeCount() != restored) {
+                    printf("FAILED: PerStroke undo %d restored %d strokes, expected %d\n",
+                           restored, page->activeLayer()->strokeCount(), restored);
+                    return false;
+                }
+            }
+            if (viewport.canUndo()) {
+                printf("FAILED: PerStroke left extra undo entries behind\n");
+                return false;
+            }
+        }
+
+        // Leave the static setting as the rest of the suite expects it.
+        DocumentViewport::setEraserUndoGrouping(
+            DocumentViewport::EraserUndoGrouping::PerGesture);
+
+        printf("PASSED\n");
+        return true;
+    }
+
+/**
+     * @brief Lasso erasing must repaint the whole stroke it removed.
+     *
+     * Regression for stale ink left behind by the lasso eraser: it deletes
+     * strokes whose bounding box extends past the lasso, but repaired the
+     * stroke cache using only the lasso bounds. The ink outside that rect
+     * stayed in the cached pixmap, and since the stroke was already gone from
+     * the layer it could not be erased again - it only vanished once something
+     * unrelated rebuilt the cache (e.g. scrolling).
+     */
+    static bool testLassoEraseRepaintsRemovedStrokes()
+    {
+        printf("  testLassoEraseRepaintsRemovedStrokes... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto doc = Document::createNew("Lasso repaint");
+        Page* page = doc->page(0);
+        if (!page || !page->activeLayer())
+            return fail("page has no active layer");
+
+        auto addLine = [&](QPointF a, QPointF b, const char* id) {
+            VectorStroke stroke;
+            stroke.id = QString::fromLatin1(id);
+            stroke.color = Qt::black;
+            stroke.baseThickness = 8.0;
+            for (int i = 0; i <= 60; ++i) {
+                StrokePoint pt;
+                pt.pos = a + (b - a) * (i / 60.0);
+                pt.pressure = 1.0;
+                stroke.points.append(pt);
+            }
+            stroke.updateBoundingBox();
+            page->activeLayer()->addStroke(stroke);
+        };
+        // Long enough to stick out well beyond the lasso on both sides.
+        addLine(QPointF(40, 200), QPointF(560, 200), "long");
+        addLine(QPointF(40, 120), QPointF(560, 120), "untouched");
+
+        DocumentViewport viewport;
+        viewport.resize(700, 500);
+        viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+        viewport.show();
+        QApplication::processEvents();
+        viewport.setDocument(doc.get());
+        viewport.setZoomLevel(1.0);
+        viewport.setLayoutMode(LayoutMode::SingleColumn);
+        QApplication::processEvents();
+
+        auto renderFull = [&](QImage* target) {
+            QPainter painter(target);
+            viewport.render(&painter);
+        };
+
+        auto event = [&](PointerEvent::Type type, QPointF pagePoint) {
+            PointerEvent pe;
+            pe.type = type;
+            pe.source = PointerEvent::Stylus;
+            pe.viewportPos = viewport.documentToViewport(pagePoint);
+            pe.button = Qt::LeftButton;
+            pe.pressure = 1.0;
+            pe.pageHit = viewport.viewportToPage(pe.viewportPos);
+            return pe;
+        };
+
+        // Warm the caches so the erase patches them instead of rebuilding.
+        QImage warm(viewport.size(), QImage::Format_ARGB32_Premultiplied);
+        warm.fill(Qt::transparent);
+        renderFull(&warm);
+
+        // A small lasso across the middle of the long stroke.
+        viewport.setCurrentTool(ToolType::Eraser);
+        viewport.setEraserMode(DocumentViewport::EraserMode::Lasso);
+        viewport.handlePointerEvent(event(PointerEvent::Press, QPointF(280, 170)));
+        viewport.handlePointerEvent(event(PointerEvent::Move, QPointF(340, 170)));
+        viewport.handlePointerEvent(event(PointerEvent::Move, QPointF(340, 230)));
+        viewport.handlePointerEvent(event(PointerEvent::Move, QPointF(280, 230)));
+        viewport.handlePointerEvent(event(PointerEvent::Release, QPointF(280, 170)));
+
+        // The intersecting stroke is gone; the other one survives.
+        if (page->activeLayer()->strokeCount() != 1) {
+            printf("FAILED: lasso removed %d stroke(s), expected 1 left\n",
+                   1 - page->activeLayer()->strokeCount());
+            return false;
+        }
+
+        QImage afterErase(viewport.size(), QImage::Format_ARGB32_Premultiplied);
+        afterErase.fill(Qt::transparent);
+        renderFull(&afterErase);
+
+        // Same state, caches rebuilt from scratch: this is what the screen
+        // ought to look like.
+        for (int l = 0; l < page->layerCount(); ++l) {
+            if (VectorLayer* layer = page->layer(l)) {
+                layer->invalidateStrokeCache();
+            }
+        }
+        QImage rebuilt(viewport.size(), QImage::Format_ARGB32_Premultiplied);
+        rebuilt.fill(Qt::transparent);
+        renderFull(&rebuilt);
+
+        int diff = 0;
+        QRect diffBounds;
+        for (int y = 0; y < rebuilt.height(); ++y) {
+            for (int x = 0; x < rebuilt.width(); ++x) {
+                if (afterErase.pixel(x, y) == rebuilt.pixel(x, y)) {
+                    continue;
+                }
+                ++diff;
+                diffBounds = diffBounds.isNull() ? QRect(x, y, 1, 1)
+                                                 : diffBounds.united(QRect(x, y, 1, 1));
+            }
+        }
+        if (diff > 0) {
+            afterErase.save(QStringLiteral("/tmp/sn_lasso_cached.png"));
+            rebuilt.save(QStringLiteral("/tmp/sn_lasso_rebuilt.png"));
+            printf("FAILED: %d stale pixel(s) after the lasso erase, bbox=(%d,%d %dx%d)\n",
+                   diff, diffBounds.x(), diffBounds.y(),
+                   diffBounds.width(), diffBounds.height());
+            return false;
+        }
+
+        printf("PASSED\n");
+        return true;
+    }
+
+/**
+     * @brief The partial lasso cuts strokes at the region edge, keeping the rest.
+     *
+     * Unlike the whole-stroke lasso, a stroke crossing the region must survive
+     * outside it - that is the difference between the two lasso erasers.
+     */
+    static bool testPartialLassoEraseKeepsOutside()
+    {
+        printf("  testPartialLassoEraseKeepsOutside... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto doc = Document::createNew("Partial lasso");
+        Page* page = doc->page(0);
+        if (!page || !page->activeLayer())
+            return fail("page has no active layer");
+
+        auto addLine = [&](QPointF a, QPointF b, const char* id) {
+            VectorStroke stroke;
+            stroke.id = QString::fromLatin1(id);
+            stroke.color = Qt::black;
+            stroke.baseThickness = 8.0;
+            for (int i = 0; i <= 60; ++i) {
+                StrokePoint pt;
+                pt.pos = a + (b - a) * (i / 60.0);
+                pt.pressure = 1.0;
+                stroke.points.append(pt);
+            }
+            stroke.updateBoundingBox();
+            page->activeLayer()->addStroke(stroke);
+        };
+        // Crosses the lasso; must end up split in two.
+        addLine(QPointF(40, 200), QPointF(560, 200), "crossing");
+        // Entirely outside; must be untouched.
+        addLine(QPointF(40, 100), QPointF(560, 100), "outside");
+
+        DocumentViewport viewport;
+        viewport.resize(700, 500);
+        viewport.setAttribute(Qt::WA_DontShowOnScreen, true);
+        viewport.show();
+        QApplication::processEvents();
+        viewport.setDocument(doc.get());
+        viewport.setZoomLevel(1.0);
+        viewport.setLayoutMode(LayoutMode::SingleColumn);
+        QApplication::processEvents();
+
+        auto renderFull = [&](QImage* target) {
+            QPainter painter(target);
+            viewport.render(&painter);
+        };
+
+        auto event = [&](PointerEvent::Type type, QPointF pagePoint) {
+            PointerEvent pe;
+            pe.type = type;
+            pe.source = PointerEvent::Stylus;
+            pe.viewportPos = viewport.documentToViewport(pagePoint);
+            pe.button = Qt::LeftButton;
+            pe.pressure = 1.0;
+            pe.pageHit = viewport.viewportToPage(pe.viewportPos);
+            return pe;
+        };
+
+        QImage warm(viewport.size(), QImage::Format_ARGB32_Premultiplied);
+        warm.fill(Qt::transparent);
+        renderFull(&warm);
+
+        viewport.setCurrentTool(ToolType::Eraser);
+        viewport.setEraserMode(DocumentViewport::EraserMode::LassoPartial);
+        viewport.handlePointerEvent(event(PointerEvent::Press, QPointF(280, 170)));
+        viewport.handlePointerEvent(event(PointerEvent::Move, QPointF(340, 170)));
+        viewport.handlePointerEvent(event(PointerEvent::Move, QPointF(340, 230)));
+        viewport.handlePointerEvent(event(PointerEvent::Move, QPointF(280, 230)));
+        viewport.handlePointerEvent(event(PointerEvent::Release, QPointF(280, 170)));
+
+        // The crossing stroke is now two fragments; the outside one is intact.
+        if (page->activeLayer()->strokeCount() != 3) {
+            printf("FAILED: expected 3 strokes after the cut (2 fragments + 1 intact), got %d\n",
+                   page->activeLayer()->strokeCount());
+            return false;
+        }
+
+        // The fragments must stop at the lasso edges, not run through it.
+        bool sawLeft = false;
+        bool sawRight = false;
+        for (const VectorStroke& stroke : page->activeLayer()->strokes()) {
+            const qreal x0 = stroke.points.first().pos.x();
+            const qreal x1 = stroke.points.last().pos.x();
+            const qreal y = stroke.points.first().pos.y();
+            if (qFuzzyCompare(y, 100.0)) {
+                if (!qFuzzyCompare(x0, 40.0) || !qFuzzyCompare(x1, 560.0)) {
+                    printf("FAILED: the untouched stroke was modified\n");
+                    return false;
+                }
+                continue;
+            }
+            if (x1 < 300.0) {
+                sawLeft = true;
+                if (x1 > 288.0) {
+                    printf("FAILED: left fragment runs into the lasso (ends at %.1f)\n", x1);
+                    return false;
+                }
+            } else {
+                sawRight = true;
+                if (x0 < 312.0) {
+                    printf("FAILED: right fragment starts inside the lasso (at %.1f)\n", x0);
+                    return false;
+                }
+            }
+        }
+        if (!sawLeft || !sawRight) {
+            printf("FAILED: the crossing stroke was not split in two\n");
+            return false;
+        }
+
+        // Repaint must match a rebuilt cache (no stale ink inside the region).
+        QImage afterCut(viewport.size(), QImage::Format_ARGB32_Premultiplied);
+        afterCut.fill(Qt::transparent);
+        renderFull(&afterCut);
+        for (int l = 0; l < page->layerCount(); ++l) {
+            if (VectorLayer* layer = page->layer(l)) {
+                layer->invalidateStrokeCache();
+            }
+        }
+        QImage rebuilt(viewport.size(), QImage::Format_ARGB32_Premultiplied);
+        rebuilt.fill(Qt::transparent);
+        renderFull(&rebuilt);
+        if (afterCut != rebuilt) {
+            printf("FAILED: the cut left stale pixels (cache differs from a rebuild)\n");
+            return false;
+        }
+
+        // One undo restores the single original stroke and nothing else.
+        viewport.undo();
+        if (page->activeLayer()->strokeCount() != 2) {
+            printf("FAILED: undo left %d strokes, expected the 2 originals\n",
+                   page->activeLayer()->strokeCount());
+            return false;
+        }
+
+        printf("PASSED\n");
+        return true;
+    }
+
     static bool runUnitTests() {
         printf("\n=== DocumentViewport Unit Tests ===\n\n");
         
@@ -5788,6 +6539,12 @@ public:
         runTest(testPdfWarningState, "testPdfWarningState");
         runTest(testEraserReachMatchesCursor, "testEraserReachMatchesCursor");
         runTest(testEraserSweepClosesSamplingGap, "testEraserSweepClosesSamplingGap");
+        runTest(testEraserPartialRepaintMatchesFull, "testEraserPartialRepaintMatchesFull");
+        runTest(testFocusCachePatchHasNoSeam, "testFocusCachePatchHasNoSeam");
+        runTest(testEraserUndoIsOnePerGesture, "testEraserUndoIsOnePerGesture");
+        runTest(testLassoEraseRepaintsRemovedStrokes, "testLassoEraseRepaintsRemovedStrokes");
+        runTest(testPartialLassoEraseKeepsOutside, "testPartialLassoEraseKeepsOutside");
+
         runTest(testPdfPlaceholderPaper, "testPdfPlaceholderPaper");
         
         printf("\n=== Results: %d passed, %d failed ===\n\n", passed, failed);
