@@ -1281,6 +1281,10 @@ int main(int argc, char* argv[])
             toolSettings.value("tools/wheelScrollSpeed", 40.0).toDouble());
         DocumentViewport::setPanOutsidePagesEnabled(
             toolSettings.value("tools/panOutsidePages", true).toBool());
+        DocumentViewport::setEraserUndoGrouping(
+            toolSettings.value("tools/eraserUndoGrouping", 0).toInt() == 1
+                ? DocumentViewport::EraserUndoGrouping::PerStroke
+                : DocumentViewport::EraserUndoGrouping::PerGesture);
     }
 
     // ========== Initialize System Notifications ==========

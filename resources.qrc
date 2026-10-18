@@ -8,6 +8,8 @@
     <file>resources/icons/marker_reversed.png</file>
     <file>resources/icons/eraser.png</file>
     <file>resources/icons/eraser_reversed.png</file>
+    <file>resources/icons/eraser_partial.png</file>
+    <file>resources/icons/eraser_partial_reversed.png</file>
     <file>resources/icons/save_reversed.png</file>
     <file>resources/icons/save.png</file>
     <file>resources/icons/pdf.png</file>
@@ -78,6 +80,8 @@
     <file>resources/icons/export_reversed.png</file>
     <file>resources/icons/rope.png</file>
     <file>resources/icons/rope_reversed.png</file>
+    <file>resources/icons/rope_partial.png</file>
+    <file>resources/icons/rope_partial_reversed.png</file>
     <file>resources/icons/layer.png</file>
     <file>resources/icons/layer_reversed.png</file>
     <file>resources/icons/hand.png</file>

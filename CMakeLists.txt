@@ -978,6 +978,7 @@ set(UI_SOURCES
     source/ui/widgets/ThicknessPresetButton.cpp
     source/ui/widgets/ToggleButton.cpp
     source/ui/widgets/ModeToggleButton.cpp
+    source/ui/widgets/IconPresetButton.cpp
     source/ui/widgets/LinkSlotButton.cpp
     source/ui/widgets/ActionBarButton.cpp
     source/ui/widgets/PageWheelPicker.cpp
