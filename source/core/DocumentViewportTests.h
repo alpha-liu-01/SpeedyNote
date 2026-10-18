@@ -6901,6 +6901,108 @@ public:
         return true;
     }
 
+    /**
+     * @brief An eraser gesture that loses its release must not eat other undo
+     *        entries, and a pan between samples must not widen the sweep.
+     *
+     * - A pen undo entry recorded while an eraser gesture is open belongs on
+     *   the stack, not in the eraser's buffer.
+     * - Switching tool (or mode) mid-gesture closes the gesture as an undo
+     *   entry instead of leaving it open.
+     * - The sweep origin is kept in document space: scrolling between two
+     *   samples must not turn "where the pen was" into a different spot.
+     */
+    static bool testEraserGestureRobustness()
+    {
+        printf("  testEraserGestureRobustness... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+        DocumentViewport::setEraserUndoGrouping(DocumentViewport::EraserUndoGrouping::PerGesture);
+
+        // ---- Lost release, then a pen stroke ----
+        {
+            auto doc = Document::createNew("Lost release");
+            Page* page = doc->page(0);
+            page->layer(0)->addStroke(eraserTestLine("a", QPointF(100, 300), QPointF(300, 300), 40, 6.0));
+            DocumentViewport vp;
+            eraserTestSetupPaged(vp, doc.get(), 800, 700, 1.0);
+            vp.setCurrentTool(ToolType::Eraser);
+            vp.setEraserMode(DocumentViewport::EraserMode::Normal);
+            vp.setEraserSize(20.0);
+            const QPointF o0 = vp.pagePosition(0);
+
+            vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Press, o0 + QPointF(200, 300)));
+            if (page->layer(0)->strokeCount() != 0) return fail("setup: eraser did not remove the stroke");
+            // The release never comes; a pen stroke is recorded meanwhile.
+            vp.pushPageStrokeUndo(0, UndoAction::AddStroke,
+                                  eraserTestLine("pen", QPointF(10, 10), QPointF(60, 10), 5, 3.0), 0);
+            if (vp.m_undoStack.size() != 1)
+                return fail("the pen stroke's undo entry was swallowed by the eraser buffer");
+            vp.cancelEraserGesture();
+            if (vp.m_undoStack.size() != 2)
+                return fail("cancelling the gesture should commit the erase as its own entry");
+        }
+
+        // ---- Tool switch mid-gesture ----
+        {
+            auto doc = Document::createNew("Tool switch");
+            Page* page = doc->page(0);
+            page->layer(0)->addStroke(eraserTestLine("a", QPointF(100, 300), QPointF(300, 300), 40, 6.0));
+            DocumentViewport vp;
+            eraserTestSetupPaged(vp, doc.get(), 800, 700, 1.0);
+            vp.setCurrentTool(ToolType::Eraser);
+            vp.setEraserMode(DocumentViewport::EraserMode::Partial);
+            vp.setEraserSize(40.0);
+            const QPointF o0 = vp.pagePosition(0);
+
+            vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Press, o0 + QPointF(200, 300)));
+            vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Move, o0 + QPointF(210, 300)));
+            vp.setCurrentTool(ToolType::Pen);
+            if (!vp.canUndo()) return fail("switching tool mid-gesture lost the erase");
+            vp.undo();
+            if (page->layer(0)->strokeCount() != 1) return fail("undo after tool switch did not restore the stroke");
+        }
+
+        // ---- Scroll between two samples ----
+        for (int mode = 0; mode < 2; ++mode) {
+            auto doc = Document::createNew("Scroll between samples");
+            Page* page = doc->page(0);
+            DocumentViewport vp;
+            eraserTestSetupPaged(vp, doc.get(), 800, 700, 1.0);
+            vp.setCurrentTool(ToolType::Eraser);
+            vp.setEraserMode(mode == 0 ? DocumentViewport::EraserMode::Normal
+                                       : DocumentViewport::EraserMode::Partial);
+            vp.setEraserSize(20.0);
+            const QPointF o0 = vp.pagePosition(0);
+            const QPointF a(300, 250);
+
+            const QPointF viewportA = vp.documentToViewport(o0 + a);
+            vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Press, o0 + a));
+            vp.scrollBy(QPointF(0, 120));
+            // Where the old viewport position points after the scroll: a sweep
+            // kept in viewport space would start here.
+            const QPointF stale = vp.viewportToDocument(viewportA) - o0;
+            if (QLineF(stale, a).length() < 80.0 || stale.y() < 20 || stale.y() > 700)
+                return fail("setup: the scroll did not move the old position far enough");
+            page->layer(0)->addStroke(eraserTestLine("bystander", stale - QPointF(0, 15),
+                                                     stale + QPointF(0, 15), 10, 6.0));
+
+            const PointerEvent move = eraserEventAt(vp, PointerEvent::Move, o0 + a + QPointF(8, 0));
+            if (!move.pageHit.valid()) return fail("setup: the move is not over the page");
+            vp.handlePointerEvent(move);
+            vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Release, o0 + a + QPointF(8, 0)));
+
+            if (page->layer(0)->strokeCount() != 1 ||
+                page->layer(0)->strokes().first().id != QLatin1String("bystander"))
+                return fail("a stroke the eraser never crossed was erased after a scroll");
+        }
+
+        printf("PASSED\n");
+        return true;
+    }
+
     static bool runUnitTests() {
         printf("\n=== DocumentViewport Unit Tests ===\n\n");
         
@@ -6979,6 +7081,7 @@ public:
         runTest(testEraserUndoAcrossPagesKeepsLayers, "testEraserUndoAcrossPagesKeepsLayers");
         runTest(testPartialEraseDirtyHintIsLocalAndExact, "testPartialEraseDirtyHintIsLocalAndExact");
         runTest(testPartialCutPositionsAndSlivers, "testPartialCutPositionsAndSlivers");
+        runTest(testEraserGestureRobustness, "testEraserGestureRobustness");
 
         runTest(testPdfPlaceholderPaper, "testPdfPlaceholderPaper");
         

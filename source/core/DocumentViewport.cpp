@@ -411,6 +411,10 @@ void DocumentViewport::setDocument(Document* doc)
     }
     m_backtickHeld = false;  // Reset key tracking for new document
     
+    // An eraser gesture refers to the outgoing document and the undo stacks
+    // are cleared below, so drop it rather than commit into them.
+    cancelEraserGesture(false);
+
     // Cancel live object previews while their source objects are still valid,
     // then clear selection before changing m_document to avoid dangling access.
     cancelObjectPointerGesture();
@@ -898,6 +902,9 @@ void DocumentViewport::setCurrentTool(ToolType tool)
     
     // Cancel any in-progress eraser lasso when switching away from Eraser
     if (previousTool == ToolType::Eraser && tool != ToolType::Eraser) {
+        // Whatever the eraser already removed must still be undoable even if
+        // the release arrives after the tool changed (or never arrives).
+        cancelEraserGesture();
         if (m_isDrawingEraserLasso) {
             m_isDrawingEraserLasso = false;
             m_eraserLassoPageIndex = -1;
@@ -1171,6 +1178,9 @@ void DocumentViewport::cancelObjectPointerGesture()
     m_pointerActive = false;
     m_activeSource = PointerEvent::Unknown;
     m_hardwareEraserActive = false;
+    // This is the shared pointer-gesture reset, and it drops the pointer: an
+    // eraser pass in flight will never see its release.
+    cancelEraserGesture();
     resetObjectPointerGesture();
     update();
 }
@@ -1186,6 +1196,10 @@ void DocumentViewport::setEraserMode(EraserMode mode)
     if (m_eraserMode == mode) {
         return;
     }
+
+    // A disc gesture in flight belongs to the old mode: close it as its own
+    // undo entry (grouping and the partial/whole distinction are per mode).
+    cancelEraserGesture();
 
     // Cancel any in-progress eraser lasso when switching away from Lasso mode
     if (m_isDrawingEraserLasso) {
@@ -6096,7 +6110,7 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
         } else {
             // The disc test starts at the press point; the first move is then
             // swept from here, so no gap opens up between press and move.
-            m_eraserSweepFrom = pe.viewportPos;
+            m_eraserSweepFrom = viewportToDocument(pe.viewportPos);
             m_eraserSweepValid = true;
             // Everything this pass removes becomes a single undo entry when the
             // pen lifts, instead of one entry per pointer event.
@@ -6253,7 +6267,7 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
         
         // Advance the sweep origin: the next move is tested as a capsule from
         // this sample, so fast swipes cannot skip strokes between events.
-        m_eraserSweepFrom = pe.viewportPos;
+        m_eraserSweepFrom = viewportToDocument(pe.viewportPos);
         m_eraserSweepValid = true;
         return;
     }
@@ -17070,7 +17084,7 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
         // Only sweep within one page: a previous sample taken over a different
         // page (or over empty space) maps to unrelated page-local coordinates,
         // and a capsule to it would erase strokes the eraser never crossed.
-        const QPointF prevViewportDoc = viewportToDocument(m_eraserSweepFrom);
+        const QPointF prevViewportDoc = m_eraserSweepFrom;
         const QPointF prevDoc = prevViewportDoc - pagePosition(pe.pageHit.pageIndex);
         const bool samePage = pageAtPoint(prevViewportDoc) == pe.pageHit.pageIndex;
         if (samePage && prevDoc != pe.pageHit.pagePoint) {
@@ -17112,10 +17126,8 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
     }
     
     // Push undo action
-    if (removedStrokes.size() == 1) {
-        pushPageStrokeUndo(pe.pageHit.pageIndex, UndoAction::RemoveStroke, removedStrokes[0], page->activeLayerIndex);
-    } else if (removedStrokes.size() > 1) {
-        pushPageStrokesUndo(pe.pageHit.pageIndex, UndoAction::RemoveMultiple, removedStrokes, page->activeLayerIndex);
+    if (!removedStrokes.isEmpty()) {
+        recordEraserRemoval(pe.pageHit.pageIndex, removedStrokes, page->activeLayerIndex);
     }
     
     emit documentModified();
@@ -17172,7 +17184,7 @@ void DocumentViewport::erasePartialAt(const PointerEvent& pe)
         layerIndex = m_edgelessActiveLayerIndex;
         docPt = viewportToDocument(pe.viewportPos);
         if (m_eraserSweepValid) {
-            sweepFromDoc = viewportToDocument(m_eraserSweepFrom);
+            sweepFromDoc = m_eraserSweepFrom;
             haveSweep = (sweepFromDoc != docPt);
         }
     } else {
@@ -17183,7 +17195,7 @@ void DocumentViewport::erasePartialAt(const PointerEvent& pe)
         layerIndex = page->activeLayerIndex;
         docPt = pe.pageHit.pagePoint;
         if (m_eraserSweepValid) {
-            const QPointF prevViewportDoc = viewportToDocument(m_eraserSweepFrom);
+            const QPointF prevViewportDoc = m_eraserSweepFrom;
             // Same containment guard as whole-stroke mode: a previous sample
             // taken on another page maps to unrelated page-local coordinates.
             if (pageAtPoint(prevViewportDoc) == pageIndex) {
@@ -17365,8 +17377,8 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
     // The swept capsule spans the previous sample to this one; use its extent
     // (not just the current disc) when deciding which tiles to scan.
     const bool haveSweep = m_eraserSweepValid
-        && viewportToDocument(m_eraserSweepFrom) != docPt;
-    const QPointF sweepFrom = haveSweep ? viewportToDocument(m_eraserSweepFrom) : docPt;
+        && m_eraserSweepFrom != docPt;
+    const QPointF sweepFrom = haveSweep ? m_eraserSweepFrom : docPt;
     const qreal radius = eraserRadiusDocUnits();
     const QRectF sweptBounds = QRectF(sweepFrom, docPt).normalized()
                                    .adjusted(-radius, -radius, radius, radius);
@@ -17427,7 +17439,7 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
 
     if (!undoAction.segments.isEmpty()) {
         markOcrDirtyTiles(undoAction);
-        recordUndoAction(undoAction);
+        recordEraserUndo(undoAction);
         emit strokesChanged();
         emit documentModified();
         
@@ -17693,7 +17705,9 @@ void DocumentViewport::finalizeEraserLasso()
 
     if (!undoAction.segments.isEmpty()) {
         markOcrDirtyTiles(undoAction);
-        recordUndoAction(undoAction);
+        // A lasso is one entry per release by construction; it is not part of
+        // the pointer-move eraser buffer.
+        pushUndoAction(undoAction);
         emit strokesChanged();
         emit documentModified();
     }
@@ -17816,7 +17830,7 @@ void DocumentViewport::finalizeEraserLassoPartial()
         m_ocrDirtyPages.insert(m_eraserLassoPageIndex);
     }
 
-    recordUndoAction(undoAction);
+    pushUndoAction(undoAction);
     emit strokesChanged();
     emit documentModified();
 }
@@ -17826,13 +17840,46 @@ void DocumentViewport::finalizeEraserLassoPartial()
 DocumentViewport::EraserUndoGrouping DocumentViewport::s_eraserUndoGrouping =
     DocumentViewport::EraserUndoGrouping::PerGesture;
 
-void DocumentViewport::recordUndoAction(const UndoAction& action)
+void DocumentViewport::recordEraserUndo(const UndoAction& action)
 {
     if (m_eraserGestureActive) {
         m_eraserGestureActions.append(action);
         return;
     }
     pushUndoAction(action);
+}
+
+void DocumentViewport::recordEraserRemoval(int pageIndex, const QVector<VectorStroke>& strokes,
+                                           int layerIndex)
+{
+    UndoAction action;
+    action.type = strokes.size() == 1 ? UndoAction::RemoveStroke : UndoAction::RemoveMultiple;
+    action.layerIndex = layerIndex;
+    for (const VectorStroke& stroke : strokes) {
+        UndoAction::StrokeSegment seg;
+        seg.pageIndex = pageIndex;
+        seg.stroke = stroke;
+        action.segments.append(seg);
+    }
+    recordEraserUndo(action);
+    if (!m_document->isEdgeless()) {
+        emit pageModified(pageIndex);
+        m_ocrDirtyPages.insert(pageIndex);
+    }
+    emit strokesChanged();
+}
+
+void DocumentViewport::cancelEraserGesture(bool commit)
+{
+    m_eraserSweepValid = false;
+    if (commit) {
+        commitEraserGesture();
+        return;
+    }
+    m_eraserGestureActive = false;
+    m_eraserGestureActions.clear();
+    m_eraserGestureSnapshots.clear();
+    m_eraserGesturePartial = false;
 }
 
 void DocumentViewport::beginEraserGesture()
@@ -18045,7 +18092,7 @@ void DocumentViewport::pushPageStrokeUndo(int pageIndex, UndoAction::Type type, 
     seg.pageIndex = pageIndex;
     seg.stroke = stroke;
     action.segments.append(seg);
-    recordUndoAction(action);
+    pushUndoAction(action);
     if (!m_document->isEdgeless()) {
         emit pageModified(pageIndex);
         m_ocrDirtyPages.insert(pageIndex);
@@ -18064,7 +18111,7 @@ void DocumentViewport::pushPageStrokesUndo(int pageIndex, UndoAction::Type type,
         seg.stroke = s;
         action.segments.append(seg);
     }
-    recordUndoAction(action);
+    pushUndoAction(action);
     if (!m_document->isEdgeless()) {
         emit pageModified(pageIndex);
         m_ocrDirtyPages.insert(pageIndex);

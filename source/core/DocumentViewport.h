@@ -3782,7 +3782,10 @@ private:
     PointerEvent::Source m_activeSource = PointerEvent::Unknown;  ///< Active input source
     GestureState m_gestureState;        ///< Multi-touch gesture state
     QPointF m_lastPointerPos;           ///< Last pointer position (for delta calculation)
-    QPointF m_eraserSweepFrom;          ///< Previous eraser position, start of the swept-disc test
+    /// Previous eraser position, start of the swept-disc test. Document
+    /// coordinates, not viewport: a pan, scroll or zoom between two samples
+    /// must not turn them into a path across unrelated content.
+    QPointF m_eraserSweepFrom;
     bool m_eraserSweepValid = false;    ///< True when m_eraserSweepFrom holds a usable start point
     bool m_hardwareEraserActive = false; ///< True when stylus eraser end is being used
     bool m_pointerInViewport = false;   ///< True when pointer is hovering inside viewport (for eraser cursor)
@@ -4896,20 +4899,44 @@ private:
     QRectF removedStrokeViewportRect(const VectorStroke& stroke, int pageIndex) const;
     
     /**
-     * @brief Record an undo action, folded into the current eraser gesture.
+     * @brief Record an eraser undo action, folded into the current gesture.
      *
      * The eraser fires on press and on every move, so pushing each event
      * straight onto the undo stack burned the whole history on one pass: a
      * single sweep could fill MAX_UNDO and push genuinely earlier work out of
      * reach. While a gesture is open the actions are buffered and become one
      * entry when the pen lifts (see commitEraserGesture()).
+     *
+     * Eraser code only. Anything else (pen strokes, straight lines, ...) must
+     * use pushUndoAction(): a pen stroke that lands while a lost release left
+     * a gesture open would otherwise be swallowed by the eraser buffer.
      */
-    void recordUndoAction(const UndoAction& action);
+    void recordEraserUndo(const UndoAction& action);
+
+    /**
+     * @brief Record the removal of whole strokes by the eraser.
+     *
+     * Buffers the undo entry via recordEraserUndo() and raises the per-event
+     * page/OCR/strokesChanged notifications, like pushPageStrokeUndo() does for
+     * other tools.
+     */
+    void recordEraserRemoval(int pageIndex, const QVector<VectorStroke>& strokes, int layerIndex);
 
     /**
      * @brief Start buffering eraser undo actions for one press-to-release.
      */
     void beginEraserGesture();
+
+    /**
+     * @brief End an eraser gesture that will not get its release event.
+     * @param commit True to keep what was erased as an undo entry (tool or
+     *        mode switch, interrupted gesture); false to drop the buffers
+     *        (the document is being replaced and the undo stacks cleared).
+     *
+     * Also forgets the sweep origin, so the next press never bridges to it.
+     * Safe to call when no gesture is open.
+     */
+    void cancelEraserGesture(bool commit = true);
 
     /**
      * @brief Remember a layer's strokes before this gesture first cuts into it.
