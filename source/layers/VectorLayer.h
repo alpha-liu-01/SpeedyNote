@@ -756,16 +756,19 @@ public:
         // to (zoom * dpr) by rebuildFocusCache, so the focus painter operates
         // in page/tile-local logical coordinates after a single
         // translate(-m_focusRect.topLeft()).
-        const QRectF clearRect = m_focusRect.intersected(removedBounds);
+        //
+        // The rect is grown by CACHE_PATCH_MARGIN: clearing an antialiased
+        // rect bleeds past its edge, and the redraw clip stops at the edge, so
+        // an exact-size patch leaves a background-coloured hairline at the
+        // boundary. The margin is intentionally not intersected with
+        // m_focusRect - the pixmap clips the overhang for us, and clipping
+        // here would reintroduce the seam at the focus rect's own edge.
+        const QRectF patchRect =
+            removedBounds.adjusted(-CACHE_PATCH_MARGIN, -CACHE_PATCH_MARGIN,
+                                   CACHE_PATCH_MARGIN, CACHE_PATCH_MARGIN);
         QPainter p(&m_focusCache);
         beginFocusPainter(p);  // antialias + page-local coords
-        p.setCompositionMode(QPainter::CompositionMode_Clear);
-        p.fillRect(clearRect, Qt::transparent);
-        p.setCompositionMode(QPainter::CompositionMode_SourceOver);
-        p.setClipRect(clearRect);
-        for (const auto& s : m_strokes) {
-            if (s.boundingBox.intersects(clearRect)) renderStroke(p, s);
-        }
+        clearAndRepaintPatch(p, patchRect);
     }
     
     /**
@@ -1136,6 +1139,42 @@ private:
     }
     
     /**
+     * @brief How far the clear-and-redraw patch reaches past the changed bounds.
+     *
+     * A patch clears a rectangle and then redraws the strokes inside a clip of
+     * the same rectangle. Without this margin the two edges land on the same
+     * fractional device pixel: the clear (antialiased in the focus path) bleeds
+     * half a pixel outwards while the clip cuts the redraw at the exact edge,
+     * leaving a 1-pixel line of background behind - the "thin white ring" seen
+     * around the erased area. Growing both the clear and the clip keeps them
+     * consistent: at the new boundary the cleared+redrawn pixels equal the
+     * untouched originals, so the seam has nothing to show.
+     */
+    static constexpr qreal CACHE_PATCH_MARGIN = 2.0;
+
+    /**
+     * @brief Clear `rect` and redraw every stroke crossing it, without AA bleed.
+     *
+     * Shared by the capped and focus caches so the two cannot drift apart.
+     */
+    void clearAndRepaintPatch(QPainter& p, const QRectF& rect) const {
+        // Clearing must be aliased: an antialiased fillRect covers partial
+        // pixels just outside `rect`, and those are never redrawn because the
+        // clip below stops at the edge.
+        const bool hadAA = p.testRenderHint(QPainter::Antialiasing);
+        p.setRenderHint(QPainter::Antialiasing, false);
+        p.setCompositionMode(QPainter::CompositionMode_Clear);
+        p.fillRect(rect, Qt::transparent);
+        p.setRenderHint(QPainter::Antialiasing, hadAA);
+
+        p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+        p.setClipRect(rect);
+        for (const auto& s : m_strokes) {
+            if (s.boundingBox.intersects(rect)) renderStroke(p, s);
+        }
+    }
+
+    /**
      * @brief Render pending strokes incrementally to the existing cache.
      * 
      * Called by ensureStrokeCacheValid() when the cache is valid but has
@@ -1183,22 +1222,15 @@ private:
         
         QPainter cachePainter(&m_strokeCache);
         applyCachePainterScale(cachePainter, m_cacheZoom * m_cacheDpr / m_cacheDivisor);
-        
-        // Step 1: Clear the removed stroke's bounding box
-        cachePainter.setCompositionMode(QPainter::CompositionMode_Clear);
-        cachePainter.fillRect(removedBounds, Qt::transparent);
-        
-        // Step 2: Re-render overlapping strokes within the cleared region.
-        // Clip to the cleared rect so we don't double-paint outside it.
-        cachePainter.setCompositionMode(QPainter::CompositionMode_SourceOver);
-        cachePainter.setClipRect(removedBounds);
+
+        // Grow the patched rect for the same reason as the focus cache: a
+        // clear that lands on a fractional device pixel and a redraw clipped to
+        // the same edge cannot line up, and the mismatch shows as a hairline.
         cachePainter.setRenderHint(QPainter::Antialiasing, true);
-        
-        for (const auto& stroke : m_strokes) {
-            if (stroke.boundingBox.intersects(removedBounds)) {
-                renderStroke(cachePainter, stroke);
-            }
-        }
+        const QRectF patchRect =
+            removedBounds.adjusted(-CACHE_PATCH_MARGIN, -CACHE_PATCH_MARGIN,
+                                   CACHE_PATCH_MARGIN, CACHE_PATCH_MARGIN);
+        clearAndRepaintPatch(cachePainter, patchRect);
     }
     
     /**
