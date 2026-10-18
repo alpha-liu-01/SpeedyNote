@@ -6098,6 +6098,9 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
             // swept from here, so no gap opens up between press and move.
             m_eraserSweepFrom = pe.viewportPos;
             m_eraserSweepValid = true;
+            // Everything this pass removes becomes a single undo entry when the
+            // pen lifts, instead of one entry per pointer event.
+            beginEraserGesture();
             eraseAt(pe);
             const qreal eraserRadius = eraserRadiusViewportPixels() + ERASER_CURSOR_REPAINT_PAD;
             QRectF cursorRectF(pe.viewportPos.x() - eraserRadius, pe.viewportPos.y() - eraserRadius,
@@ -6309,6 +6312,10 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
 void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
 {
     if (!m_document) return;
+    
+    // Close the eraser's undo batch before any branch can return: the release
+    // itself never erases, so this is the end of the pass.
+    commitEraserGesture();
     
     // Off-page pan: either finish the pan, or treat a press that never moved as
     // the tap that used to clear the selection.
@@ -17223,6 +17230,14 @@ void DocumentViewport::erasePartialAt(const PointerEvent& pe)
         const QPointF localPt = docPt - target.origin;
         const QPointF localFrom = sweepFromDoc - target.origin;
         
+        // Capture the layer's pre-gesture contents before the first cut. The
+        // commit step diffs against this, because successive moves keep cutting
+        // the fragments the previous move produced.
+        if (m_eraserGestureActive) {
+            snapshotLayerForEraserGesture(target.container, layerIndex, pageIndex,
+                                          target.tile, edgeless);
+        }
+
         // Collect first: replaceStroke() mutates the list being iterated.
         QVector<QString> candidates;
         for (const VectorStroke& stroke : layer->strokes()) {
@@ -17284,7 +17299,14 @@ void DocumentViewport::erasePartialAt(const PointerEvent& pe)
         m_document->markPageDirty(pageIndex);
         m_ocrDirtyPages.insert(pageIndex);
     }
-    pushUndoAction(undoAction);
+    if (m_eraserGestureActive) {
+        // One entry per pass comes from the snapshot diff in
+        // commitEraserGesture(); recording each move here would bury the
+        // history (and, because the cuts chain, restore a half-cut state).
+        m_eraserGesturePartial = true;
+    } else {
+        recordUndoAction(undoAction);
+    }
     emit strokesChanged();
     emit documentModified();
     
@@ -17391,7 +17413,7 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
 
     if (!undoAction.segments.isEmpty()) {
         markOcrDirtyTiles(undoAction);
-        pushUndoAction(undoAction);
+        recordUndoAction(undoAction);
         emit strokesChanged();
         emit documentModified();
         
@@ -17637,13 +17659,165 @@ void DocumentViewport::finalizeEraserLasso()
 
     if (!undoAction.segments.isEmpty()) {
         markOcrDirtyTiles(undoAction);
-        pushUndoAction(undoAction);
+        recordUndoAction(undoAction);
         emit strokesChanged();
         emit documentModified();
     }
 }
 
 // ===== Undo/Redo System (unified) =====
+
+DocumentViewport::EraserUndoGrouping DocumentViewport::s_eraserUndoGrouping =
+    DocumentViewport::EraserUndoGrouping::PerGesture;
+
+void DocumentViewport::recordUndoAction(const UndoAction& action)
+{
+    if (m_eraserGestureActive) {
+        m_eraserGestureActions.append(action);
+        return;
+    }
+    pushUndoAction(action);
+}
+
+void DocumentViewport::beginEraserGesture()
+{
+    // A new press always starts a fresh entry: a gesture left open by a lost
+    // release event must not swallow the next one.
+    m_eraserGestureActions.clear();
+    m_eraserGestureSnapshots.clear();
+    m_eraserGesturePartial = false;
+    m_eraserGestureActive = true;
+}
+
+void DocumentViewport::snapshotLayerForEraserGesture(Page* container, int layerIndex,
+                                                     int pageIndex, Document::TileCoord tile,
+                                                     bool edgeless)
+{
+    if (!container) {
+        return;
+    }
+    for (const EraserLayerSnapshot& snapshot : m_eraserGestureSnapshots) {
+        if (snapshot.container == container && snapshot.layerIndex == layerIndex) {
+            return;   // Already captured before the first cut into this layer.
+        }
+    }
+
+    VectorLayer* layer = container->layer(layerIndex);
+    if (!layer) {
+        return;
+    }
+
+    EraserLayerSnapshot snapshot;
+    snapshot.container = container;
+    snapshot.layerIndex = layerIndex;
+    snapshot.pageIndex = pageIndex;
+    snapshot.tile = tile;
+    snapshot.edgeless = edgeless;
+    // QVector is implicitly shared: this costs nothing until the layer is
+    // modified, which happens immediately, so it is one copy per pass.
+    snapshot.before = layer->strokes();
+    m_eraserGestureSnapshots.append(snapshot);
+}
+
+void DocumentViewport::commitEraserGesture()
+{
+    m_eraserGestureActive = false;
+
+    const QVector<UndoAction> actions = std::move(m_eraserGestureActions);
+    m_eraserGestureActions.clear();
+
+    const QVector<EraserLayerSnapshot> snapshots = std::move(m_eraserGestureSnapshots);
+    m_eraserGestureSnapshots.clear();
+    const bool partial = m_eraserGesturePartial;
+    m_eraserGesturePartial = false;
+
+    if (partial) {
+        // A cut replaces one stroke with several fragments, and further moves
+        // cut those fragments again, so the per-event snapshots describe
+        // intermediate states that no longer exist. Diff the layer against the
+        // state captured before the first cut instead: undo then needs only the
+        // strokes that disappeared and the ones that are there now.
+        UndoAction merged;
+        merged.type = UndoAction::ErasePartial;
+
+        for (const EraserLayerSnapshot& snapshot : snapshots) {
+            Page* container = snapshot.container;
+            VectorLayer* layer = container ? container->layer(snapshot.layerIndex) : nullptr;
+            if (!layer) {
+                continue;
+            }
+            merged.layerIndex = snapshot.layerIndex;
+
+            const QVector<VectorStroke>& after = layer->strokes();
+            QSet<QString> beforeIds;
+            beforeIds.reserve(snapshot.before.size());
+            for (const VectorStroke& stroke : snapshot.before) {
+                beforeIds.insert(stroke.id);
+            }
+            QSet<QString> afterIds;
+            afterIds.reserve(after.size());
+            for (const VectorStroke& stroke : after) {
+                afterIds.insert(stroke.id);
+            }
+
+            for (const VectorStroke& stroke : snapshot.before) {
+                if (afterIds.contains(stroke.id)) {
+                    continue;
+                }
+                UndoAction::StrokeSegment seg;
+                seg.stroke = stroke;
+                seg.pageIndex = snapshot.pageIndex;
+                seg.tileCoord = snapshot.tile;
+                merged.removedSegments.append(seg);
+            }
+            for (const VectorStroke& stroke : after) {
+                if (beforeIds.contains(stroke.id)) {
+                    continue;
+                }
+                UndoAction::StrokeSegment seg;
+                seg.stroke = stroke;
+                seg.pageIndex = snapshot.pageIndex;
+                seg.tileCoord = snapshot.tile;
+                merged.addedSegments.append(seg);
+            }
+        }
+
+        if (!merged.removedSegments.isEmpty()) {
+            pushUndoAction(merged);
+        }
+        return;
+    }
+
+    if (actions.isEmpty()) {
+        return;
+    }
+
+    if (s_eraserUndoGrouping == EraserUndoGrouping::PerGesture) {
+        UndoAction merged;
+        for (const UndoAction& action : actions) {
+            merged.segments += action.segments;
+        }
+        if (merged.segments.isEmpty()) {
+            return;
+        }
+        merged.layerIndex = actions.first().layerIndex;
+        merged.type = merged.segments.size() == 1 ? UndoAction::RemoveStroke
+                                                  : UndoAction::RemoveMultiple;
+        pushUndoAction(merged);
+        return;
+    }
+
+    // PerStroke: one entry per erased stroke, in the order they went.
+    for (const UndoAction& action : actions) {
+        for (const UndoAction::StrokeSegment& seg : action.segments) {
+            UndoAction single;
+            single.type = UndoAction::RemoveStroke;
+            single.layerIndex = action.layerIndex;
+            single.segments.append(seg);
+            pushUndoAction(single);
+        }
+    }
+}
 
 void DocumentViewport::pushUndoAction(const UndoAction& action)
 {
@@ -17688,7 +17862,7 @@ void DocumentViewport::pushPageStrokeUndo(int pageIndex, UndoAction::Type type, 
     seg.pageIndex = pageIndex;
     seg.stroke = stroke;
     action.segments.append(seg);
-    pushUndoAction(action);
+    recordUndoAction(action);
     if (!m_document->isEdgeless()) {
         emit pageModified(pageIndex);
         m_ocrDirtyPages.insert(pageIndex);
@@ -17707,7 +17881,7 @@ void DocumentViewport::pushPageStrokesUndo(int pageIndex, UndoAction::Type type,
         seg.stroke = s;
         action.segments.append(seg);
     }
-    pushUndoAction(action);
+    recordUndoAction(action);
     if (!m_document->isEdgeless()) {
         emit pageModified(pageIndex);
         m_ocrDirtyPages.insert(pageIndex);

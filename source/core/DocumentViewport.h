@@ -407,7 +407,20 @@ public:
         Lasso    ///< Draw a region, delete all strokes inside on release
     };
     Q_ENUM(EraserMode)
-    
+
+    /**
+     * @brief How whole-stroke erasing is grouped into undo steps.
+     *
+     * Partial erasing is always grouped per gesture: a single stroke may be cut
+     * many times during one pass, and splitting it would make undo both
+     * tedious and unable to restore the original stroke.
+     */
+    enum class EraserUndoGrouping {
+        PerGesture, ///< One entry per press-to-release, however many strokes
+        PerStroke   ///< One entry per stroke erased
+    };
+    Q_ENUM(EraserUndoGrouping)
+
     // ===== Constructor & Destructor =====
     
     /**
@@ -656,6 +669,23 @@ public:
      * @param size Eraser radius in document units.
      */
     void setEraserSize(qreal size);
+
+    /**
+     * @brief Choose how whole-stroke erasing groups undo entries.
+     *
+     * A static setting rather than a per-viewport one: it is a global
+     * preference and every open tab has to follow it immediately, without
+     * waiting for the next tab switch to re-apply tool settings.
+     */
+    static void setEraserUndoGrouping(EraserUndoGrouping grouping)
+    {
+        s_eraserUndoGrouping = grouping;
+    }
+
+    /**
+     * @brief Get the whole-stroke eraser's undo grouping.
+     */
+    static EraserUndoGrouping eraserUndoGrouping() { return s_eraserUndoGrouping; }
     
     /**
      * @brief Allowed eraser radius range, in document units.
@@ -3085,6 +3115,8 @@ private:
                                       ///< both hit testing and the on-screen cursor circle; see
                                       ///< eraserRadiusDocUnits().
     EraserMode m_eraserMode = EraserMode::Normal;  ///< Current eraser mode
+    /// Undo granularity for whole-stroke erasing (global; see setEraserUndoGrouping).
+    static EraserUndoGrouping s_eraserUndoGrouping;
     bool m_isDrawingEraserLasso = false;            ///< Currently drawing an eraser lasso region
     int m_eraserLassoPageIndex = -1;                ///< Page index for paged-mode eraser lasso
     
@@ -3771,6 +3803,27 @@ private:
      */
     static constexpr int EDGELESS_STROKE_MARGIN = 100;
     
+    /// Undo actions recorded during the current eraser gesture, in order.
+    /// Buffered rather than pushed so one sweep costs one undo entry.
+    /// Whole-stroke erasing only ever removes strokes, so these per-event
+    /// segments stay valid and carry the erase order (PerStroke grouping).
+    QVector<UndoAction> m_eraserGestureActions;
+    bool m_eraserGestureActive = false;
+
+    /// Layer contents captured before the gesture first modified them, used to
+    /// rebuild a chained partial erase as one correct remove/add pair.
+    struct EraserLayerSnapshot {
+        Page* container = nullptr;
+        int layerIndex = 0;
+        int pageIndex = -1;
+        Document::TileCoord tile = {0, 0};
+        bool edgeless = false;
+        QVector<VectorStroke> before;
+    };
+    QVector<EraserLayerSnapshot> m_eraserGestureSnapshots;
+    /// True when the gesture cut a stroke (as opposed to deleting it whole).
+    bool m_eraserGesturePartial = false;
+
     // ===== Undo/Redo State (unified) =====
     QStack<UndoAction> m_undoStack;   ///< Global undo stack (both paged and edgeless)
     QStack<UndoAction> m_redoStack;   ///< Global redo stack (both paged and edgeless)
@@ -4811,6 +4864,44 @@ private:
      */
     QRectF removedStrokeViewportRect(const VectorStroke& stroke, int pageIndex) const;
     
+    /**
+     * @brief Record an undo action, folded into the current eraser gesture.
+     *
+     * The eraser fires on press and on every move, so pushing each event
+     * straight onto the undo stack burned the whole history on one pass: a
+     * single sweep could fill MAX_UNDO and push genuinely earlier work out of
+     * reach. While a gesture is open the actions are buffered and become one
+     * entry when the pen lifts (see commitEraserGesture()).
+     */
+    void recordUndoAction(const UndoAction& action);
+
+    /**
+     * @brief Start buffering eraser undo actions for one press-to-release.
+     */
+    void beginEraserGesture();
+
+    /**
+     * @brief Remember a layer's strokes before this gesture first cuts into it.
+     *
+     * Partial erasing chains: each move cuts the fragments the previous move
+     * left behind. Appending those per-event actions would record intermediate
+     * strokes that no longer exist, and undoing the batch would restore a
+     * half-cut mess. Snapshotting the "before" state and diffing against the
+     * layer at commit yields the two lists undo actually needs.
+     */
+    void snapshotLayerForEraserGesture(Page* container, int layerIndex,
+                                       int pageIndex, Document::TileCoord tile,
+                                       bool edgeless);
+
+    /**
+     * @brief Turn the buffered eraser actions into undo entries.
+     *
+     * Whole-stroke erasing follows setEraserUndoGrouping(); partial erasing is
+     * always folded into a single ErasePartial, because its fragments only make
+     * sense together with the original stroke they replaced.
+     */
+    void commitEraserGesture();
+
     /**
      * @brief Erase only the covered stretch of each stroke (部分擦除).
      * @param pe The pointer event containing hit information.
