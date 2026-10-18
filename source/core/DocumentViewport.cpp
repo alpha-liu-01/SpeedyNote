@@ -17845,7 +17845,8 @@ void DocumentViewport::snapshotLayerForEraserGesture(Page* container, int layerI
         return;
     }
     for (const EraserLayerSnapshot& snapshot : m_eraserGestureSnapshots) {
-        if (snapshot.container == container && snapshot.layerIndex == layerIndex) {
+        if (snapshot.edgeless == edgeless && snapshot.pageIndex == pageIndex
+            && snapshot.tile == tile && snapshot.layerIndex == layerIndex) {
             return;   // Already captured before the first cut into this layer.
         }
     }
@@ -17856,7 +17857,6 @@ void DocumentViewport::snapshotLayerForEraserGesture(Page* container, int layerI
     }
 
     EraserLayerSnapshot snapshot;
-    snapshot.container = container;
     snapshot.layerIndex = layerIndex;
     snapshot.pageIndex = pageIndex;
     snapshot.tile = tile;
@@ -17880,6 +17880,9 @@ void DocumentViewport::commitEraserGesture()
     m_eraserGesturePartial = false;
 
     if (partial) {
+        if (!m_document) {
+            return;
+        }
         // A cut replaces one stroke with several fragments, and further moves
         // cut those fragments again, so the per-event snapshots describe
         // intermediate states that no longer exist. Diff the layer against the
@@ -17889,14 +17892,20 @@ void DocumentViewport::commitEraserGesture()
         merged.type = UndoAction::ErasePartial;
 
         for (const EraserLayerSnapshot& snapshot : snapshots) {
-            Page* container = snapshot.container;
-            VectorLayer* layer = container ? container->layer(snapshot.layerIndex) : nullptr;
-            if (!layer) {
-                continue;
+            // Resolve the container now, by coordinates. An edgeless tile that a
+            // cut left empty has already been freed; its layer is then simply
+            // empty, so every stroke it held counts as removed.
+            Page* container = nullptr;
+            if (snapshot.edgeless) {
+                container = m_document->getTile(snapshot.tile.first, snapshot.tile.second);
+            } else {
+                container = m_document->page(snapshot.pageIndex);
             }
+            const VectorLayer* layer = container ? container->layer(snapshot.layerIndex) : nullptr;
             merged.layerIndex = snapshot.layerIndex;
 
-            const QVector<VectorStroke>& after = layer->strokes();
+            static const QVector<VectorStroke> kNoStrokes;
+            const QVector<VectorStroke>& after = layer ? layer->strokes() : kNoStrokes;
             QSet<QString> beforeIds;
             beforeIds.reserve(snapshot.before.size());
             for (const VectorStroke& stroke : snapshot.before) {

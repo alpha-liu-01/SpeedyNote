@@ -6473,6 +6473,109 @@ public:
         return true;
     }
 
+    // ===== Eraser test helpers =====
+
+    /// Pointer event at a document-space point.
+    static PointerEvent eraserEventAt(DocumentViewport& vp, PointerEvent::Type type,
+                                      QPointF docPt)
+    {
+        PointerEvent pe;
+        pe.type = type;
+        pe.source = PointerEvent::Stylus;
+        pe.viewportPos = vp.documentToViewport(docPt);
+        pe.button = Qt::LeftButton;
+        pe.pressure = 1.0;
+        pe.pageHit = vp.viewportToPage(pe.viewportPos);
+        return pe;
+    }
+
+    /// Straight stroke from a to b with n segments, full pressure.
+    static VectorStroke eraserTestLine(const QString& id, QPointF a, QPointF b, int n,
+                                       qreal thickness, QColor color = Qt::black)
+    {
+        VectorStroke s;
+        s.id = id;
+        s.color = color;
+        s.baseThickness = thickness;
+        for (int i = 0; i <= n; ++i) {
+            StrokePoint pt;
+            pt.pos = a + (b - a) * (double(i) / n);
+            pt.pressure = 1.0;
+            s.points.append(pt);
+        }
+        s.updateBoundingBox();
+        return s;
+    }
+
+    static void eraserTestSetupPaged(DocumentViewport& vp, Document* doc, int w, int h,
+                                     qreal zoom)
+    {
+        vp.resize(w, h);
+        vp.setAttribute(Qt::WA_DontShowOnScreen, true);
+        vp.show();
+        QApplication::processEvents();
+        vp.setDocument(doc);
+        vp.setZoomLevel(zoom);
+        vp.setLayoutMode(LayoutMode::SingleColumn);
+        QApplication::processEvents();
+    }
+
+    /**
+     * @brief Partial-erasing the only stroke of an edgeless tile frees the tile.
+     *
+     * The gesture snapshot used to hold a raw Page*, which dangled as soon as
+     * Document::removeTileIfEmpty() dropped the emptied tile, so releasing the
+     * pen read freed memory (caught by AddressSanitizer). Undo must also bring
+     * the stroke and the tile back.
+     */
+    static bool testPartialEraseFreesEdgelessTile()
+    {
+        printf("  testPartialEraseFreesEdgelessTile... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto doc = Document::createNew("Edgeless partial", Document::Mode::Edgeless);
+        const int layerIndex = doc->edgelessActiveLayerIndex();
+        Page* tile = doc->getOrCreateTile(0, 0);
+        tile->layer(layerIndex)->addStroke(
+            eraserTestLine("only", QPointF(100, 100), QPointF(300, 100), 40, 4.0));
+        doc->markTileDirty({0, 0});
+
+        DocumentViewport vp;
+        vp.resize(1000, 700);
+        vp.setAttribute(Qt::WA_DontShowOnScreen, true);
+        vp.show();
+        QApplication::processEvents();
+        vp.setDocument(doc.get());
+        vp.setZoomLevel(1.0);
+        QApplication::processEvents();
+        vp.setCurrentTool(ToolType::Eraser);
+        vp.setEraserMode(DocumentViewport::EraserMode::Partial);
+        vp.setEraserSize(60.0);
+
+        vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Press, QPointF(90, 100)));
+        for (int x = 100; x <= 320; x += 20)
+            vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Move, QPointF(x, 100)));
+        if (doc->getTile(0, 0))
+            return fail("expected the emptied tile to be dropped mid-gesture");
+        vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Release, QPointF(320, 100)));
+
+        if (!vp.canUndo())
+            return fail("the erase left no undo entry");
+        vp.undo();
+        Page* restored = doc->getTile(0, 0);
+        if (!restored || restored->layer(layerIndex)->strokeCount() != 1)
+            return fail("undo did not restore the stroke (and its tile)");
+        vp.redo();
+        if (doc->getTile(0, 0) && doc->getTile(0, 0)->layer(layerIndex)->strokeCount() != 0)
+            return fail("redo did not erase the stroke again");
+
+        printf("PASSED\n");
+        return true;
+    }
+
     static bool runUnitTests() {
         printf("\n=== DocumentViewport Unit Tests ===\n\n");
         
@@ -6545,6 +6648,8 @@ public:
         runTest(testEraserUndoIsOnePerGesture, "testEraserUndoIsOnePerGesture");
         runTest(testLassoEraseRepaintsRemovedStrokes, "testLassoEraseRepaintsRemovedStrokes");
         runTest(testPartialLassoEraseKeepsOutside, "testPartialLassoEraseKeepsOutside");
+
+        runTest(testPartialEraseFreesEdgelessTile, "testPartialEraseFreesEdgelessTile");
 
         runTest(testPdfPlaceholderPaper, "testPdfPlaceholderPaper");
         

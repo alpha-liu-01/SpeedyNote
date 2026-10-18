@@ -3832,8 +3832,11 @@ private:
 
     /// Layer contents captured before the gesture first modified them, used to
     /// rebuild a chained partial erase as one correct remove/add pair.
+    ///
+    /// Identified by coordinates, never by Page*: an edgeless tile is freed by
+    /// Document::removeTileIfEmpty() the moment a cut leaves it empty, which can
+    /// happen in the middle of a gesture.
     struct EraserLayerSnapshot {
-        Page* container = nullptr;
         int layerIndex = 0;
         int pageIndex = -1;
         Document::TileCoord tile = {0, 0};
