@@ -17145,6 +17145,18 @@ void DocumentViewport::erasePartialAt(const PointerEvent& pe)
     // Look up the same candidate strokes whole-stroke mode would find, then
     // subtract the swept capsule from each instead of deleting it whole.
     if (!m_document) return;
+
+    // The undo entry is a diff against a pre-cut snapshot, so a gesture must be
+    // open. Pointer press normally opened one; a direct call gets one scoped to
+    // this call so it still yields exactly one undo entry.
+    struct GestureScope {
+        DocumentViewport* viewport;
+        bool owns;
+        ~GestureScope() { if (owns) viewport->commitEraserGesture(); }
+    } gestureScope{this, !m_eraserGestureActive};
+    if (gestureScope.owns) {
+        beginEraserGesture();
+    }
     
     const qreal radius = eraserRadiusDocUnits();
     const bool edgeless = m_document->isEdgeless();
@@ -17299,14 +17311,10 @@ void DocumentViewport::erasePartialAt(const PointerEvent& pe)
         m_document->markPageDirty(pageIndex);
         m_ocrDirtyPages.insert(pageIndex);
     }
-    if (m_eraserGestureActive) {
-        // One entry per pass comes from the snapshot diff in
-        // commitEraserGesture(); recording each move here would bury the
-        // history (and, because the cuts chain, restore a half-cut state).
-        m_eraserGesturePartial = true;
-    } else {
-        recordUndoAction(undoAction);
-    }
+    // One entry per pass comes from the snapshot diff in commitEraserGesture();
+    // recording each move here would bury the history (and, because the cuts
+    // chain, restore a half-cut state).
+    m_eraserGesturePartial = true;
     emit strokesChanged();
     emit documentModified();
     
@@ -17726,8 +17734,10 @@ void DocumentViewport::finalizeEraserLassoPartial()
         targets.append(target);
     }
 
-    UndoAction undoAction;
-    undoAction.type = UndoAction::ErasePartial;
+    // The undo entry is a diff of each touched layer against its state before
+    // the cuts (same mechanism as the disc eraser), which also records every
+    // stroke's draw-order slot so undo restores the stacking.
+    m_eraserGestureSnapshots.clear();
 
     for (const Target& target : targets) {
         Page* container = target.container;
@@ -17739,7 +17749,9 @@ void DocumentViewport::finalizeEraserLassoPartial()
         VectorLayer* layer = container->layer(layerIdx);
         if (!layer || layer->locked || layer->isEmpty()) continue;
 
-        undoAction.layerIndex = layerIdx;
+        snapshotLayerForEraserGesture(container, layerIdx,
+                                      edgeless ? -1 : m_eraserLassoPageIndex,
+                                      target.tile, edgeless);
 
         // Strokes live in page/tile-local coordinates, so the polygon has to be
         // shifted into the same space. A zero origin makes this a no-op.
@@ -17771,20 +17783,6 @@ void DocumentViewport::finalizeEraserLassoPartial()
                 continue;
             }
 
-            UndoAction::StrokeSegment removedSeg;
-            removedSeg.stroke = *original;
-            if (edgeless) removedSeg.tileCoord = target.tile;
-            else removedSeg.pageIndex = m_eraserLassoPageIndex;
-            undoAction.removedSegments.append(removedSeg);
-
-            for (const VectorStroke& fragment : fragments) {
-                UndoAction::StrokeSegment addedSeg;
-                addedSeg.stroke = fragment;
-                if (edgeless) addedSeg.tileCoord = target.tile;
-                else addedSeg.pageIndex = m_eraserLassoPageIndex;
-                undoAction.addedSegments.append(addedSeg);
-            }
-
             layer->replaceStroke(id, fragments);
         }
 
@@ -17795,6 +17793,9 @@ void DocumentViewport::finalizeEraserLassoPartial()
         }
     }
 
+    const QVector<EraserLayerSnapshot> snapshots = std::move(m_eraserGestureSnapshots);
+    m_eraserGestureSnapshots.clear();
+    const UndoAction undoAction = buildErasePartialUndo(snapshots);
     if (undoAction.removedSegments.isEmpty()) {
         return;
     }
@@ -17867,6 +17868,75 @@ void DocumentViewport::snapshotLayerForEraserGesture(Page* container, int layerI
     m_eraserGestureSnapshots.append(snapshot);
 }
 
+UndoAction DocumentViewport::buildErasePartialUndo(
+    const QVector<EraserLayerSnapshot>& snapshots) const
+{
+    // A cut replaces one stroke with several fragments, and further cuts split
+    // those fragments again, so per-event records describe intermediate states
+    // that no longer exist. Diffing each layer against the state captured
+    // before the first cut yields exactly the strokes that disappeared and the
+    // ones that are there now, each with its draw-order slot.
+    UndoAction merged;
+    merged.type = UndoAction::ErasePartial;
+    if (!m_document) {
+        return merged;
+    }
+
+    static const QVector<VectorStroke> kNoStrokes;
+
+    for (const EraserLayerSnapshot& snapshot : snapshots) {
+        // Resolve the container now, by coordinates. An edgeless tile that a
+        // cut left empty has already been freed; its layer is then simply
+        // empty, so every stroke it held counts as removed.
+        Page* container = snapshot.edgeless
+            ? m_document->getTile(snapshot.tile.first, snapshot.tile.second)
+            : m_document->page(snapshot.pageIndex);
+        const VectorLayer* layer = container ? container->layer(snapshot.layerIndex) : nullptr;
+        const QVector<VectorStroke>& after = layer ? layer->strokes() : kNoStrokes;
+
+        QSet<QString> beforeIds;
+        beforeIds.reserve(snapshot.before.size());
+        for (const VectorStroke& stroke : snapshot.before) {
+            beforeIds.insert(stroke.id);
+        }
+        QSet<QString> afterIds;
+        afterIds.reserve(after.size());
+        for (const VectorStroke& stroke : after) {
+            afterIds.insert(stroke.id);
+        }
+
+        for (int i = 0; i < snapshot.before.size(); ++i) {
+            if (afterIds.contains(snapshot.before[i].id)) {
+                continue;
+            }
+            UndoAction::StrokeSegment seg;
+            seg.stroke = snapshot.before[i];
+            seg.pageIndex = snapshot.pageIndex;
+            seg.tileCoord = snapshot.tile;
+            seg.layerIndex = snapshot.layerIndex;
+            seg.zIndex = i;
+            merged.removedSegments.append(seg);
+        }
+        for (int i = 0; i < after.size(); ++i) {
+            if (beforeIds.contains(after[i].id)) {
+                continue;
+            }
+            UndoAction::StrokeSegment seg;
+            seg.stroke = after[i];
+            seg.pageIndex = snapshot.pageIndex;
+            seg.tileCoord = snapshot.tile;
+            seg.layerIndex = snapshot.layerIndex;
+            seg.zIndex = i;
+            merged.addedSegments.append(seg);
+        }
+    }
+
+    if (!merged.removedSegments.isEmpty()) {
+        merged.layerIndex = merged.removedSegments.first().layerIndex;
+    }
+    return merged;
+}
+
 void DocumentViewport::commitEraserGesture()
 {
     m_eraserGestureActive = false;
@@ -17880,65 +17950,7 @@ void DocumentViewport::commitEraserGesture()
     m_eraserGesturePartial = false;
 
     if (partial) {
-        if (!m_document) {
-            return;
-        }
-        // A cut replaces one stroke with several fragments, and further moves
-        // cut those fragments again, so the per-event snapshots describe
-        // intermediate states that no longer exist. Diff the layer against the
-        // state captured before the first cut instead: undo then needs only the
-        // strokes that disappeared and the ones that are there now.
-        UndoAction merged;
-        merged.type = UndoAction::ErasePartial;
-
-        for (const EraserLayerSnapshot& snapshot : snapshots) {
-            // Resolve the container now, by coordinates. An edgeless tile that a
-            // cut left empty has already been freed; its layer is then simply
-            // empty, so every stroke it held counts as removed.
-            Page* container = nullptr;
-            if (snapshot.edgeless) {
-                container = m_document->getTile(snapshot.tile.first, snapshot.tile.second);
-            } else {
-                container = m_document->page(snapshot.pageIndex);
-            }
-            const VectorLayer* layer = container ? container->layer(snapshot.layerIndex) : nullptr;
-            merged.layerIndex = snapshot.layerIndex;
-
-            static const QVector<VectorStroke> kNoStrokes;
-            const QVector<VectorStroke>& after = layer ? layer->strokes() : kNoStrokes;
-            QSet<QString> beforeIds;
-            beforeIds.reserve(snapshot.before.size());
-            for (const VectorStroke& stroke : snapshot.before) {
-                beforeIds.insert(stroke.id);
-            }
-            QSet<QString> afterIds;
-            afterIds.reserve(after.size());
-            for (const VectorStroke& stroke : after) {
-                afterIds.insert(stroke.id);
-            }
-
-            for (const VectorStroke& stroke : snapshot.before) {
-                if (afterIds.contains(stroke.id)) {
-                    continue;
-                }
-                UndoAction::StrokeSegment seg;
-                seg.stroke = stroke;
-                seg.pageIndex = snapshot.pageIndex;
-                seg.tileCoord = snapshot.tile;
-                merged.removedSegments.append(seg);
-            }
-            for (const VectorStroke& stroke : after) {
-                if (beforeIds.contains(stroke.id)) {
-                    continue;
-                }
-                UndoAction::StrokeSegment seg;
-                seg.stroke = stroke;
-                seg.pageIndex = snapshot.pageIndex;
-                seg.tileCoord = snapshot.tile;
-                merged.addedSegments.append(seg);
-            }
-        }
-
+        const UndoAction merged = buildErasePartialUndo(snapshots);
         if (!merged.removedSegments.isEmpty()) {
             pushUndoAction(merged);
         }
@@ -17952,7 +17964,14 @@ void DocumentViewport::commitEraserGesture()
     if (s_eraserUndoGrouping == EraserUndoGrouping::PerGesture) {
         UndoAction merged;
         for (const UndoAction& action : actions) {
-            merged.segments += action.segments;
+            // One drag can cross pages whose active layers differ, so every
+            // segment carries its own layer instead of sharing the first one.
+            for (UndoAction::StrokeSegment seg : action.segments) {
+                if (seg.layerIndex < 0) {
+                    seg.layerIndex = action.layerIndex;
+                }
+                merged.segments.append(seg);
+            }
         }
         if (merged.segments.isEmpty()) {
             return;
@@ -18290,6 +18309,36 @@ static Page* getContainer(Document* doc, const UndoAction::StrokeSegment& seg, b
             : doc->getTile(seg.tileCoord.first, seg.tileCoord.second);
     }
     return doc->page(seg.pageIndex);
+}
+
+/// Layer a segment belongs to: its own when it names one, else the action's.
+static int segmentLayerIndex(const UndoAction& action, const UndoAction::StrokeSegment& seg)
+{
+    return seg.layerIndex >= 0 ? seg.layerIndex : action.layerIndex;
+}
+
+/// Segments ordered by ascending draw-order slot (stable, so segments without
+/// a slot keep their recorded order). Re-inserting in this order reproduces the
+/// layer exactly: each insertion lands at an index no later insertion shifts.
+static QVector<UndoAction::StrokeSegment> inDrawOrder(const QVector<UndoAction::StrokeSegment>& segs)
+{
+    QVector<UndoAction::StrokeSegment> sorted = segs;
+    std::stable_sort(sorted.begin(), sorted.end(),
+                     [](const UndoAction::StrokeSegment& a, const UndoAction::StrokeSegment& b) {
+                         return a.zIndex < b.zIndex;
+                     });
+    return sorted;
+}
+
+/// Put a stroke back in a layer: at its recorded slot when it has one,
+/// otherwise on top (the historical behaviour for other action types).
+static void restoreStroke(VectorLayer* layer, const UndoAction::StrokeSegment& seg)
+{
+    if (seg.zIndex >= 0) {
+        layer->insertStroke(seg.zIndex, seg.stroke);
+    } else {
+        layer->addStroke(seg.stroke);
+    }
 }
 
 static void markSegDirty(Document* doc, const UndoAction::StrokeSegment& seg)
@@ -18737,19 +18786,20 @@ void DocumentViewport::undo()
         for (const auto& seg : action.addedSegments) {
             Page* c = getContainer(m_document, seg, false);
             if (!c) continue;
-            VectorLayer* layer = c->layer(action.layerIndex);
+            VectorLayer* layer = c->layer(segmentLayerIndex(action, seg));
             if (layer) layer->removeStroke(seg.stroke.id);
             markSegDirty(m_document, seg);
             tryRemoveEmptyTile(m_document, seg);
         }
-        // Restore removed strokes
-        for (const auto& seg : action.removedSegments) {
+        // Restore removed strokes (at their old draw-order slot when recorded)
+        for (const auto& seg : inDrawOrder(action.removedSegments)) {
             Page* c = getContainer(m_document, seg, true);
             if (!c) continue;
-            while (c->layerCount() <= action.layerIndex)
+            const int layerIndex = segmentLayerIndex(action, seg);
+            while (c->layerCount() <= layerIndex)
                 c->addLayer(QString("Layer %1").arg(c->layerCount() + 1));
-            VectorLayer* layer = c->layer(action.layerIndex);
-            if (layer) layer->addStroke(seg.stroke);
+            VectorLayer* layer = c->layer(layerIndex);
+            if (layer) restoreStroke(layer, seg);
             markSegDirty(m_document, seg);
         }
     } else if (action.type == UndoAction::RecolorStrokes) {
@@ -18798,9 +18848,10 @@ void DocumentViewport::undo()
             Page* c = getContainer(m_document, seg,
                                    action.type != UndoAction::AddStroke);
             if (!c) continue;
-            while (c->layerCount() <= action.layerIndex)
+            const int layerIndex = segmentLayerIndex(action, seg);
+            while (c->layerCount() <= layerIndex)
                 c->addLayer(QString("Layer %1").arg(c->layerCount() + 1));
-            VectorLayer* layer = c->layer(action.layerIndex);
+            VectorLayer* layer = c->layer(layerIndex);
             if (!layer) continue;
 
             switch (action.type) {
@@ -19195,19 +19246,20 @@ void DocumentViewport::redo()
         for (const auto& seg : action.removedSegments) {
             Page* c = getContainer(m_document, seg, false);
             if (!c) continue;
-            VectorLayer* layer = c->layer(action.layerIndex);
+            VectorLayer* layer = c->layer(segmentLayerIndex(action, seg));
             if (layer) layer->removeStroke(seg.stroke.id);
             markSegDirty(m_document, seg);
             tryRemoveEmptyTile(m_document, seg);
         }
-        // Add transformed strokes (redo the add)
-        for (const auto& seg : action.addedSegments) {
+        // Add transformed strokes (redo the add), at their recorded slot if any
+        for (const auto& seg : inDrawOrder(action.addedSegments)) {
             Page* c = getContainer(m_document, seg, true);
             if (!c) continue;
-            while (c->layerCount() <= action.layerIndex)
+            const int layerIndex = segmentLayerIndex(action, seg);
+            while (c->layerCount() <= layerIndex)
                 c->addLayer(QString("Layer %1").arg(c->layerCount() + 1));
-            VectorLayer* layer = c->layer(action.layerIndex);
-            if (layer) layer->addStroke(seg.stroke);
+            VectorLayer* layer = c->layer(layerIndex);
+            if (layer) restoreStroke(layer, seg);
             markSegDirty(m_document, seg);
         }
     } else if (action.type == UndoAction::RecolorStrokes) {
@@ -19256,9 +19308,10 @@ void DocumentViewport::redo()
             Page* c = getContainer(m_document, seg,
                                    action.type == UndoAction::AddStroke);
             if (!c) continue;
-            while (c->layerCount() <= action.layerIndex)
+            const int layerIndex = segmentLayerIndex(action, seg);
+            while (c->layerCount() <= layerIndex)
                 c->addLayer(QString("Layer %1").arg(c->layerCount() + 1));
-            VectorLayer* layer = c->layer(action.layerIndex);
+            VectorLayer* layer = c->layer(layerIndex);
             if (!layer) continue;
 
             switch (action.type) {

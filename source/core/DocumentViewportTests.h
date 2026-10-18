@@ -6576,6 +6576,125 @@ public:
         return true;
     }
 
+    /**
+     * @brief Undo/redo of a partial erase restores draw order, not just strokes.
+     *
+     * replaceStroke() keeps a cut stroke at its place in the stack, but undo and
+     * redo used to re-append strokes, lifting them above everything drawn later.
+     * Both the disc eraser and the lasso must come back in the same order.
+     */
+    static bool testPartialEraseUndoKeepsDrawOrder()
+    {
+        printf("  testPartialEraseUndoKeepsDrawOrder... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        // Fragments get fresh ids, so describe order by what each stroke is.
+        auto kinds = [](const VectorLayer* layer) {
+            QString out;
+            for (const VectorStroke& s : layer->strokes())
+                out += (s.color == QColor(Qt::red)) ? 'A'
+                     : (s.color == QColor(Qt::blue)) ? 'B' : '?';
+            return out;
+        };
+
+        for (int mode = 0; mode < 2; ++mode) {
+            const bool lasso = (mode == 1);
+            auto doc = Document::createNew("Partial order");
+            Page* page = doc->page(0);
+            VectorLayer* layer = page->activeLayer();
+            // A (red) is the bottom stroke, B (blue) was drawn later, on top.
+            layer->addStroke(eraserTestLine("A", QPointF(40, 200), QPointF(560, 200), 60, 8.0, Qt::red));
+            layer->addStroke(eraserTestLine("B", QPointF(300, 100), QPointF(300, 300), 60, 8.0, Qt::blue));
+
+            DocumentViewport vp;
+            eraserTestSetupPaged(vp, doc.get(), 700, 500, 1.0);
+            vp.setCurrentTool(ToolType::Eraser);
+            const QPointF o = vp.pagePosition(0);
+
+            if (!lasso) {
+                vp.setEraserMode(DocumentViewport::EraserMode::Partial);
+                vp.setEraserSize(15.0);
+                vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Press, o + QPointF(120, 200)));
+                vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Move, o + QPointF(130, 200)));
+                vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Release, o + QPointF(130, 200)));
+            } else {
+                vp.setEraserMode(DocumentViewport::EraserMode::LassoPartial);
+                vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Press, o + QPointF(100, 170)));
+                vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Move, o + QPointF(140, 170)));
+                vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Move, o + QPointF(140, 230)));
+                vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Move, o + QPointF(100, 230)));
+                vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Release, o + QPointF(100, 170)));
+            }
+
+            const QString afterErase = kinds(layer);
+            if (afterErase != "AAB")
+                return fail(qPrintable(QString("cut stroke left its slot: %1").arg(afterErase)));
+            vp.undo();
+            if (kinds(layer) != "AB")
+                return fail(qPrintable(QString("undo changed the draw order: %1").arg(kinds(layer))));
+            vp.redo();
+            if (kinds(layer) != "AAB")
+                return fail(qPrintable(QString("redo changed the draw order: %1").arg(kinds(layer))));
+        }
+
+        printf("PASSED\n");
+        return true;
+    }
+
+    /**
+     * @brief One eraser drag across two pages undoes into each page's own layer.
+     *
+     * Pages keep their own active layer, but the merged undo entry used the
+     * first action's layer index for every stroke.
+     */
+    static bool testEraserUndoAcrossPagesKeepsLayers()
+    {
+        printf("  testEraserUndoAcrossPagesKeepsLayers... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        for (int mode = 0; mode < 2; ++mode) {
+            const bool partial = (mode == 1);
+            auto doc = Document::createNew("Cross-page eraser");
+            Page* p0 = doc->page(0);
+            Page* p1 = doc->addPage();
+            p1->addLayer("L2");
+            p1->activeLayerIndex = 1;
+            p0->layer(0)->addStroke(eraserTestLine("p0s", QPointF(100, 300), QPointF(300, 300), 40, 6.0));
+            p1->layer(1)->addStroke(eraserTestLine("p1s", QPointF(100, 300), QPointF(300, 300), 40, 6.0));
+
+            DocumentViewport vp;
+            eraserTestSetupPaged(vp, doc.get(), 900, 900, 0.4);
+            vp.setCurrentTool(ToolType::Eraser);
+            vp.setEraserMode(partial ? DocumentViewport::EraserMode::Partial
+                                     : DocumentViewport::EraserMode::Normal);
+            vp.setEraserSize(partial ? 40.0 : 20.0);
+            DocumentViewport::setEraserUndoGrouping(
+                DocumentViewport::EraserUndoGrouping::PerGesture);
+
+            const QPointF o0 = vp.pagePosition(0);
+            const QPointF o1 = vp.pagePosition(1);
+            vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Press, o0 + QPointF(200, 300)));
+            vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Move, o1 + QPointF(200, 300)));
+            vp.handlePointerEvent(eraserEventAt(vp, PointerEvent::Release, o1 + QPointF(200, 300)));
+
+            if (!vp.canUndo())
+                return fail("the drag left no undo entry");
+            vp.undo();
+            if (p0->layer(0)->strokeCount() < 1 || p1->layer(1)->strokeCount() < 1
+                || p1->layer(0)->strokeCount() != 0)
+                return fail("undo restored a stroke into the wrong layer");
+        }
+
+        printf("PASSED\n");
+        return true;
+    }
+
     static bool runUnitTests() {
         printf("\n=== DocumentViewport Unit Tests ===\n\n");
         
@@ -6650,6 +6769,8 @@ public:
         runTest(testPartialLassoEraseKeepsOutside, "testPartialLassoEraseKeepsOutside");
 
         runTest(testPartialEraseFreesEdgelessTile, "testPartialEraseFreesEdgelessTile");
+        runTest(testPartialEraseUndoKeepsDrawOrder, "testPartialEraseUndoKeepsDrawOrder");
+        runTest(testEraserUndoAcrossPagesKeepsLayers, "testEraserUndoAcrossPagesKeepsLayers");
 
         runTest(testPdfPlaceholderPaper, "testPdfPlaceholderPaper");
         

@@ -144,6 +144,14 @@ struct UndoAction {
         int pageIndex = -1;
         Document::TileCoord tileCoord = {0, 0};
         VectorStroke stroke;
+        /// Layer this stroke lives in. -1 means "use the action's layerIndex".
+        /// Needed once one action can span several containers (an eraser drag
+        /// across pages), each with its own active layer.
+        int layerIndex = -1;
+        /// Draw-order slot in the layer, or -1 to append on top. ErasePartial
+        /// records it so undo/redo put fragments back where they were instead
+        /// of lifting them above everything drawn later.
+        int zIndex = -1;
     };
 
     // Single-stroke actions
@@ -4915,6 +4923,14 @@ private:
     void snapshotLayerForEraserGesture(Page* container, int layerIndex,
                                        int pageIndex, Document::TileCoord tile,
                                        bool edgeless);
+
+    /**
+     * @brief Diff snapshotted layers against their current contents.
+     * @return An ErasePartial action: originals (with draw-order slot) in
+     *         removedSegments, fragments in addedSegments. Empty
+     *         removedSegments means nothing changed.
+     */
+    UndoAction buildErasePartialUndo(const QVector<EraserLayerSnapshot>& snapshots) const;
 
     /**
      * @brief Turn the buffered eraser actions into undo entries.

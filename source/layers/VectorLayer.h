@@ -102,6 +102,25 @@ public:
     }
     
     /**
+     * @brief Insert a stroke at a draw-order slot (clamped to the valid range).
+     * @param index Position in the stroke list; 0 is the bottom of the layer.
+     * @param stroke The stroke to insert.
+     *
+     * Undo/redo of the partial eraser uses this to put strokes back exactly
+     * where they were. The cache is patched over the stroke's bounds, because
+     * unlike addStroke() the stroke may sit underneath strokes already drawn.
+     */
+    void insertStroke(int index, const VectorStroke& stroke) {
+        index = qBound(0, index, static_cast<int>(m_strokes.size()));
+        if (index == m_strokes.size()) {
+            addStroke(stroke);
+            return;
+        }
+        m_strokes.insert(index, stroke);
+        patchCacheAfterRemoval(stroke.boundingBox);
+    }
+    
+    /**
      * @brief Replace a stroke with zero or more fragments, in place.
      * @param strokeId ID of the stroke to replace.
      * @param replacements Fragments that take its place (may be empty).
