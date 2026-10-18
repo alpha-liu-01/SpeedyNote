@@ -17233,6 +17233,7 @@ void DocumentViewport::erasePartialAt(const PointerEvent& pe)
     UndoAction undoAction;
     undoAction.type = UndoAction::ErasePartial;
     undoAction.layerIndex = layerIndex;
+    QVector<QRectF> dirtyDocRects;  ///< Per-stroke changed regions, document coords
     
     for (const Target& target : targets) {
         if (!target.container) continue;
@@ -17269,9 +17270,10 @@ void DocumentViewport::erasePartialAt(const PointerEvent& pe)
             }
             if (!original) continue;
             
+            QRectF changed;
             const QVector<VectorStroke> fragments = haveSweep
-                ? original->subtractEraserSweep(localFrom, localPt, radius)
-                : original->subtractEraserSweep(localPt, localPt, radius);
+                ? original->subtractEraserSweep(localFrom, localPt, radius, &changed)
+                : original->subtractEraserSweep(localPt, localPt, radius, &changed);
             
             // Subtracting may leave the stroke untouched (the sweep test is
             // deliberately generous), in which case keep it and push no undo.
@@ -17293,7 +17295,14 @@ void DocumentViewport::erasePartialAt(const PointerEvent& pe)
                 undoAction.addedSegments.append(addedSeg);
             }
             
-            layer->replaceStroke(id, fragments);
+            // Only `changed` needs repainting, not the whole stroke: a long
+            // stroke nicked at one end would otherwise repaint its full bounds.
+            if (changed.isNull()) {
+                changed = original->boundingBox;
+            }
+            dirtyDocRects.append(changed.translated(target.origin
+                                                    + (edgeless ? QPointF() : pagePosition(pageIndex))));
+            layer->replaceStroke(id, fragments, changed);
             if (edgeless) m_document->markTileDirty(target.tile);
         }
     }
@@ -17326,15 +17335,12 @@ void DocumentViewport::erasePartialAt(const PointerEvent& pe)
                               pe.viewportPos.y() - eraserRadius,
                               eraserRadius * 2, eraserRadius * 2).toAlignedRect(),
                         QRegion::Ellipse);
-    for (const UndoAction::StrokeSegment& seg : undoAction.removedSegments) {
-        const QPointF origin = edgeless
-            ? QPointF(seg.tileCoord.first * Document::EDGELESS_TILE_SIZE,
-                      seg.tileCoord.second * Document::EDGELESS_TILE_SIZE)
-            : pagePosition(pageIndex);
-        const QRectF docRect = seg.stroke.boundingBox.translated(origin);
+    for (const QRectF& docRect : dirtyDocRects) {
+        // Grown by a pixel or two: antialiased edges bleed past the geometry.
         const QRectF vpRect =
             QRectF(documentToViewport(docRect.topLeft()),
                    documentToViewport(docRect.bottomRight())).normalized()
+                .adjusted(-2, -2, 2, 2)
                 .intersected(QRectF(rect()));
         dirtyRegion += vpRect.toAlignedRect();
     }
@@ -17767,9 +17773,9 @@ void DocumentViewport::finalizeEraserLassoPartial()
         }
         if (candidates.isEmpty()) continue;
 
-        // No cache repair here: replaceStroke() patches the union of the
-        // original stroke's bounds and its fragments, which already covers the
-        // ink that disappeared (inside the lasso) and the ink that moved.
+        // No cache repair here: replaceStroke() patches the region the cut
+        // changed (see VectorStroke::subtractWhere), which covers the ink that
+        // disappeared (inside the lasso) and the ink that got reshaped.
         for (const QString& id : candidates) {
             const VectorStroke* original = nullptr;
             for (const VectorStroke& stroke : layer->strokes()) {
@@ -17777,13 +17783,14 @@ void DocumentViewport::finalizeEraserLassoPartial()
             }
             if (!original) continue;
 
-            const QVector<VectorStroke> fragments = original->subtractPolygon(localPath);
+            QRectF changed;
+            const QVector<VectorStroke> fragments = original->subtractPolygon(localPath, &changed);
             // Unchanged (the region only touched its bounding box): keep it.
             if (fragments.size() == 1 && fragments.first().id == original->id) {
                 continue;
             }
 
-            layer->replaceStroke(id, fragments);
+            layer->replaceStroke(id, fragments, changed);
         }
 
         if (edgeless) {

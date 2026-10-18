@@ -36,6 +36,10 @@ struct VectorStroke {
     QColor color;                   ///< Stroke color
     qreal baseThickness;            ///< Base thickness before pressure scaling
     QRectF boundingBox;             ///< Cached bounding box for fast culling/hit testing
+    /// Widest half-width of the ribbon, cached by updateBoundingBox() so the
+    /// eraser's broad phase is O(1) per stroke instead of walking every point.
+    /// Negative until computed; maxHalfWidth() then falls back to a scan.
+    qreal cachedMaxHalfWidth = -1.0;
     
     /**
      * @brief Default constructor.
@@ -50,6 +54,7 @@ struct VectorStroke {
      * Adds padding based on maximum possible stroke width.
      */
     void updateBoundingBox() {
+        cachedMaxHalfWidth = baseThickness / 2.0;
         if (points.isEmpty()) {
             boundingBox = QRectF();
             return;
@@ -62,6 +67,7 @@ struct VectorStroke {
             maxX = qMax(maxX, pt.pos.x());
             minY = qMin(minY, pt.pos.y());
             maxY = qMax(maxY, pt.pos.y());
+            cachedMaxHalfWidth = qMax(cachedMaxHalfWidth, baseThickness * pt.pressure / 2.0);
         }
         boundingBox = QRectF(minX - maxWidth, minY - maxWidth,
                              maxX - minX + maxWidth * 2,
@@ -141,6 +147,9 @@ struct VectorStroke {
      * Used to size the broad-phase rejection padding.
      */
     qreal maxHalfWidth() const {
+        if (cachedMaxHalfWidth >= 0.0) {
+            return cachedMaxHalfWidth;
+        }
         qreal hw = baseThickness / 2.0;
         for (const StrokePoint& pt : points) {
             hw = qMax(hw, baseThickness * pt.pressure / 2.0);
@@ -210,12 +219,16 @@ struct VectorStroke {
      * @param a Start of the eraser motion path.
      * @param b End of the eraser motion path.
      * @param radius Eraser radius in the same units as the stroke points.
+     * @param changedBounds Optional out: region whose rendering differs
+     *        between this stroke and the returned fragments (see
+     *        subtractWhere). Left untouched when the sweep missed the stroke.
      * @return Surviving fragments. Returns this stroke unchanged (same id) when
      *         the sweep missed it entirely, and an empty list when nothing
      *         survived.
      */
     QVector<VectorStroke> subtractEraserSweep(const QPointF& a, const QPointF& b,
-                                              qreal radius) const {
+                                              qreal radius,
+                                              QRectF* changedBounds = nullptr) const {
         if (points.isEmpty() || radius <= 0.0) {
             return {*this};
         }
@@ -223,6 +236,9 @@ struct VectorStroke {
         // A dot either survives whole or not at all - there is no stretch to cut.
         if (points.size() == 1) {
             if (distanceToSegment(points[0].pos, a, b) < radius) {
+                if (changedBounds) {
+                    *changedBounds = boundingBox;
+                }
                 return {};
             }
             return {*this};
@@ -240,7 +256,7 @@ struct VectorStroke {
         
         return subtractWhere([&](const QPointF& p, const QPointF& q) {
             return survivingIntervals(p, q, a, b, radius);
-        });
+        }, changedBounds);
     }
     
     /**
@@ -251,10 +267,12 @@ struct VectorStroke {
      * the stroke crosses the polygon edge.
      *
      * @param polygon Lasso path in the same coordinate space as the points.
+     * @param changedBounds Optional out, as for subtractEraserSweep().
      * @return Surviving fragments, this stroke unchanged (same id) when the
      *         polygon missed it, or an empty list when nothing survived.
      */
-    QVector<VectorStroke> subtractPolygon(const QPolygonF& polygon) const {
+    QVector<VectorStroke> subtractPolygon(const QPolygonF& polygon,
+                                          QRectF* changedBounds = nullptr) const {
         if (points.isEmpty() || polygon.size() < 3) {
             return {*this};
         }
@@ -266,7 +284,13 @@ struct VectorStroke {
         };
 
         if (points.size() == 1) {
-            return inside(points[0].pos) ? QVector<VectorStroke>{} : QVector<VectorStroke>{*this};
+            if (inside(points[0].pos)) {
+                if (changedBounds) {
+                    *changedBounds = boundingBox;
+                }
+                return {};
+            }
+            return {*this};
         }
 
         const QRectF polyBounds = polygon.boundingRect();
@@ -276,7 +300,7 @@ struct VectorStroke {
 
         return subtractWhere([&](const QPointF& p, const QPointF& q) {
             return survivingIntervalsWhere(p, q, inside);
-        });
+        }, changedBounds);
     }
     
     /**
@@ -284,9 +308,18 @@ struct VectorStroke {
      *
      * @param intervalsForSegment Maps one source segment to the parameter
      *        ranges [t0,t1] that survive, in increasing order.
+     * @param changedBounds Optional out. Set to the region where the rendered
+     *        result can differ from this stroke, so callers can repaint just
+     *        that. It is NOT just the erased area: the renderer smooths points
+     *        with Catmull-Rom, so cutting at a vertex also reshapes the curve
+     *        for two neighbouring vertices on either side. Straight 2-point
+     *        strokes are not smoothed, so only the erased stretch counts there.
+     *        Padded by the stroke's widest half-width. Only written when the
+     *        stroke was actually cut.
      */
     template <typename IntervalsFn>
-    QVector<VectorStroke> subtractWhere(IntervalsFn intervalsForSegment) const {
+    QVector<VectorStroke> subtractWhere(IntervalsFn intervalsForSegment,
+                                        QRectF* changedBounds = nullptr) const {
         if (points.size() < 2) {
             return {*this};
         }
@@ -297,13 +330,27 @@ struct VectorStroke {
             qreal t1 = 1.0;    ///< End parameter along that segment
         };
         QVector<Piece> pieces;
+        QRectF changed;
         
         for (int i = 1; i < points.size(); ++i) {
             const QPointF& p = points[i - 1].pos;
             const QPointF& q = points[i].pos;
-            for (const auto& iv : intervalsForSegment(p, q)) {
+            const auto intervals = intervalsForSegment(p, q);
+            for (const auto& iv : intervals) {
                 pieces.append(Piece{i - 1, iv.first, iv.second});
             }
+            if (changedBounds) {
+                const bool untouched = intervals.size() == 1
+                                       && intervals.first().first <= 0.0
+                                       && intervals.first().second >= 1.0;
+                if (!untouched) {
+                    changed = changed.united(changedRegionForSegment(i - 1, intervals));
+                }
+            }
+        }
+        if (changedBounds && !changed.isNull()) {
+            const qreal pad = maxHalfWidth() + 1.0;
+            *changedBounds = changed.adjusted(-pad, -pad, pad, pad);
         }
         
         if (pieces.isEmpty()) {
@@ -372,6 +419,50 @@ struct VectorStroke {
         return fragments;
     }
     
+    /**
+     * @brief Region of one cut segment whose rendering can change.
+     * @param segment Index of the segment (points[segment]..points[segment+1]).
+     * @param surviving Parameter ranges of that segment that survive.
+     */
+    QRectF changedRegionForSegment(int segment,
+                                   const QVector<QPair<qreal, qreal>>& surviving) const {
+        if (points.size() == 2) {
+            // Not smoothed: only the erased stretches differ.
+            const StrokePoint& p = points[0];
+            const StrokePoint& q = points[1];
+            QRectF rect;
+            bool any = false;
+            const auto addGap = [&](qreal t0, qreal t1) {
+                if (t1 > t0) {
+                    const QRectF gap = QRectF(interpolatePoint(p, q, t0).pos,
+                                              interpolatePoint(p, q, t1).pos).normalized();
+                    rect = any ? rect.united(gap) : gap;
+                    any = true;
+                }
+            };
+            qreal from = 0.0;
+            for (const auto& iv : surviving) {
+                addGap(from, iv.first);
+                from = iv.second;
+            }
+            addGap(from, 1.0);
+            return rect;
+        }
+        // Catmull-Rom: segment s depends on points s-1..s+2, and the cut moves
+        // the end tangents of the segments next to it, so take s-2..s+3.
+        const int lo = qMax(0, segment - 2);
+        const int hi = qMin(static_cast<int>(points.size()) - 1, segment + 3);
+        qreal minX = points[lo].pos.x(), maxX = minX;
+        qreal minY = points[lo].pos.y(), maxY = minY;
+        for (int k = lo + 1; k <= hi; ++k) {
+            minX = qMin(minX, points[k].pos.x());
+            maxX = qMax(maxX, points[k].pos.x());
+            minY = qMin(minY, points[k].pos.y());
+            maxY = qMax(maxY, points[k].pos.y());
+        }
+        return QRectF(QPointF(minX, minY), QPointF(maxX, maxY));
+    }
+
     /**
      * @brief Serialize to JSON.
      * @return JSON object containing id, color, thickness, and points array.

@@ -5978,6 +5978,134 @@ public:
     }
 
 /**
+     * @brief The partial eraser repaints only what a cut changed - and all of it.
+     *
+     * A cut returns `changedBounds`, and VectorLayer::replaceStroke() patches
+     * just that instead of the whole stroke's bounds. Two things can go wrong:
+     * the region is too big (long strokes repaint everything: slow), or too
+     * small (the renderer smooths points with Catmull-Rom, so a cut reshapes
+     * the curve beyond the erased stretch; a too-tight patch leaves stale ink).
+     * This checks both, at zooms where the patch margin differs a lot.
+     */
+    static bool testPartialEraseDirtyHintIsLocalAndExact()
+    {
+        printf("  testPartialEraseDirtyHintIsLocalAndExact... ");
+
+        const QSizeF pageSize(1000, 800);
+        const qreal dpr = 1.0;
+        const QRectF focusRect(QPointF(0, 0), pageSize);
+
+        // Sparse points on a curve: long segments are where a window that is
+        // too small would show (the Catmull-Rom curve bulges between them).
+        auto makeStroke = [](const char* id, const QVector<QPointF>& pts, qreal thickness) {
+            VectorStroke stroke;
+            stroke.id = QString::fromLatin1(id);
+            stroke.color = Qt::black;
+            stroke.baseThickness = thickness;
+            for (const QPointF& p : pts) {
+                StrokePoint pt;
+                pt.pos = p;
+                pt.pressure = 1.0;
+                stroke.points.append(pt);
+            }
+            stroke.updateBoundingBox();
+            return stroke;
+        };
+
+        QVector<QPointF> wave;
+        for (int i = 0; i <= 150; ++i) {
+            const qreal x = 40.0 + i * 6.0;
+            wave.append(QPointF(x, 400.0 + 120.0 * std::sin(i * 0.15)));
+        }
+        QVector<QPointF> sparse;
+        sparse << QPointF(60, 700) << QPointF(250, 560) << QPointF(430, 720)
+               << QPointF(640, 540) << QPointF(940, 700);
+
+        struct Case { const char* name; VectorStroke stroke; QPointF at; qreal radius; };
+        const QVector<Case> cases = {
+            {"dense wave, nick", makeStroke("w", wave, 6.0), wave[75], 14.0},
+            {"dense wave, end", makeStroke("w", wave, 6.0), wave[3], 20.0},
+            {"sparse polyline", makeStroke("s", sparse, 10.0), QPointF(335, 640), 30.0},
+            {"two-point line", makeStroke("l", {QPointF(50, 100), QPointF(950, 300)}, 8.0),
+             QPointF(500, 200), 25.0},
+        };
+
+        for (const qreal zoom : {0.25, 0.5, 2.0}) {
+            for (const Case& c : cases) {
+                VectorLayer layer;
+                layer.addStroke(c.stroke);
+                // Something else crossing the cut region and the stroke's bounds.
+                layer.addStroke(makeStroke("x", {QPointF(50, 60), QPointF(950, 760)}, 12.0));
+
+                auto renderFocus = [&](VectorLayer& target) {
+                    QImage image(qRound(pageSize.width() * zoom), qRound(pageSize.height() * zoom),
+                                 QImage::Format_ARGB32_Premultiplied);
+                    image.fill(Qt::white);
+                    QPainter painter(&image);
+                    painter.scale(zoom, zoom);
+                    target.renderTiered(painter, pageSize, zoom, dpr,
+                                        VectorLayer::RenderTier::Focus, focusRect);
+                    painter.end();
+                    return image;
+                };
+                renderFocus(layer);   // Build the cache.
+
+                QRectF changed;
+                const QVector<VectorStroke> fragments =
+                    c.stroke.subtractEraserSweep(c.at, c.at, c.radius, &changed);
+                if (fragments.size() == 1 && fragments.first().id == c.stroke.id) {
+                    printf("FAILED: '%s' was not cut\n", c.name);
+                    return false;
+                }
+                if (changed.isNull()) {
+                    printf("FAILED: '%s' reported no changed region\n", c.name);
+                    return false;
+                }
+                // Local: the dense wave's bounds span the page; a nick must not.
+                if (c.stroke.points.size() > 100 &&
+                    changed.width() > c.stroke.boundingBox.width() * 0.25) {
+                    printf("FAILED: '%s' changed region %.0fx%.0f is not local (stroke %.0f wide)\n",
+                           c.name, changed.width(), changed.height(),
+                           c.stroke.boundingBox.width());
+                    return false;
+                }
+
+                layer.replaceStroke(c.stroke.id, fragments, changed);
+                const QImage patched = renderFocus(layer);
+                layer.releaseFocusCache();
+                const QImage rebuilt = renderFocus(layer);
+
+                // Untouched ink is re-rendered from different polygon vertices
+                // (the fragment ends), so antialiasing can differ by a few
+                // levels along the whole stroke. Stale or missing ink differs
+                // by far more, so a small tolerance still catches the bugs.
+                int diff = 0;
+                int maxDelta = 0;
+                for (int y = 0; y < patched.height(); ++y) {
+                    for (int x = 0; x < patched.width(); ++x) {
+                        const QRgb a = patched.pixel(x, y);
+                        const QRgb b = rebuilt.pixel(x, y);
+                        const int delta = qMax(qMax(qAbs(qRed(a) - qRed(b)), qAbs(qGreen(a) - qGreen(b))),
+                                               qAbs(qBlue(a) - qBlue(b)));
+                        if (delta > 4) {
+                            ++diff;
+                            maxDelta = qMax(maxDelta, delta);
+                        }
+                    }
+                }
+                if (diff > 0) {
+                    printf("FAILED: '%s' at zoom %.2f: patch differs from rebuild in %d pixel(s), "
+                           "max delta %d\n", c.name, zoom, diff, maxDelta);
+                    return false;
+                }
+            }
+        }
+
+        printf("PASSED\n");
+        return true;
+    }
+
+/**
      * @brief One eraser pass must cost one undo entry.
      *
      * The eraser fires on press and on every move, and each call used to push
@@ -6771,6 +6899,7 @@ public:
         runTest(testPartialEraseFreesEdgelessTile, "testPartialEraseFreesEdgelessTile");
         runTest(testPartialEraseUndoKeepsDrawOrder, "testPartialEraseUndoKeepsDrawOrder");
         runTest(testEraserUndoAcrossPagesKeepsLayers, "testEraserUndoAcrossPagesKeepsLayers");
+        runTest(testPartialEraseDirtyHintIsLocalAndExact, "testPartialEraseDirtyHintIsLocalAndExact");
 
         runTest(testPdfPlaceholderPaper, "testPdfPlaceholderPaper");
         

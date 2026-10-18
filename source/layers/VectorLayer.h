@@ -124,6 +124,13 @@ public:
      * @brief Replace a stroke with zero or more fragments, in place.
      * @param strokeId ID of the stroke to replace.
      * @param replacements Fragments that take its place (may be empty).
+     * @param dirtyHint Optional region (layer coords) outside of which the
+     *        replacement renders identically to the original. Pass
+     *        VectorStroke's `changedBounds` from the cut; the cache patch is
+     *        then limited to it instead of the whole stroke's bounds, which
+     *        matters for long strokes where a small cut would otherwise
+     *        repaint everything the stroke ever touched. A null hint means
+     *        "unknown", and patches the full bounds.
      * @return True if the stroke was found and replaced.
      *
      * Used by the partial eraser. Inserting the fragments at the original index
@@ -131,7 +138,8 @@ public:
      * stroke above everything drawn after it, which shows up when strokes
      * overlap in different colours.
      */
-    bool replaceStroke(const QString& strokeId, const QVector<VectorStroke>& replacements) {
+    bool replaceStroke(const QString& strokeId, const QVector<VectorStroke>& replacements,
+                       const QRectF& dirtyHint = QRectF()) {
         for (int i = 0; i < m_strokes.size(); ++i) {
             if (m_strokes[i].id != strokeId) {
                 continue;
@@ -141,6 +149,14 @@ public:
             for (int j = 0; j < replacements.size(); ++j) {
                 affected = affected.united(replacements[j].boundingBox);
                 m_strokes.insert(i + j, replacements[j]);
+            }
+            if (!dirtyHint.isNull()) {
+                // A hint that misses the stroke entirely is wrong; ignore it
+                // rather than risk leaving a stale cache.
+                const QRectF limited = affected.intersected(dirtyHint);
+                if (!limited.isEmpty()) {
+                    affected = limited;
+                }
             }
             // Clears `affected` and re-renders every stroke overlapping it, so
             // both the fragments coming in and the ink cut away are handled.
@@ -782,9 +798,9 @@ public:
         // boundary. The margin is intentionally not intersected with
         // m_focusRect - the pixmap clips the overhang for us, and clipping
         // here would reintroduce the seam at the focus rect's own edge.
+        const qreal margin = patchMargin(m_focusZoom * m_focusDpr);
         const QRectF patchRect =
-            removedBounds.adjusted(-CACHE_PATCH_MARGIN, -CACHE_PATCH_MARGIN,
-                                   CACHE_PATCH_MARGIN, CACHE_PATCH_MARGIN);
+            removedBounds.adjusted(-margin, -margin, margin, margin);
         QPainter p(&m_focusCache);
         beginFocusPainter(p);  // antialias + page-local coords
         clearAndRepaintPatch(p, patchRect);
@@ -1158,7 +1174,8 @@ private:
     }
     
     /**
-     * @brief How far the clear-and-redraw patch reaches past the changed bounds.
+     * @brief How far the clear-and-redraw patch reaches past the changed
+     *        bounds, in cache pixels (see patchMargin() for the unit conversion).
      *
      * A patch clears a rectangle and then redraws the strokes inside a clip of
      * the same rectangle. Without this margin the two edges land on the same
@@ -1170,6 +1187,19 @@ private:
      * untouched originals, so the seam has nothing to show.
      */
     static constexpr qreal CACHE_PATCH_MARGIN = 2.0;
+
+    /**
+     * @brief The patch margin in logical units for a cache of the given scale.
+     * @param pixelsPerUnit Cache pixels per logical unit (zoom * dpr / divisor).
+     *
+     * The seam is a cache-pixel effect, so the margin is CACHE_PATCH_MARGIN
+     * cache pixels, converted to logical units. A fixed 2-unit margin was
+     * 2 pixels at 1x, but 0.5 pixel at 0.25x (seam returns on zoomed-out
+     * pages) and 8+ pixels of needless redraw at 4x.
+     */
+    static qreal patchMargin(qreal pixelsPerUnit) {
+        return CACHE_PATCH_MARGIN / qMax(pixelsPerUnit, 0.01);
+    }
 
     /**
      * @brief Clear `rect` and redraw every stroke crossing it, without AA bleed.
@@ -1246,9 +1276,9 @@ private:
         // clear that lands on a fractional device pixel and a redraw clipped to
         // the same edge cannot line up, and the mismatch shows as a hairline.
         cachePainter.setRenderHint(QPainter::Antialiasing, true);
+        const qreal margin = patchMargin(m_cacheZoom * m_cacheDpr / m_cacheDivisor);
         const QRectF patchRect =
-            removedBounds.adjusted(-CACHE_PATCH_MARGIN, -CACHE_PATCH_MARGIN,
-                                   CACHE_PATCH_MARGIN, CACHE_PATCH_MARGIN);
+            removedBounds.adjusted(-margin, -margin, margin, margin);
         clearAndRepaintPatch(cachePainter, patchRect);
     }
     
