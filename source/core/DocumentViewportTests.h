@@ -5615,17 +5615,18 @@ public:
         
         // The same motion must not reach a stroke off the path. 200 units away
         // is far beyond the 5-unit radius plus the stroke half-width.
-        VectorStroke far;
-        far.color = Qt::black;
-        far.baseThickness = 4.0;
+        // Not named `far`: that is a macro in MinGW's windef.h.
+        VectorStroke farStroke;
+        farStroke.color = Qt::black;
+        farStroke.baseThickness = 4.0;
         for (int i = 0; i <= 4; ++i) {
             StrokePoint pt;
             pt.pos = QPointF(50.0 + i * 25.0, 200.0);
             pt.pressure = 1.0;
-            far.points.append(pt);
+            farStroke.points.append(pt);
         }
-        far.updateBoundingBox();
-        if (far.intersectsEraserSweep(from, to, smallRadius))
+        farStroke.updateBoundingBox();
+        if (farStroke.intersectsEraserSweep(from, to, smallRadius))
             return fail("swept eraser erased a stroke far off its path");
         
         // A crossing path is caught even though all four endpoints are distant:
