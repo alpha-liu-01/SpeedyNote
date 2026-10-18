@@ -32,11 +32,14 @@ void EraserSubToolbar::createWidgets()
     // that cycles. A cycle hides what the alternatives are and where you are in
     // the list, and getting back to a mode meant clicking through the others.
     // This is the same "row of presets" the Pen subtoolbar uses.
-    static const char* const kModeIcons[NUM_MODES] = {"eraser", "eraser_partial", "rope"};
+    static const char* const kModeIcons[NUM_MODES] = {
+        "eraser", "eraser_partial", "rope", "rope_partial"
+    };
     const QString modeTips[NUM_MODES] = {
         tr("Whole-stroke eraser - touching a stroke removes all of it"),
         tr("Partial eraser - removes only the part you touch"),
-        tr("Lasso eraser - draw a region to remove everything inside it")
+        tr("Lasso eraser - draw a region to remove every stroke inside it"),
+        tr("Partial lasso eraser - draw a region to cut strokes at its edge")
     };
 
     for (int i = 0; i < NUM_MODES; ++i) {
@@ -102,9 +105,10 @@ void EraserSubToolbar::setupConnections()
 int EraserSubToolbar::sizeSlotForMode(int mode)
 {
     switch (static_cast<DocumentViewport::EraserMode>(mode)) {
-    case DocumentViewport::EraserMode::Normal:  return 0;
-    case DocumentViewport::EraserMode::Partial: return 1;
-    case DocumentViewport::EraserMode::Lasso:   return -1;
+    case DocumentViewport::EraserMode::Normal:       return 0;
+    case DocumentViewport::EraserMode::Partial:      return 1;
+    case DocumentViewport::EraserMode::Lasso:        return -1;
+    case DocumentViewport::EraserMode::LassoPartial: return -1;
     }
     return 0;
 }

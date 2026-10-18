@@ -6073,7 +6073,7 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
     bool isErasing = m_hardwareEraserActive || m_currentTool == ToolType::Eraser;
     
     if (isErasing) {
-        if (m_eraserMode == EraserMode::Lasso) {
+        if (eraserModeIsLasso(m_eraserMode)) {
             // Lasso eraser: start drawing a freeform region
             m_lassoPath.clear();
             resetLassoPathCache();
@@ -17525,7 +17525,7 @@ void DocumentViewport::drawEraserCursor(QPainter& painter)
     // feedback). Partial mode draws the same circle: its reach is the same
     // disc, only the amount removed differs.
     bool showCursor = (m_currentTool == ToolType::Eraser || m_hardwareEraserActive)
-                      && m_eraserMode != EraserMode::Lasso;
+                      && eraserModeUsesDisc(m_eraserMode);
     
     if (!showCursor) {
         return;
@@ -17559,6 +17559,13 @@ void DocumentViewport::drawEraserCursor(QPainter& painter)
 void DocumentViewport::finalizeEraserLasso()
 {
     if (!m_document || m_lassoPath.size() < 3) {
+        return;
+    }
+
+    // The two lasso erasers differ only in what happens to a stroke that
+    // crosses the region: whole removes it, partial cuts it at the edge.
+    if (m_eraserMode == EraserMode::LassoPartial) {
+        finalizeEraserLassoPartial();
         return;
     }
 
@@ -17604,6 +17611,14 @@ void DocumentViewport::finalizeEraserLasso()
 
             if (idsToRemove.isEmpty()) continue;
 
+            // Repair the cache over the lasso *and* every removed stroke's
+            // bounds. A stroke only has to intersect the lasso to be deleted,
+            // so its ink can extend well outside it; patching just the lasso
+            // rect left that ink in the cached pixmap, where it could never be
+            // erased again (the stroke itself was already gone) and only
+            // disappeared when something unrelated rebuilt the cache.
+            QRectF patchBounds = lassoBounds.translated(-tileOrigin);
+
             QVector<VectorStroke>& layerStrokes = layer->strokes();
             for (int i = static_cast<int>(layerStrokes.size()) - 1; i >= 0; --i) {
                 if (idsToRemove.contains(layerStrokes[i].id)) {
@@ -17611,13 +17626,13 @@ void DocumentViewport::finalizeEraserLasso()
                     seg.tileCoord = coord;
                     seg.stroke = layerStrokes[i];
                     undoAction.segments.append(seg);
+                    patchBounds = patchBounds.united(layerStrokes[i].boundingBox);
                     layerStrokes.removeAt(i);
                 }
             }
-            // Every removal was inside the lasso, so repairing that region is
-            // enough. Invalidating instead threw away a cache the next paint
-            // then had to rebuild at full tile size.
-            layer->patchCacheAfterRemovals(lassoBounds.translated(-tileOrigin));
+            // Invalidating instead threw away a cache the next paint then had
+            // to rebuild at full tile size, so the bounds are patched instead.
+            layer->patchCacheAfterRemovals(patchBounds);
             m_document->markTileDirty(coord);
         }
     } else {
@@ -17642,6 +17657,10 @@ void DocumentViewport::finalizeEraserLasso()
         }
 
         if (!idsToRemove.isEmpty()) {
+            // See the edgeless branch: an intersecting stroke can extend past
+            // the lasso, so its own bounds have to be repaired too.
+            QRectF patchBounds = lassoBounds;
+
             QVector<VectorStroke>& layerStrokes = layer->strokes();
             for (int i = static_cast<int>(layerStrokes.size()) - 1; i >= 0; --i) {
                 if (idsToRemove.contains(layerStrokes[i].id)) {
@@ -17649,10 +17668,11 @@ void DocumentViewport::finalizeEraserLasso()
                     seg.pageIndex = m_eraserLassoPageIndex;
                     seg.stroke = layerStrokes[i];
                     undoAction.segments.append(seg);
+                    patchBounds = patchBounds.united(layerStrokes[i].boundingBox);
                     layerStrokes.removeAt(i);
                 }
             }
-            layer->patchCacheAfterRemovals(lassoBounds);
+            layer->patchCacheAfterRemovals(patchBounds);
             m_document->markPageDirty(m_eraserLassoPageIndex);
         }
     }
@@ -17663,6 +17683,134 @@ void DocumentViewport::finalizeEraserLasso()
         emit strokesChanged();
         emit documentModified();
     }
+}
+
+void DocumentViewport::finalizeEraserLassoPartial()
+{
+    // ========== PARTIAL LASSO ERASER ==========
+    // Same region and same hit test as the whole-stroke lasso, but strokes are
+    // split along the polygon instead of deleted, so a stroke that merely
+    // passes through the region keeps everything outside it.
+    const bool edgeless = m_document->isEdgeless();
+
+    struct Target {
+        Page* container = nullptr;
+        QPointF origin;                        ///< Tile origin (0,0 when paged)
+        Document::TileCoord tile = {0, 0};
+        bool edgeless = false;
+    };
+    QVector<Target> targets;
+
+    if (edgeless) {
+        const QRectF lassoBounds = m_lassoPath.boundingRect();
+        const auto tiles = m_document->tilesInRect(
+            lassoBounds.adjusted(-EDGELESS_STROKE_MARGIN, -EDGELESS_STROKE_MARGIN,
+                                 EDGELESS_STROKE_MARGIN, EDGELESS_STROKE_MARGIN));
+        for (const auto& coord : tiles) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (!tile) continue;
+            Target target;
+            target.container = tile;
+            target.tile = coord;
+            target.edgeless = true;
+            target.origin = QPointF(coord.first * Document::EDGELESS_TILE_SIZE,
+                                    coord.second * Document::EDGELESS_TILE_SIZE);
+            targets.append(target);
+        }
+    } else {
+        if (m_eraserLassoPageIndex < 0 || m_eraserLassoPageIndex >= m_document->pageCount()) return;
+        Page* page = m_document->page(m_eraserLassoPageIndex);
+        if (!page) return;
+        Target target;
+        target.container = page;
+        targets.append(target);
+    }
+
+    UndoAction undoAction;
+    undoAction.type = UndoAction::ErasePartial;
+
+    for (const Target& target : targets) {
+        Page* container = target.container;
+        if (!container) continue;
+
+        const int layerIdx = edgeless ? m_edgelessActiveLayerIndex
+                                      : container->activeLayerIndex;
+        if (layerIdx < 0 || layerIdx >= container->layerCount()) continue;
+        VectorLayer* layer = container->layer(layerIdx);
+        if (!layer || layer->locked || layer->isEmpty()) continue;
+
+        undoAction.layerIndex = layerIdx;
+
+        // Strokes live in page/tile-local coordinates, so the polygon has to be
+        // shifted into the same space. A zero origin makes this a no-op.
+        const QPolygonF localPath = m_lassoPath.translated(-target.origin);
+        const QRectF localBounds = localPath.boundingRect();
+
+        // Collect first: replaceStroke() mutates the list being iterated.
+        QVector<QString> candidates;
+        for (const VectorStroke& stroke : layer->strokes()) {
+            if (stroke.boundingBox.intersects(localBounds)) {
+                candidates.append(stroke.id);
+            }
+        }
+        if (candidates.isEmpty()) continue;
+
+        // No cache repair here: replaceStroke() patches the union of the
+        // original stroke's bounds and its fragments, which already covers the
+        // ink that disappeared (inside the lasso) and the ink that moved.
+        for (const QString& id : candidates) {
+            const VectorStroke* original = nullptr;
+            for (const VectorStroke& stroke : layer->strokes()) {
+                if (stroke.id == id) { original = &stroke; break; }
+            }
+            if (!original) continue;
+
+            const QVector<VectorStroke> fragments = original->subtractPolygon(localPath);
+            // Unchanged (the region only touched its bounding box): keep it.
+            if (fragments.size() == 1 && fragments.first().id == original->id) {
+                continue;
+            }
+
+            UndoAction::StrokeSegment removedSeg;
+            removedSeg.stroke = *original;
+            if (edgeless) removedSeg.tileCoord = target.tile;
+            else removedSeg.pageIndex = m_eraserLassoPageIndex;
+            undoAction.removedSegments.append(removedSeg);
+
+            for (const VectorStroke& fragment : fragments) {
+                UndoAction::StrokeSegment addedSeg;
+                addedSeg.stroke = fragment;
+                if (edgeless) addedSeg.tileCoord = target.tile;
+                else addedSeg.pageIndex = m_eraserLassoPageIndex;
+                undoAction.addedSegments.append(addedSeg);
+            }
+
+            layer->replaceStroke(id, fragments);
+        }
+
+        if (edgeless) {
+            m_document->markTileDirty(target.tile);
+        } else {
+            m_document->markPageDirty(m_eraserLassoPageIndex);
+        }
+    }
+
+    if (undoAction.removedSegments.isEmpty()) {
+        return;
+    }
+
+    if (edgeless) {
+        markOcrDirtyTiles(undoAction);
+        for (const auto& seg : undoAction.removedSegments) {
+            m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
+        }
+    } else {
+        m_ocrDirtyPages.insert(m_eraserLassoPageIndex);
+    }
+
+    recordUndoAction(undoAction);
+    emit strokesChanged();
+    emit documentModified();
 }
 
 // ===== Undo/Redo System (unified) =====

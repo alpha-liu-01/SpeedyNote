@@ -18,6 +18,7 @@
 #include <QJsonArray>
 #include <QLineF>
 #include <QPair>
+#include <QPolygonF>
 #include <QUuid>
 
 #include <cmath>
@@ -237,9 +238,59 @@ struct VectorStroke {
             return {*this};
         }
         
-        // Walk each original segment, keeping the parameter ranges the capsule
-        // did not cover. Pieces that meet at a shared vertex are stitched back
-        // into a single fragment below.
+        return subtractWhere([&](const QPointF& p, const QPointF& q) {
+            return survivingIntervals(p, q, a, b, radius);
+        });
+    }
+    
+    /**
+     * @brief Split this stroke around a lasso polygon, keeping what is outside.
+     *
+     * The lasso counterpart of subtractEraserSweep(): the removed set is the
+     * polygon interior instead of a swept disc, and the cut lands exactly where
+     * the stroke crosses the polygon edge.
+     *
+     * @param polygon Lasso path in the same coordinate space as the points.
+     * @return Surviving fragments, this stroke unchanged (same id) when the
+     *         polygon missed it, or an empty list when nothing survived.
+     */
+    QVector<VectorStroke> subtractPolygon(const QPolygonF& polygon) const {
+        if (points.isEmpty() || polygon.size() < 3) {
+            return {*this};
+        }
+
+        const auto inside = [&polygon](const QPointF& pt) {
+            // Odd-even matches the hit test the whole-stroke lasso uses
+            // (strokeIntersectsLasso), so both modes agree on the region.
+            return polygon.containsPoint(pt, Qt::OddEvenFill);
+        };
+
+        if (points.size() == 1) {
+            return inside(points[0].pos) ? QVector<VectorStroke>{} : QVector<VectorStroke>{*this};
+        }
+
+        const QRectF polyBounds = polygon.boundingRect();
+        if (polyBounds.isEmpty() || !boundingBox.intersects(polyBounds)) {
+            return {*this};
+        }
+
+        return subtractWhere([&](const QPointF& p, const QPointF& q) {
+            return survivingIntervalsWhere(p, q, inside);
+        });
+    }
+    
+    /**
+     * @brief Rebuild this stroke from the parts an erase predicate left alone.
+     *
+     * @param intervalsForSegment Maps one source segment to the parameter
+     *        ranges [t0,t1] that survive, in increasing order.
+     */
+    template <typename IntervalsFn>
+    QVector<VectorStroke> subtractWhere(IntervalsFn intervalsForSegment) const {
+        if (points.size() < 2) {
+            return {*this};
+        }
+
         struct Piece {
             int segment = 0;   ///< Index of the source segment (points[i]..points[i+1])
             qreal t0 = 0.0;    ///< Start parameter along that segment
@@ -250,7 +301,7 @@ struct VectorStroke {
         for (int i = 1; i < points.size(); ++i) {
             const QPointF& p = points[i - 1].pos;
             const QPointF& q = points[i].pos;
-            for (const auto& iv : survivingIntervals(p, q, a, b, radius)) {
+            for (const auto& iv : intervalsForSegment(p, q)) {
                 pieces.append(Piece{i - 1, iv.first, iv.second});
             }
         }
@@ -386,70 +437,82 @@ private:
      * @brief Parameter ranges of segment p->q that lie outside an eraser capsule.
      *
      * Returns the surviving parts of one stroke segment, as [t0, t1] pairs in
-     * increasing order with 0 <= t0 < t1 <= 1. Boundaries are refined by
-     * bisection so the cut lands within a fraction of a unit of where the disc
-     * actually ends, rather than at a coarse sample position.
+     * increasing order with 0 <= t0 < t1 <= 1.
      */
     static QVector<QPair<qreal, qreal>> survivingIntervals(const QPointF& p, const QPointF& q,
                                                            const QPointF& a, const QPointF& b,
                                                            qreal radius) {
-        auto distAt = [&](qreal t) {
-            return distanceToSegment(p + (q - p) * t, a, b);
+        const auto isErased = [&](const QPointF& pt) {
+            return distanceToSegment(pt, a, b) < radius;
         };
-        
+
         // distance() is convex along the segment, so its maximum is at an
-        // endpoint. Both endpoints covered means the whole segment is covered.
-        if (distAt(0.0) < radius && distAt(1.0) < radius) {
+        // endpoint. Both endpoints erased means the whole segment is erased.
+        if (isErased(p) && isErased(q)) {
             return {};
         }
-        
+        return survivingIntervalsWhere(p, q, isErased);
+    }
+
+    /**
+     * @brief Surviving parameter ranges of segment p->q, keeping where !isErased.
+     *
+     * Samples the segment and refines each crossing by bisection, so the cut
+     * lands within a fraction of a unit of the real boundary rather than at the
+     * nearest sample. `isErased` must be a point predicate; the lasso path
+     * passes a polygon test, the disc eraser a distance test.
+     */
+    template <typename ErasedFn>
+    static QVector<QPair<qreal, qreal>> survivingIntervalsWhere(const QPointF& p, const QPointF& q,
+                                                                ErasedFn isErased) {
         // Sampling density: fine enough to catch a shallow graze, which can be
         // a very short stretch, without scanning a long segment point by point.
         const qreal len = QLineF(p, q).length();
         const int samples = qBound(2, static_cast<int>(std::ceil(len / 1.0)) + 1, 512);
-        
+
+        const QPointF delta = q - p;
         QVector<QPair<qreal, qreal>> result;
         qreal runStart = -1.0;   // Start of the current surviving run, or -1
         qreal prevT = 0.0;
-        bool prevInside = distAt(0.0) < radius;
-        if (!prevInside) {
+        bool prevErased = isErased(p);
+        if (!prevErased) {
             runStart = 0.0;
         }
-        
+
         for (int i = 1; i <= samples; ++i) {
             const qreal t = static_cast<qreal>(i) / samples;
-            const bool inside = distAt(t) < radius;
-            
-            if (inside != prevInside) {
-                // Refine the crossing by bisection: the classification of the
-                // midpoint decides which half holds the boundary.
+            const bool erased = isErased(p + delta * t);
+
+            if (erased != prevErased) {
+                // Refine the crossing: whichever side of the midpoint still
+                // matches the previous sample holds the boundary.
                 qreal lo = prevT;
                 qreal hi = t;
-                const bool loInside = prevInside;
+                const bool loErased = prevErased;
                 for (int it = 0; it < 24; ++it) {
                     const qreal mid = 0.5 * (lo + hi);
-                    if ((distAt(mid) < radius) == loInside) {
+                    if (isErased(p + delta * mid) == loErased) {
                         lo = mid;
                     } else {
                         hi = mid;
                     }
                 }
                 const qreal boundary = 0.5 * (lo + hi);
-                if (inside) {
-                    // Entering the capsule: close the surviving run here.
+                if (erased) {
+                    // Entering the erased region: close the surviving run here.
                     if (runStart >= 0.0 && boundary > runStart) {
                         result.append({runStart, boundary});
                     }
                     runStart = -1.0;
                 } else {
-                    // Leaving the capsule: begin a new surviving run.
+                    // Leaving the erased region: begin a new surviving run.
                     runStart = boundary;
                 }
-                prevInside = inside;
+                prevErased = erased;
             }
             prevT = t;
         }
-        
+
         if (runStart >= 0.0 && prevT > runStart) {
             result.append({runStart, 1.0});
         }

@@ -14,7 +14,8 @@ class IconPresetButton;
  * @brief Subtoolbar for the Eraser tool.
  *
  * Layout (mirrors the Pen subtoolbar: a row of round preset buttons):
- * - 3 mode buttons: whole-stroke / partial / lasso (exactly one selected)
+ * - 4 mode buttons: whole-stroke / partial / lasso / lasso-partial
+ *   (exactly one selected)
  * - separator + 3 size preset buttons, hidden in lasso mode
  *
  * Size presets are kept per mode: the whole-stroke eraser and the partial
@@ -101,8 +102,8 @@ private slots:
 private:
     // Constants first: the member arrays below are sized from them.
     static constexpr int NUM_PRESETS = 3;
-    /// Number of eraser modes: whole-stroke, partial, lasso.
-    static constexpr int NUM_MODES = 3;
+    /// Number of eraser modes: whole, partial, lasso, lasso-partial.
+    static constexpr int NUM_MODES = 4;
     /// Number of modes that own a size: whole-stroke and partial.
     static constexpr int NUM_SIZE_SETS = 2;
     static constexpr qreal DEFAULT_SIZES[NUM_SIZE_SETS][NUM_PRESETS] = {
@@ -133,6 +134,8 @@ private:
 
     /**
      * @brief Size slot for a mode: 0 = whole-stroke, 1 = partial, -1 = lasso.
+     *
+     * Both lasso modes draw a region and therefore have no size.
      */
     static int sizeSlotForMode(int mode);
 

@@ -341,7 +341,7 @@ private slots:
 
         // Switching to partial brings its own values, not the shared ones.
         const QList<IconPresetButton*> modes = bar.findChildren<IconPresetButton*>();
-        QCOMPARE(modes.size(), 3);
+        QCOMPARE(modes.size(), 4);
         QTest::mouseClick(modes.at(1), Qt::LeftButton);
         QCOMPARE(bar.currentModeIndex(), 1);
         QCOMPARE(thicknesses(), QList<qreal>({8.0, 15.0, 25.0}));
@@ -372,6 +372,13 @@ private slots:
         bar.cycleSize();
         QCOMPARE(bar.currentModeIndex(), beforeCycle);
 
+        // The partial lasso also works on a region, so it has no size either.
+        QTest::mouseClick(modes.at(3), Qt::LeftButton);
+        QCOMPARE(bar.currentModeIndex(), 3);
+        for (ThicknessPresetButton* button : sizes) {
+            QVERIFY(button->isHidden());
+        }
+
         // Returning to a disc-based mode brings the row back with that mode's
         // values intact.
         QTest::mouseClick(modes.at(1), Qt::LeftButton);
@@ -391,7 +398,8 @@ private slots:
         EraserSubToolbar bar;
 
         const QList<IconPresetButton*> buttons = bar.findChildren<IconPresetButton*>();
-        QCOMPARE(buttons.size(), 3);
+        // whole / partial / lasso / lasso-partial
+        QCOMPARE(buttons.size(), 4);
 
         auto selectedCount = [&]() {
             int count = 0;
@@ -409,7 +417,7 @@ private slots:
         QVERIFY(buttons.at(0)->isSelected());
 
         // Picking a mode selects it, deselects the rest, and reports the change.
-        for (int mode : {1, 2, 0}) {
+        for (int mode : {1, 2, 3, 0}) {
             QSignalSpy spy(&bar, &EraserSubToolbar::eraserModeChanged);
             QTest::mouseClick(buttons.at(mode), Qt::LeftButton);
             QCOMPARE(bar.currentModeIndex(), mode);

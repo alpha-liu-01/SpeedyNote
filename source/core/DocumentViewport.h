@@ -402,11 +402,31 @@ public:
      * Lasso: draw a freeform region, delete all strokes inside on release.
      */
     enum class EraserMode {
-        Normal,  ///< Whole-stroke eraser: touching a stroke deletes all of it
-        Partial, ///< Split eraser: removes only the stretch the disc covered
-        Lasso    ///< Draw a region, delete all strokes inside on release
+        Normal,       ///< Whole-stroke eraser: touching a stroke deletes all of it
+        Partial,      ///< Split eraser: removes only the stretch the disc covered
+        Lasso,        ///< Draw a region, delete all strokes touching it on release
+        LassoPartial  ///< Draw a region, cut strokes at its edge and keep the rest
     };
     Q_ENUM(EraserMode)
+
+    /**
+     * @brief Whether this eraser mode is driven by a disc (and thus has a size).
+     *
+     * Both lasso modes work on a drawn region instead, so they show no size
+     * picker and no cursor circle.
+     */
+    static bool eraserModeUsesDisc(EraserMode mode)
+    {
+        return mode == EraserMode::Normal || mode == EraserMode::Partial;
+    }
+
+    /**
+     * @brief Whether this eraser mode draws a lasso region first.
+     */
+    static bool eraserModeIsLasso(EraserMode mode)
+    {
+        return mode == EraserMode::Lasso || mode == EraserMode::LassoPartial;
+    }
 
     /**
      * @brief How whole-stroke erasing is grouped into undo steps.
@@ -4901,6 +4921,15 @@ private:
      * sense together with the original stroke they replaced.
      */
     void commitEraserGesture();
+
+    /**
+     * @brief Finish a lasso that cuts strokes at the drawn region's edge.
+     *
+     * The lasso counterpart of erasePartialAt(): strokes are split along the
+     * polygon boundary instead of being removed whole, so only the ink inside
+     * the region disappears.
+     */
+    void finalizeEraserLassoPartial();
 
     /**
      * @brief Erase only the covered stretch of each stroke (部分擦除).
