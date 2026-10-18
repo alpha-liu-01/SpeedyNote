@@ -5510,6 +5510,135 @@ public:
     }
 
     /**
+     * @brief Eraser reach is solid-to-solid: the circle touching ink erases it.
+     *
+     * The stroke is a ribbon of width baseThickness, so the eraser disc reaches
+     * its ink as soon as the gap between the eraser edge and the stroke's centre
+     * line drops to half the stroke width. Testing centre-line distance alone
+     * made the user push the circle well into the stroke before anything
+     * happened, which is the opposite complaint from the original bug.
+     */
+    static bool testEraserReachMatchesCursor() {
+        printf("  testEraserReachMatchesCursor... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+        
+        // Thick stroke: half-width 15 units. Its ink reaches out to y = 15.
+        VectorStroke stroke;
+        stroke.color = Qt::black;
+        stroke.baseThickness = 30.0;
+        for (int i = 0; i <= 4; ++i) {
+            StrokePoint pt;
+            pt.pos = QPointF(100.0 + i * 20.0, 0.0);
+            pt.pressure = 1.0;
+            stroke.points.append(pt);
+        }
+        stroke.updateBoundingBox();
+        
+        const qreal radius = 20.0;
+        
+        // Circle just touching the ink: centre line 34 units away, ink to 15,
+        // so the gap is 19 < 20. Must erase.
+        if (!stroke.containsPoint(QPointF(180.0, 34.0), radius))
+            return fail("circle touching the stroke edge did not erase");
+        
+        // Circle clearly clear of the ink: 40 away, gap is 25 > 20. Must not.
+        if (stroke.containsPoint(QPointF(180.0, 40.0), radius))
+            return fail("circle clear of the stroke erased it");
+        
+        // Centre well inside the ink: always a hit.
+        if (!stroke.containsPoint(QPointF(180.0, 0.0), radius))
+            return fail("circle on the stroke did not erase");
+        
+        // Thin stroke must NOT inherit the thick one's reach: half-width 1,
+        // so at 25 away the 20-unit circle still misses.
+        VectorStroke thin = stroke;
+        thin.baseThickness = 2.0;
+        thin.updateBoundingBox();
+        if (thin.containsPoint(QPointF(180.0, 25.0), radius))
+            return fail("thin stroke erased from too far away");
+        if (!thin.containsPoint(QPointF(180.0, 18.0), radius))
+            return fail("thin stroke not erased when the circle overlapped it");
+        
+        // Dots follow the same rule.
+        VectorStroke dot;
+        dot.color = Qt::black;
+        dot.baseThickness = 30.0;
+        StrokePoint dotPt;
+        dotPt.pos = QPointF(0.0, 0.0);
+        dotPt.pressure = 1.0;
+        dot.points.append(dotPt);
+        dot.updateBoundingBox();
+        if (!dot.containsPoint(QPointF(0.0, 34.0), radius))
+            return fail("dot touches circle but was not erased");
+        if (dot.containsPoint(QPointF(0.0, 40.0), radius))
+            return fail("dot clear of circle was erased");
+        
+        printf("PASSED\n");
+        return true;
+    }
+    
+    /**
+     * @brief A fast eraser swipe erases everything it visibly crossed.
+     *
+     * Regression guard for pointer sampling: eraseAt() only sees discrete
+     * positions, so without a swept-disc test a stroke lying between two
+     * samples survived even though the eraser passed straight over it.
+     */
+    static bool testEraserSweepClosesSamplingGap() {
+        printf("  testEraserSweepClosesSamplingGap... ");
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+        
+        VectorStroke stroke;
+        stroke.color = Qt::black;
+        stroke.baseThickness = 4.0;
+        for (int i = 0; i <= 4; ++i) {
+            StrokePoint pt;
+            pt.pos = QPointF(50.0 + i * 25.0, 0.0);
+            pt.pressure = 1.0;
+            stroke.points.append(pt);
+        }
+        stroke.updateBoundingBox();
+        
+        // Two samples far apart, on the stroke line: neither disc alone reaches
+        // a stroke segment sitting in the middle of the gap.
+        const QPointF from(0.0, 0.0);
+        const QPointF to(1000.0, 0.0);
+        const qreal smallRadius = 5.0;
+        if (!stroke.intersectsEraserSweep(from, to, smallRadius))
+            return fail("swept eraser missed a stroke on its path");
+        
+        // The same motion must not reach a stroke off the path. 200 units away
+        // is far beyond the 5-unit radius plus the stroke half-width.
+        VectorStroke far;
+        far.color = Qt::black;
+        far.baseThickness = 4.0;
+        for (int i = 0; i <= 4; ++i) {
+            StrokePoint pt;
+            pt.pos = QPointF(50.0 + i * 25.0, 200.0);
+            pt.pressure = 1.0;
+            far.points.append(pt);
+        }
+        far.updateBoundingBox();
+        if (far.intersectsEraserSweep(from, to, smallRadius))
+            return fail("swept eraser erased a stroke far off its path");
+        
+        // A crossing path is caught even though all four endpoints are distant:
+        // a vertical swipe cuts through a horizontal stroke.
+        if (!stroke.intersectsEraserSweep(QPointF(150.0, -100.0), QPointF(150.0, 100.0),
+                                          smallRadius))
+            return fail("swept eraser missed a stroke it crossed");
+        
+        printf("PASSED\n");
+        return true;
+    }
+
+    /**
      * @brief The fill under an unrendered page must match what the page renders to.
      *
      * A PDF page's raster is cleared to white and then lightness-inverted for
@@ -5657,6 +5786,8 @@ public:
         runTest(testGestureSnapshotExcludesChildren,
                 "testGestureSnapshotExcludesChildren");
         runTest(testPdfWarningState, "testPdfWarningState");
+        runTest(testEraserReachMatchesCursor, "testEraserReachMatchesCursor");
+        runTest(testEraserSweepClosesSamplingGap, "testEraserSweepClosesSamplingGap");
         runTest(testPdfPlaceholderPaper, "testPdfPlaceholderPaper");
         
         printf("\n=== Results: %d passed, %d failed ===\n\n", passed, failed);
