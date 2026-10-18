@@ -656,6 +656,15 @@ public:
     void setEraserSize(qreal size);
     
     /**
+     * @brief Allowed eraser radius range, in document units.
+     *
+     * EraserSubToolbar clamps its presets to these so the UI cannot offer a
+     * size setEraserSize() would silently alter.
+     */
+    static constexpr qreal ERASER_MIN_SIZE_DOC_UNITS = 2.0;
+    static constexpr qreal ERASER_MAX_SIZE_DOC_UNITS = 100.0;
+    
+    /**
      * @brief Get the current eraser size.
      */
     qreal eraserSize() const { return m_eraserSize; }
@@ -3070,7 +3079,9 @@ private:
                                       ///< Floored into per-point pressure at stroke capture.  0 = full
                                       ///< pressure sensitivity; equal to m_penThickness = uniform stroke.
                                       ///< MainWindow keeps this in sync with PenSubToolbar.
-    qreal m_eraserSize = 20.0;        ///< CUSTOMIZABLE: Default eraser radius (range: 5-100 document units)
+    qreal m_eraserSize = 20.0;        ///< Eraser radius in document units. Single source of truth for
+                                      ///< both hit testing and the on-screen cursor circle; see
+                                      ///< eraserRadiusDocUnits().
     EraserMode m_eraserMode = EraserMode::Normal;  ///< Current eraser mode
     bool m_isDrawingEraserLasso = false;            ///< Currently drawing an eraser lasso region
     int m_eraserLassoPageIndex = -1;                ///< Page index for paged-mode eraser lasso
@@ -3709,6 +3720,8 @@ private:
     PointerEvent::Source m_activeSource = PointerEvent::Unknown;  ///< Active input source
     GestureState m_gestureState;        ///< Multi-touch gesture state
     QPointF m_lastPointerPos;           ///< Last pointer position (for delta calculation)
+    QPointF m_eraserSweepFrom;          ///< Previous eraser position, start of the swept-disc test
+    bool m_eraserSweepValid = false;    ///< True when m_eraserSweepFrom holds a usable start point
     bool m_hardwareEraserActive = false; ///< True when stylus eraser end is being used
     bool m_pointerInViewport = false;   ///< True when pointer is hovering inside viewport (for eraser cursor)
     QTimer* m_tabletHoverTimer = nullptr; ///< Timer to detect when tablet stylus leaves (no events = left)
@@ -4756,20 +4769,52 @@ private:
     // ===== Eraser Tool (Task 2.4) =====
     
     /**
-     * @brief Erase strokes at the given pointer position.
+     * @brief Eraser radius in document units - the single source of truth.
+     *
+     * Hit testing, the on-screen cursor circle and every dirty-rect estimate
+     * derive from this, so what the user aims at is exactly what gets erased.
+     * Dividing by the zoom yields the radius in viewport pixels.
+     */
+    qreal eraserRadiusDocUnits() const { return m_eraserSize; }
+    
+    /**
+     * @brief Eraser cursor radius in viewport pixels.
+     */
+    qreal eraserRadiusViewportPixels() const { return m_eraserSize * m_zoomLevel; }
+    
+    /**
+     * @brief Pixel padding around the cursor circle for the repaint region.
+     *
+     * Covers the 1px dashed outline plus anti-aliasing so a moved cursor is
+     * fully cleaned up without repainting an oversized rect.
+     */
+    static constexpr qreal ERASER_CURSOR_REPAINT_PAD = 5.0;
+    
+    /**
+     * @brief Erase strokes along the segment the eraser travelled since the last sample.
      * @param pe The pointer event containing hit information.
      * 
-     * Finds all strokes within eraser radius and removes them from the layer.
-     * Invalidates stroke cache after removal.
+     * Removes every stroke in the active layer whose outline the eraser disc
+     * touches, sampling both the current position and the capsule swept from
+     * the previous position. The capsule is what keeps a fast swipe from
+     * skipping strokes it visually crossed.
      */
     void eraseAt(const PointerEvent& pe);
+    
+    /**
+     * @brief Viewport-space rect covering a page stroke, for repaint requests.
+     * @param stroke The stroke, in page-local coordinates.
+     * @param pageIndex Page the stroke belongs to.
+     * @return Rect in viewport coordinates, clamped to this widget's bounds.
+     */
+    QRectF removedStrokeViewportRect(const VectorStroke& stroke, int pageIndex) const;
     
     /**
      * @brief Erase strokes in edgeless mode (Phase E4).
      * @param viewportPos The eraser position in viewport coordinates.
      * 
-     * Converts to document coordinates and checks the center tile plus
-     * 8 neighboring tiles for cross-tile stroke segments.
+     * Converts to document coordinates and checks only the tiles the swept
+     * eraser disc can reach, including cross-tile stroke segments.
      */
     void eraseAtEdgeless(QPointF viewportPos);
     

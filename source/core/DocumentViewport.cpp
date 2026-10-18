@@ -288,7 +288,8 @@ DocumentViewport::DocumentViewport(QWidget* parent)
             // Use elliptical region to match circular cursor shape
             // Use toAlignedRect() to properly round floating-point to integer coords
             if (m_currentTool == ToolType::Eraser || m_hardwareEraserActive) {
-                qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+                const qreal eraserRadius = eraserRadiusViewportPixels()
+                                           + ERASER_CURSOR_REPAINT_PAD;
                 QRectF cursorRectF(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
                                    eraserRadius * 2, eraserRadius * 2);
                 update(QRegion(cursorRectF.toAlignedRect(), QRegion::Ellipse));
@@ -994,8 +995,11 @@ qreal DocumentViewport::applyPenPressureFloor(qreal rawPressure) const
 
 void DocumentViewport::setEraserSize(qreal size)
 {
-    // Clamp to reasonable range
-    size = qBound(5.0, size, 200.0);
+    // Clamp to the range the eraser UI offers. Keeping the bounds here (next to
+    // the value they describe) is what makes the cursor circle, the hit test
+    // and the preset button agree - they previously disagreed (2-100 vs 5-200),
+    // so small presets were silently shown smaller than the real eraser.
+    size = qBound(ERASER_MIN_SIZE_DOC_UNITS, size, ERASER_MAX_SIZE_DOC_UNITS);
     
     if (qFuzzyCompare(m_eraserSize, size)) {
         return;
@@ -3783,7 +3787,7 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
         // Use elliptical regions to match circular eraser cursor
         // Use toAlignedRect() to properly round floating-point to integer coords
         if (m_currentTool == ToolType::Eraser) {
-            qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+            const qreal eraserRadius = eraserRadiusViewportPixels() + ERASER_CURSOR_REPAINT_PAD;
             QRectF newRectF(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
                             eraserRadius * 2, eraserRadius * 2);
             QRectF oldRectF(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
@@ -4477,7 +4481,7 @@ void DocumentViewport::leaveEvent(QEvent* event)
     // Use elliptical region to match circular cursor shape
     // Use toAlignedRect() to properly round floating-point to integer coords
     if (m_currentTool == ToolType::Eraser || m_hardwareEraserActive) {
-        qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+        const qreal eraserRadius = eraserRadiusViewportPixels() + ERASER_CURSOR_REPAINT_PAD;
         QRectF cursorRectF(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
                            eraserRadius * 2, eraserRadius * 2);
         update(QRegion(cursorRectF.toAlignedRect(), QRegion::Ellipse));
@@ -4576,7 +4580,7 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
             // Trigger repaint for eraser cursor update
             // Use elliptical regions to match circular cursor shape
             // Use toAlignedRect() to properly round floating-point to integer coords
-            qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+            qreal eraserRadius = eraserRadiusViewportPixels() + ERASER_CURSOR_REPAINT_PAD;
             QRectF oldRectF(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
                             eraserRadius * 2, eraserRadius * 2);
             QRectF newRectF(newPos.x() - eraserRadius, newPos.y() - eraserRadius,
@@ -5057,7 +5061,7 @@ bool DocumentViewport::event(QEvent* event)
         // Use elliptical region to match circular cursor shape
         // Use toAlignedRect() to properly round floating-point to integer coords
         if (m_currentTool == ToolType::Eraser || m_hardwareEraserActive) {
-            qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+            const qreal eraserRadius = eraserRadiusViewportPixels() + ERASER_CURSOR_REPAINT_PAD;
             QRectF cursorRectF(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
                                eraserRadius * 2, eraserRadius * 2);
             update(QRegion(cursorRectF.toAlignedRect(), QRegion::Ellipse));
@@ -6090,8 +6094,12 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
             m_pointerActive = true;
             update();
         } else {
+            // The disc test starts at the press point; the first move is then
+            // swept from here, so no gap opens up between press and move.
+            m_eraserSweepFrom = pe.viewportPos;
+            m_eraserSweepValid = true;
             eraseAt(pe);
-            qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+            const qreal eraserRadius = eraserRadiusViewportPixels() + ERASER_CURSOR_REPAINT_PAD;
             QRectF cursorRectF(pe.viewportPos.x() - eraserRadius, pe.viewportPos.y() - eraserRadius,
                                eraserRadius * 2, eraserRadius * 2);
             update(QRegion(cursorRectF.toAlignedRect(), QRegion::Ellipse));
@@ -6229,7 +6237,7 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
         }
         
         eraseAt(pe);
-        qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+        const qreal eraserRadius = eraserRadiusViewportPixels() + ERASER_CURSOR_REPAINT_PAD;
         
         QRectF oldRectF(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
                         eraserRadius * 2, eraserRadius * 2);
@@ -6239,6 +6247,11 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
         QRegion dirtyRegion(oldRectF.toAlignedRect(), QRegion::Ellipse);
         dirtyRegion += QRegion(newRectF.toAlignedRect(), QRegion::Ellipse);
         update(dirtyRegion);
+        
+        // Advance the sweep origin: the next move is tested as a capsule from
+        // this sample, so fast swipes cannot skip strokes between events.
+        m_eraserSweepFrom = pe.viewportPos;
+        m_eraserSweepValid = true;
         return;
     }
     
@@ -6406,6 +6419,8 @@ void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
     m_activeSource = PointerEvent::Unknown;  // Reset source
     m_activeDrawingPage = -1;
     m_hardwareEraserActive = false;  // Clear hardware eraser state
+    // The next press starts a fresh sweep; never bridge two separate contacts.
+    m_eraserSweepValid = false;
     // Note: Don't clear m_lastPointerPos - keep it for eraser cursor during hover
     
     // Pre-load stroke caches after interaction (but NOT PDF cache - it causes thrashing during rapid strokes)
@@ -17000,6 +17015,18 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
 
 // ===== Eraser Tool (Task 2.4) =====
 
+QRectF DocumentViewport::removedStrokeViewportRect(const VectorStroke& stroke, int pageIndex) const
+{
+    // Strokes are stored page-local; shift to document space, then to viewport.
+    const QPointF origin = pagePosition(pageIndex);
+    const QRectF docRect = stroke.boundingBox.translated(origin);
+    const QRectF vpRect = QRectF(documentToViewport(docRect.topLeft()),
+                                 documentToViewport(docRect.bottomRight())).normalized();
+    // Intersect with the widget so a huge stroke does not make update() walk a
+    // rect far larger than anything that can be on screen.
+    return vpRect.intersected(QRectF(rect()));
+}
+
 void DocumentViewport::eraseAt(const PointerEvent& pe)
 {
     if (!m_document) return;
@@ -17019,8 +17046,27 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
     VectorLayer* layer = page->activeLayer();
     if (!layer || layer->locked) return;
     
-    // Find strokes at eraser position
-    QVector<QString> hitIds = layer->strokesAtPoint(pe.pageHit.pagePoint, m_eraserSize);
+    const qreal radius = eraserRadiusDocUnits();
+    
+    // Hit test the disc at the current position plus, when the eraser has
+    // moved since the previous sample, the capsule swept along the way. The
+    // capsule keeps a fast swipe from jumping over strokes it visibly crossed.
+    QVector<QString> hitIds = layer->strokesAtPoint(pe.pageHit.pagePoint, radius);
+    if (m_eraserSweepValid) {
+        // Only sweep within one page: a previous sample taken over a different
+        // page (or over empty space) maps to unrelated page-local coordinates,
+        // and a capsule to it would erase strokes the eraser never crossed.
+        const QPointF prevViewportDoc = viewportToDocument(m_eraserSweepFrom);
+        const QPointF prevDoc = prevViewportDoc - pagePosition(pe.pageHit.pageIndex);
+        const bool samePage = pageAtPoint(prevViewportDoc) == pe.pageHit.pageIndex;
+        if (samePage && prevDoc != pe.pageHit.pagePoint) {
+            for (const QString& id : layer->strokesInEraserSweep(prevDoc, pe.pageHit.pagePoint, radius)) {
+                if (!hitIds.contains(id)) {
+                    hitIds.append(id);
+                }
+            }
+        }
+    }
     
     if (hitIds.isEmpty()) return;
     
@@ -17060,15 +17106,23 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
     
     emit documentModified();
     
-    // ========== OPTIMIZATION: Dirty Region Update for Eraser ==========
-    // Calculate elliptical region around eraser position for targeted repaint
-    // Use ellipse to match the circular eraser shape and avoid "square brush" artifact
-    // Use toAlignedRect() to properly round floating-point to integer coords
-    qreal eraserRadius = m_eraserSize * m_zoomLevel + 10;  // Add padding for stroke edges
-    QPointF vpPos = pe.viewportPos;
-    QRectF dirtyRectF(vpPos.x() - eraserRadius, vpPos.y() - eraserRadius,
-                      eraserRadius * 2, eraserRadius * 2);
-    update(QRegion(dirtyRectF.toAlignedRect(), QRegion::Ellipse));
+    // ========== Dirty Region Update for Eraser ==========
+    // Repaint the eraser circle AND the bounds of every stroke that was just
+    // removed. Requesting only the circle left the removed stroke's ink outside
+    // it on screen: the layer had already dropped the stroke, but those pixels
+    // were never asked to repaint, so a flick (or the release repaint) appeared
+    // to erase the rest of the stroke all at once. Erasing is immediate - the
+    // repaint region has to say so.
+    const qreal eraserRadius = eraserRadiusViewportPixels() + ERASER_CURSOR_REPAINT_PAD;
+    const QPointF vpPos = pe.viewportPos;
+    QRegion dirtyRegion(QRegion(QRectF(vpPos.x() - eraserRadius, vpPos.y() - eraserRadius,
+                                      eraserRadius * 2, eraserRadius * 2)
+                                    .toAlignedRect(),
+                                QRegion::Ellipse));
+    for (const VectorStroke& removed : removedStrokes) {
+        dirtyRegion += removedStrokeViewportRect(removed, pe.pageHit.pageIndex).toAlignedRect();
+    }
+    update(dirtyRegion);
 }
 
 void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
@@ -17086,6 +17140,15 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
     // Convert viewport position to document coordinates
     QPointF docPt = viewportToDocument(viewportPos);
     
+    // The swept capsule spans the previous sample to this one; use its extent
+    // (not just the current disc) when deciding which tiles to scan.
+    const bool haveSweep = m_eraserSweepValid
+        && viewportToDocument(m_eraserSweepFrom) != docPt;
+    const QPointF sweepFrom = haveSweep ? viewportToDocument(m_eraserSweepFrom) : docPt;
+    const qreal radius = eraserRadiusDocUnits();
+    const QRectF sweptBounds = QRectF(sweepFrom, docPt).normalized()
+                                   .adjusted(-radius, -radius, radius, radius);
+    
     int tileSize = Document::EDGELESS_TILE_SIZE;
     
     UndoAction undoAction;
@@ -17095,11 +17158,11 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
     // Scan only the tiles the eraser disc can actually reach. A fixed 3x3
     // neighbourhood scanned nine tiles' worth of strokes on every pointer move,
     // and at a 1024-unit tile size an ordinary eraser touches one.
-    const qreal reach = m_eraserSize + EDGELESS_STROKE_MARGIN;
-    const int minTx = static_cast<int>(std::floor((docPt.x() - reach) / tileSize));
-    const int maxTx = static_cast<int>(std::floor((docPt.x() + reach) / tileSize));
-    const int minTy = static_cast<int>(std::floor((docPt.y() - reach) / tileSize));
-    const int maxTy = static_cast<int>(std::floor((docPt.y() + reach) / tileSize));
+    const qreal reach = radius + EDGELESS_STROKE_MARGIN;
+    const int minTx = static_cast<int>(std::floor((sweptBounds.left() - reach) / tileSize));
+    const int maxTx = static_cast<int>(std::floor((sweptBounds.right() + reach) / tileSize));
+    const int minTy = static_cast<int>(std::floor((sweptBounds.top() - reach) / tileSize));
+    const int maxTy = static_cast<int>(std::floor((sweptBounds.bottom() + reach) / tileSize));
 
     for (int tx = minTx; tx <= maxTx; ++tx) {
         for (int ty = minTy; ty <= maxTy; ++ty) {
@@ -17109,9 +17172,17 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
             VectorLayer* layer = tile->layer(m_edgelessActiveLayerIndex);
             if (!layer || layer->locked) continue;
 
-            QPointF tileOrigin(tx * tileSize, ty * tileSize);
-            QPointF localPt = docPt - tileOrigin;
-            QVector<QString> hitIds = layer->strokesAtPoint(localPt, m_eraserSize);
+            const QPointF tileOrigin(tx * tileSize, ty * tileSize);
+            const QPointF localPt = docPt - tileOrigin;
+            QVector<QString> hitIds = layer->strokesAtPoint(localPt, radius);
+            if (haveSweep) {
+                for (const QString& id : layer->strokesInEraserSweep(
+                         sweepFrom - tileOrigin, localPt, radius)) {
+                    if (!hitIds.contains(id)) {
+                        hitIds.append(id);
+                    }
+                }
+            }
             if (hitIds.isEmpty()) continue;
 
             for (const QString& id : hitIds) {
@@ -17138,12 +17209,25 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
         emit strokesChanged();
         emit documentModified();
         
-        // Dirty region update - use elliptical region to match circular eraser
-        // Use toAlignedRect() to properly round floating-point to integer coords
-        qreal eraserRadius = m_eraserSize * m_zoomLevel + 10;  // Add padding for stroke edges
-        QRectF dirtyRectF(viewportPos.x() - eraserRadius, viewportPos.y() - eraserRadius,
-                          eraserRadius * 2, eraserRadius * 2);
-        update(QRegion(dirtyRectF.toAlignedRect(), QRegion::Ellipse));
+        // Dirty region update - the eraser circle plus the bounds of every
+        // removed stroke. Without the latter, ink outside the circle stayed on
+        // screen until some later repaint, which read as a delayed whole-stroke
+        // erase. Edgeless strokes are tile-local, so shift by the tile origin.
+        const qreal eraserRadius = eraserRadiusViewportPixels() + ERASER_CURSOR_REPAINT_PAD;
+        QRegion dirtyRegion(QRectF(viewportPos.x() - eraserRadius, viewportPos.y() - eraserRadius,
+                                  eraserRadius * 2, eraserRadius * 2).toAlignedRect(),
+                            QRegion::Ellipse);
+        for (const UndoAction::StrokeSegment& seg : undoAction.segments) {
+            const QPointF tileOrigin(seg.tileCoord.first * Document::EDGELESS_TILE_SIZE,
+                                     seg.tileCoord.second * Document::EDGELESS_TILE_SIZE);
+            const QRectF docRect = seg.stroke.boundingBox.translated(tileOrigin);
+            const QRectF vpRect =
+                QRectF(documentToViewport(docRect.topLeft()),
+                       documentToViewport(docRect.bottomRight())).normalized()
+                    .intersected(QRectF(rect()));
+            dirtyRegion += vpRect.toAlignedRect();
+        }
+        update(dirtyRegion);
     }
 }
 
@@ -17251,12 +17335,14 @@ void DocumentViewport::drawEraserCursor(QPainter& painter)
     }
     
     // Draw eraser circle at last pointer position (in viewport coordinates)
-    // The eraser size is in document units, so scale by zoom for screen display
+    // The radius comes from the same helper hit testing uses, so the circle is
+    // exactly the region the eraser removes - it used to be drawn smaller than
+    // the real reach because containsPoint() added the stroke's half-width.
     painter.setRenderHint(QPainter::Antialiasing, false);
     painter.setPen(QPen(Qt::gray, 1, Qt::DashLine));
     painter.setBrush(Qt::NoBrush);
     
-    qreal screenRadius = m_eraserSize * m_zoomLevel;
+    const qreal screenRadius = eraserRadiusViewportPixels();
     painter.drawEllipse(m_lastPointerPos, screenRadius, screenRadius);
 }
 

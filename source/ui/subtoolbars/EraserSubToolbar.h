@@ -3,6 +3,7 @@
 
 #include "SubToolbar.h"
 #include "../widgets/ModeToggleButton.h"
+#include "../../core/DocumentViewport.h"
 #include <QColor>
 #include <QHash>
 
@@ -114,8 +115,10 @@ private:
     // Default values
     static constexpr int NUM_PRESETS = 3;
     static constexpr qreal DEFAULT_SIZES[NUM_PRESETS] = {5.0, 15.0, 40.0};
-    static constexpr qreal MIN_SIZE = 2.0;
-    static constexpr qreal MAX_SIZE = 100.0;
+    /// Bounds come from DocumentViewport so the picker cannot offer a size the
+    /// viewport would clamp (and therefore draw at a different radius).
+    static constexpr qreal MIN_SIZE = DocumentViewport::ERASER_MIN_SIZE_DOC_UNITS;
+    static constexpr qreal MAX_SIZE = DocumentViewport::ERASER_MAX_SIZE_DOC_UNITS;
     
     // Preview color (gray, visible in both light and dark themes)
     static const QColor PREVIEW_COLOR;
