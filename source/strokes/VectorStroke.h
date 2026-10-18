@@ -192,10 +192,21 @@ struct VectorStroke {
         
         // Two polylines touch when their closest approach is within the sum of
         // their half-widths; the sweep is a capsule of `radius` around a->b.
+        const QRectF pathRect = QRectF(a, b).normalized();
         for (int i = 1; i < points.size(); ++i) {
             const qreal reach = radius
                                 + (halfWidthAt(i - 1) + halfWidthAt(i)) * 0.5;
-            if (segmentsCloserThan(points[i-1].pos, points[i].pos, a, b, reach)) {
+            const QPointF& p = points[i-1].pos;
+            const QPointF& q = points[i].pos;
+            // Cheap per-segment rejection before the four distance tests; a long
+            // stroke has thousands of segments and the sweep only meets a few.
+            if (qMax(p.x(), q.x()) < pathRect.left() - reach
+                || qMin(p.x(), q.x()) > pathRect.right() + reach
+                || qMax(p.y(), q.y()) < pathRect.top() - reach
+                || qMin(p.y(), q.y()) > pathRect.bottom() + reach) {
+                continue;
+            }
+            if (segmentsCloserThan(p, q, a, b, reach)) {
                 return true;
             }
         }
