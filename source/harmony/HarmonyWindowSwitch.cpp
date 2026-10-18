@@ -209,11 +209,21 @@ void switchTo(QWidget* incoming, QWidget* outgoing, OutgoingPolicy policy, int f
     const bool outgoingMaximized  = copyState && outgoing && outgoing->isMaximized();
     const bool outgoingFullScreen = copyState && outgoing && outgoing->isFullScreen();
     const QRect incomingGeometry = targetGeometry(incoming, outgoing);
+    const bool incomingIsLauncher = isLauncher(incoming);
 
     clearStaleWindowState(incoming);
     incoming->setWindowOpacity(0.0);
 
-    if (outgoingMaximized) {
+    // The Launcher is the app's menu, not a document view. Taking on a
+    // fullscreen MainWindow's state would leave it fullscreen with no way out:
+    // its only fullscreen toggle (view.fullscreen) is a QAction hosted by the
+    // MainWindow, and while the MainWindow is hidden that shortcut map is
+    // inactive, so F11 does nothing there. Land it maximised instead -- still
+    // filling the screen, but with a window frame the user can leave.
+    const bool incomingMaximized = outgoingMaximized
+        || (outgoingFullScreen && incomingIsLauncher);
+
+    if (incomingMaximized) {
         incoming->showMaximized();
     } else if (outgoingFullScreen) {
         incoming->showFullScreen();
@@ -251,8 +261,6 @@ void switchTo(QWidget* incoming, QWidget* outgoing, OutgoingPolicy policy, int f
 
     incoming->raise();
     incoming->activateWindow();
-
-    const bool incomingIsLauncher = isLauncher(incoming);
 
 #ifdef Q_OS_HARMONY
     // Only for the switch the raise above cannot make: a MainWindow that

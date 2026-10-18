@@ -85,6 +85,7 @@ private:
     QDoubleSpinBox *wheelScrollSpeedSpin;
     QCheckBox *panOutsidePagesCheck = nullptr;
     QCheckBox *ocrCjkGridModeCheck = nullptr;
+    QComboBox *eraserUndoGroupingCombo = nullptr;
     void createToolsTab();
 
     // === Theme tab ===
