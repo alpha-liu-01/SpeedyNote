@@ -388,6 +388,14 @@ void ControlPanelDialog::applyChanges()
         DocumentViewport::setPanOutsidePagesEnabled(panOutsidePages);
     }
 
+    if (eraserUndoGroupingCombo) {
+        const int grouping = eraserUndoGroupingCombo->currentIndex();
+        settings.setValue("tools/eraserUndoGrouping", grouping);
+        DocumentViewport::setEraserUndoGrouping(
+            grouping == 1 ? DocumentViewport::EraserUndoGrouping::PerStroke
+                          : DocumentViewport::EraserUndoGrouping::PerGesture);
+    }
+
     if (ocrCjkGridModeCheck)
         settings.setValue("ocrCjkGridMode", ocrCjkGridModeCheck->isChecked());
 
@@ -1151,6 +1159,32 @@ void ControlPanelDialog::createToolsTab()
     panLayout->addRow(offPagePanHint);
 
     layout->addWidget(panGroup);
+
+    // --- Eraser settings group ---
+    QGroupBox *eraserGroup = new QGroupBox(tr("Eraser"), toolsTab);
+    QFormLayout *eraserLayout = new QFormLayout(eraserGroup);
+
+    eraserUndoGroupingCombo = new QComboBox(eraserGroup);
+    eraserUndoGroupingCombo->addItem(
+        tr("One step per erase pass"), 0);   // EraserUndoGrouping::PerGesture
+    eraserUndoGroupingCombo->addItem(
+        tr("One step per stroke"), 1);       // EraserUndoGrouping::PerStroke
+    eraserUndoGroupingCombo->setCurrentIndex(
+        settings.value("tools/eraserUndoGrouping", 0).toInt() == 1 ? 1 : 0);
+    eraserLayout->addRow(tr("Undo for the stroke eraser:"), eraserUndoGroupingCombo);
+
+    QLabel *eraserUndoHint = new QLabel(
+        tr("Applies to the whole-stroke eraser. \"One step per erase pass\" makes a "
+           "single press-drag-release undo as a unit, however many strokes it "
+           "removed; \"One step per stroke\" brings strokes back one at a time. "
+           "The partial eraser always undoes a whole pass, because its fragments "
+           "only make sense together with the stroke they were cut from."),
+        eraserGroup);
+    eraserUndoHint->setWordWrap(true);
+    eraserUndoHint->setStyleSheet("color: gray; font-size: 11px;");
+    eraserLayout->addRow(eraserUndoHint);
+
+    layout->addWidget(eraserGroup);
 
     // --- OCR settings group ---
     QGroupBox *ocrGroup = new QGroupBox(tr("OCR (Handwriting Recognition)"), toolsTab);

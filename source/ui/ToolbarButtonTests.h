@@ -10,6 +10,10 @@
 #include "ToolbarButtons.h"
 #include "Toolbar.h"
 #include "widgets/ExpandableToolButton.h"
+#include "widgets/IconPresetButton.h"
+#include "subtoolbars/EraserSubToolbar.h"
+#include "widgets/ThicknessPresetButton.h"
+#include <QSettings>
 
 /**
  * Unit tests for ToolbarButton classes.
@@ -267,6 +271,174 @@ private slots:
         toolbar.setCurrentTool(ToolType::Pen);
         QVERIFY(pen->isExpanded());
         QCOMPARE(pen->sizeHint().width(), expandedWidth);
+    }
+
+    // Size presets belong to a mode: switching modes must swap the three
+    // values (and the selection), and lasso - which has no size - must hide the
+    // row instead of showing dead controls.
+    void testEraserSizePresetsArePerMode() {
+        // The bar reads the real QSettings, so snapshot the eraser group and
+        // put it back afterwards: a test run must not wipe the developer's
+        // saved presets.
+        auto snapshotEraserGroup = []() {
+            QMap<QString, QVariant> saved;
+            QSettings settings;
+            for (const QString& key : settings.allKeys()) {
+                if (key.startsWith(QStringLiteral("eraser/"))) {
+                    saved.insert(key, settings.value(key));
+                }
+            }
+            return saved;
+        };
+        auto restoreEraserGroup = [](const QMap<QString, QVariant>& saved) {
+            QSettings settings;
+            settings.beginGroup(QStringLiteral("eraser"));
+            settings.remove(QString());
+            settings.endGroup();
+            for (auto it = saved.constBegin(); it != saved.constEnd(); ++it) {
+                settings.setValue(it.key(), it.value());
+            }
+        };
+
+        const QMap<QString, QVariant> savedSettings = snapshotEraserGroup();
+
+        // Start from a clean slate so the built-in defaults are what we see.
+        {
+            QSettings settings;
+            settings.beginGroup(QStringLiteral("eraser"));
+            settings.remove(QString());
+            settings.endGroup();
+        }
+
+        EraserSubToolbar bar;
+        const QList<ThicknessPresetButton*> sizes =
+            bar.findChildren<ThicknessPresetButton*>();
+        QCOMPARE(sizes.size(), 3);
+
+        auto thicknesses = [&]() {
+            QList<qreal> values;
+            for (ThicknessPresetButton* button : sizes) {
+                values << button->thickness();
+            }
+            return values;
+        };
+
+        auto indexOf = [&](ThicknessPresetButton* button) {
+            return sizes.indexOf(button);
+        };
+
+        // Whole-stroke is the default mode and shows its own three sizes.
+        QCOMPARE(bar.currentModeIndex(), 0);
+        QCOMPARE(thicknesses(), QList<qreal>({5.0, 15.0, 40.0}));
+        for (ThicknessPresetButton* button : sizes) {
+            QVERIFY(!button->isHidden());
+        }
+
+        // Edit the whole-stroke presets through the selection path, then pick
+        // the third one, so the mode has a distinctive set + selection.
+        QTest::mouseClick(sizes.at(indexOf(sizes.at(2))), Qt::LeftButton);
+        QCOMPARE(bar.currentSize(), 40.0);
+
+        // Switching to partial brings its own values, not the shared ones.
+        const QList<IconPresetButton*> modes = bar.findChildren<IconPresetButton*>();
+        QCOMPARE(modes.size(), 4);
+        QTest::mouseClick(modes.at(1), Qt::LeftButton);
+        QCOMPARE(bar.currentModeIndex(), 1);
+        QCOMPARE(thicknesses(), QList<qreal>({8.0, 15.0, 25.0}));
+        QCOMPARE(bar.currentSize(), 15.0);   // partial starts on its middle preset
+
+        // Remember the partial selection, then bounce back: whole-stroke must
+        // still have its own values and its third preset selected.
+        QTest::mouseClick(sizes.at(0), Qt::LeftButton);
+        QCOMPARE(bar.currentSize(), 8.0);
+        QTest::mouseClick(modes.at(0), Qt::LeftButton);
+        QCOMPARE(bar.currentModeIndex(), 0);
+        QCOMPARE(thicknesses(), QList<qreal>({5.0, 15.0, 40.0}));
+        QCOMPARE(bar.currentSize(), 40.0);
+
+        // And back to partial: its first preset is still selected.
+        QTest::mouseClick(modes.at(1), Qt::LeftButton);
+        QCOMPARE(bar.currentSize(), 8.0);
+
+        // Lasso has no size, so the whole row disappears.
+        QTest::mouseClick(modes.at(2), Qt::LeftButton);
+        QCOMPARE(bar.currentModeIndex(), 2);
+        for (ThicknessPresetButton* button : sizes) {
+            QVERIFY(button->isHidden());
+        }
+
+        // Cycling the size does nothing while lasso is active.
+        const int beforeCycle = bar.currentModeIndex();
+        bar.cycleSize();
+        QCOMPARE(bar.currentModeIndex(), beforeCycle);
+
+        // The partial lasso also works on a region, so it has no size either.
+        QTest::mouseClick(modes.at(3), Qt::LeftButton);
+        QCOMPARE(bar.currentModeIndex(), 3);
+        for (ThicknessPresetButton* button : sizes) {
+            QVERIFY(button->isHidden());
+        }
+
+        // Returning to a disc-based mode brings the row back with that mode's
+        // values intact.
+        QTest::mouseClick(modes.at(1), Qt::LeftButton);
+        for (ThicknessPresetButton* button : sizes) {
+            QVERIFY(!button->isHidden());
+        }
+        QCOMPARE(thicknesses(), QList<qreal>({8.0, 15.0, 25.0}));
+        QCOMPARE(bar.currentSize(), 8.0);
+
+        // Leave the developer's settings exactly as they were.
+        restoreEraserGroup(savedSettings);
+    }
+
+    // The eraser mode picker must be three side-by-side choices, with exactly
+    // one selected - not a single button that cycles through hidden states.
+    void testEraserModeButtons() {
+        EraserSubToolbar bar;
+
+        const QList<IconPresetButton*> buttons = bar.findChildren<IconPresetButton*>();
+        // whole / partial / lasso / lasso-partial
+        QCOMPARE(buttons.size(), 4);
+
+        auto selectedCount = [&]() {
+            int count = 0;
+            for (IconPresetButton* button : buttons) {
+                if (button->isSelected()) {
+                    ++count;
+                }
+            }
+            return count;
+        };
+
+        // Whole-stroke is the default and must be the visible selection.
+        QCOMPARE(bar.currentModeIndex(), 0);
+        QCOMPARE(selectedCount(), 1);
+        QVERIFY(buttons.at(0)->isSelected());
+
+        // Picking a mode selects it, deselects the rest, and reports the change.
+        for (int mode : {1, 2, 3, 0}) {
+            QSignalSpy spy(&bar, &EraserSubToolbar::eraserModeChanged);
+            QTest::mouseClick(buttons.at(mode), Qt::LeftButton);
+            QCOMPARE(bar.currentModeIndex(), mode);
+            QCOMPARE(spy.count(), 1);
+            QCOMPARE(spy.first().first().toInt(), mode);
+            QCOMPARE(selectedCount(), 1);
+            QVERIFY(buttons.at(mode)->isSelected());
+        }
+
+        // Clicking the already-active mode is a no-op, not a toggle-off.
+        QSignalSpy repeat(&bar, &EraserSubToolbar::eraserModeChanged);
+        QTest::mouseClick(buttons.at(0), Qt::LeftButton);
+        QCOMPARE(repeat.count(), 0);
+        QCOMPARE(bar.currentModeIndex(), 0);
+        QCOMPARE(selectedCount(), 1);
+
+        // External state changes (e.g. shortcut) move the ring with them.
+        bar.setModeState(2);
+        QCOMPARE(bar.currentModeIndex(), 2);
+        QCOMPARE(selectedCount(), 1);
+        QVERIFY(buttons.at(2)->isSelected());
     }
 };
 

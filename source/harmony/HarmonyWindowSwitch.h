@@ -56,7 +56,9 @@ enum class OutgoingPolicy {
 // Bring `incoming` to the front, adopting `outgoing`'s window state and
 // geometry, and fade it in. `outgoing` is then hidden, unless the policy leaves
 // that to the caller or mustStayResident() forbids it. A null `outgoing` skips
-// both the geometry adoption and the hide.
+// both the geometry adoption and the hide. A fullscreen `outgoing` becomes a
+// maximised Launcher rather than a fullscreen one, because the Launcher has no
+// fullscreen shortcut of its own and would otherwise be stuck that way.
 void switchTo(QWidget* incoming, QWidget* outgoing,
               OutgoingPolicy policy = OutgoingPolicy::Hide, int fadeDurationMs = 150);
 
