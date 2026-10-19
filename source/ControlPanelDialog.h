@@ -126,13 +126,21 @@ private:
     void onOpenConfigFolder();
     void updateShortcutDisplay(QTreeWidgetItem* item, const QString& actionId);
 
-#ifdef Q_OS_LINUX
-    // === Stylus tab (Linux only) ===
+    // === Stylus tab (cross-platform: side buttons; palm rejection is Linux only) ===
     QWidget *stylusTab;
+#ifdef Q_OS_LINUX
     QCheckBox *palmRejectionCheckbox;
     QSpinBox *palmRejectionDelaySpinBox;
-    void createStylusTab();
 #endif
+    QCheckBox *stylusButtonMappingCheckbox = nullptr;
+    QComboBox *stylusButtonAToolCombo = nullptr;
+    QComboBox *stylusButtonAModeCombo = nullptr;
+    QComboBox *stylusButtonBToolCombo = nullptr;
+    QComboBox *stylusButtonBModeCombo = nullptr;
+    QLabel *stylusButtonALabel = nullptr;
+    QLabel *stylusButtonBLabel = nullptr;
+    void createStylusTab();
+    void detectStylusButton(bool isButtonA);
 };
 
 #endif // CONTROLPANELDIALOG_H

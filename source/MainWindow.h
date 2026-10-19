@@ -84,6 +84,13 @@ enum class TouchGestureMode {
 };
 #endif
 
+// Stylus side-button (barrel button) trigger behaviour.
+enum class StylusButtonMode {
+    Hold,     // While held: use the mapped tool; on release: back to the previous tool
+    Toggle,   // Press once: mapped tool; press again: back to the previous tool
+    OneShot   // Press once: switch to the mapped tool and stay there (no auto-revert)
+};
+
 
 // Forward declarations
 class QTreeWidgetItem;
@@ -130,6 +137,29 @@ public:
     int getPalmRejectionDelay() const;
     void setPalmRejectionDelay(int delayMs);
 #endif
+
+    // ==================== Stylus Side Buttons ====================
+    // Maps the stylus barrel/side buttons to tools, with three trigger modes
+    // (Hold / Toggle / OneShot). Configured from the Stylus tab of the
+    // Control Panel. Available on every platform: the side button arrives as a
+    // QTabletEvent with Qt::MiddleButton / Qt::RightButton in buttons().
+    bool isStylusButtonMappingEnabled() const { return m_stylusButtonMappingEnabled; }
+    void setStylusButtonMappingEnabled(bool enabled);
+
+    int getStylusButtonActionA() const { return static_cast<int>(m_stylusButtonATool); }
+    void setStylusButtonActionA(int toolIndex);
+    int getStylusButtonActionB() const { return static_cast<int>(m_stylusButtonBTool); }
+    void setStylusButtonActionB(int toolIndex);
+
+    StylusButtonMode getStylusButtonModeA() const { return m_stylusButtonAMode; }
+    void setStylusButtonModeA(StylusButtonMode mode);
+    StylusButtonMode getStylusButtonModeB() const { return m_stylusButtonBMode; }
+    void setStylusButtonModeB(StylusButtonMode mode);
+
+    Qt::MouseButton getStylusButtonAQt() const { return m_stylusButtonAQt; }
+    void setStylusButtonAQt(Qt::MouseButton button);
+    Qt::MouseButton getStylusButtonBQt() const { return m_stylusButtonBQt; }
+    void setStylusButtonBQt(Qt::MouseButton button);
 
     // Scroll-bar placement settings (Plan SB4); delegate to SplitViewManager.
     // Page-axis (vertical) bar: false = left edge, true = right edge.
@@ -953,6 +983,39 @@ private:
     void onStylusProximityEnter();
     void onStylusProximityLeave();
 #endif
+
+    // ==================== Stylus Side Buttons ====================
+    bool m_stylusButtonMappingEnabled = false;
+
+    // Button A / B configuration.
+    ToolType m_stylusButtonATool = ToolType::Eraser;
+    ToolType m_stylusButtonBTool = ToolType::Eraser;
+    StylusButtonMode m_stylusButtonAMode = StylusButtonMode::Hold;
+    StylusButtonMode m_stylusButtonBMode = StylusButtonMode::Hold;
+    Qt::MouseButton m_stylusButtonAQt = Qt::MiddleButton;
+    Qt::MouseButton m_stylusButtonBQt = Qt::RightButton;
+
+    // Live per-button state.
+    bool m_stylusButtonAHeld = false;   ///< Button A is currently physically down
+    bool m_stylusButtonBHeld = false;   ///< Button B is currently physically down
+    bool m_stylusButtonAActive = false; ///< A mapping is currently applied (Hold/Toggle)
+    bool m_stylusButtonBActive = false; ///< B mapping is currently applied (Hold/Toggle)
+
+    // Tool to restore when a Hold release or Toggle-off happens. Valid only
+    // while the corresponding *Active flag is set.
+    ToolType m_stylusButtonAPreviousTool = ToolType::Pen;
+    ToolType m_stylusButtonBPreviousTool = ToolType::Pen;
+
+    void loadStylusButtonSettings();
+    void saveStylusButtonSettings();
+    void handleStylusTabletButtons(Qt::MouseButtons buttons, Qt::MouseButton changedButton,
+                                   bool isPress, DocumentViewport* viewport);
+    void applyStylusButtonMapping(Qt::MouseButton button, DocumentViewport* viewport);
+    void revertStylusButtonMapping(Qt::MouseButton button);
+
+    // Viewport a Hold/Toggle mapping was applied to, so the revert reaches the
+    // same pane even in split view. QPointer so a closed tab cannot dangle.
+    QPointer<DocumentViewport> m_stylusButtonMappedViewport;
 };
 
 #endif // MAINWINDOW_H

@@ -421,6 +421,19 @@ public:
     Q_ENUM(EraserMode)
 
     /**
+     * @brief Lasso tool selection mode.
+     *
+     * Freeform: draw an arbitrary polygon around strokes (original behavior).
+     * Rectangle: press-drag-release defines a rectangle whose two corners are
+     * the press and current points; strokes inside are selected on release.
+     */
+    enum class LassoMode {
+        Freeform,  ///< Freeform polygon selection (default)
+        Rectangle  ///< Rectangular marquee selection
+    };
+    Q_ENUM(LassoMode)
+
+    /**
      * @brief Whether this eraser mode is driven by a disc (and thus has a size).
      *
      * Both lasso modes work on a drawn region instead, so they show no size
@@ -451,6 +464,7 @@ public:
         PerStroke   ///< One entry per stroke erased
     };
     Q_ENUM(EraserUndoGrouping)
+
 
     // ===== Constructor & Destructor =====
     
@@ -1474,13 +1488,31 @@ public:
     void handleCutAction();
     
     /**
-     * @brief Handle Paste action based on current context.
-     * 
-     * Behavior depends on current tool:
-     * - Lasso: Paste strokes from internal clipboard
-     * - ObjectSelect: Paste objects from internal clipboard
+     * @brief Handle Paste action (tool-independent).
+     *
+     * Universal paste: picks between the internal clipboard (strokes/objects)
+     * and the system clipboard (image/file/text) by whichever was copied most
+     * recently, so content can be pasted with any tool selected.
      */
     void handlePasteAction();
+    
+    /**
+     * @brief Paste from the internal clipboards (strokes first, then objects).
+     * @return True if something was pasted.
+     */
+    bool pasteInternalClipboard();
+    
+    /**
+     * @brief Paste from the system clipboard (image, then local file, then text).
+     * @return True if something was pasted.
+     */
+    bool pasteSystemClipboard();
+    
+    /**
+     * @brief Create a text box filled with clipboard text at the pointer
+     *        position (or viewport center when the pointer is off-page).
+     */
+    void pasteTextAtPointer(const QString& text);
     
     /**
      * @brief Handle Delete action based on current context.
@@ -1553,6 +1585,29 @@ public:
      * @brief Get the current eraser mode.
      */
     EraserMode eraserMode() const { return m_eraserMode; }
+
+    /**
+     * @brief Set the lasso selection mode (persisted to QSettings).
+     * @param mode The new lasso mode (Freeform or Rectangle).
+     */
+    void setLassoMode(LassoMode mode);
+
+    /**
+     * @brief Get the current lasso selection mode.
+     */
+    LassoMode lassoMode() const { return m_lassoMode; }
+
+    // ===== Universal Paste (tool-independent clipboard arbitration) =====
+
+    /**
+     * @brief Record a system clipboard change and stamp its arrival time.
+     *
+     * Called from MainWindow on QClipboard::dataChanged and when the window is
+     * re-activated (the activation check compares a mime fingerprint so a
+     * change missed while unfocused is still noticed). Static: the timestamps
+     * are process-wide, like the internal clipboards they are compared with.
+     */
+    static void noteSystemClipboardChanged();
     
     // ===== Object Resize (Phase O3.1) =====
     
@@ -1834,8 +1889,10 @@ public:
      * @param pageIndex The page to create on.
      * @param rect The rectangle in page-local coordinates.
      * @param viewportPos A viewport position for tile determination in edgeless mode.
+     * @param initialText Optional text to fill the box with (universal paste).
      */
-    void createTextBoxAtRect(int pageIndex, const QRectF& rect, const QPointF& viewportPos);
+    void createTextBoxAtRect(int pageIndex, const QRectF& rect, const QPointF& viewportPos,
+                             const QString& initialText = QString());
 
     /**
      * @brief Backdrop for a new text box, matched to the paper it lands on.
@@ -2725,6 +2782,11 @@ signals:
     void zoomChanged(qreal zoom);
     
     /**
+     * @brief Emitted when the lasso selection mode changes.
+     */
+    void lassoModeChanged(LassoMode mode);
+    
+    /**
      * @brief Emitted when the pan offset changes.
      * @param offset New pan offset.
      */
@@ -3151,6 +3213,31 @@ private:
     bool m_isDrawingEraserLasso = false;            ///< Currently drawing an eraser lasso region
     int m_eraserLassoPageIndex = -1;                ///< Page index for paged-mode eraser lasso
     
+    LassoMode m_lassoMode = LassoMode::Freeform;    ///< Current lasso selection mode
+    
+    // Universal paste: the tool that was active before a paste switched the
+    // viewport to the pasted content's owner tool. A click on empty space
+    // (with the pasted content deselected) returns to it; any explicit tool
+    // pick clears it.
+    ToolType m_prePasteTool = ToolType::Pen;
+    bool m_hasPrePasteTool = false;
+
+    /**
+     * @brief End the post-paste temporary tool state: clear the pending
+     *        return-tool record and switch back to the tool that was active
+     *        before the paste. No-op when no paste is pending.
+     * @return True if a switch happened (caller should stop its own handling).
+     */
+    bool returnToPrePasteTool();
+
+    /**
+     * @brief returnToPrePasteTool() variant for use inside a pointer-press
+     *        handler: also disarms the in-flight gesture so the pen's
+     *        subsequent move events (which would now be seen by the restored
+     *        drawing tool) do not start a stroke.
+     */
+    void returnToPrePasteToolAndCancelGesture();
+    
     // Marker tool settings (Task 2.8)
     QColor m_markerColor = QColor(0xE6, 0xFF, 0x6E, 128);  ///< CUSTOMIZABLE: Default marker color (#E6FF6E at 50% opacity)
     qreal m_markerThickness = 8.0;    ///< CUSTOMIZABLE: Default marker thickness (wider than pen, no pressure)
@@ -3213,6 +3300,11 @@ private:
     };
     LassoSelection m_lassoSelection;
     QPolygonF m_lassoPath;               ///< The lasso path being drawn
+    
+    // Rectangle lasso mode: drag endpoints in page/document coordinates.
+    // m_lassoPath stays empty while dragging; the preview is drawn directly.
+    QPointF m_lassoRectStart;            ///< Rectangle lasso first corner
+    QPointF m_lassoRectCurrent;          ///< Rectangle lasso current opposite corner
     bool m_isDrawingLasso = false;       ///< Currently drawing a lasso path
     
     // P1: Lasso path incremental rendering cache
@@ -3224,6 +3316,7 @@ private:
     
     void resetLassoPathCache();          ///< Creates/resets the lasso path cache
     void renderLassoPathIncremental(QPainter& painter);  ///< Renders lasso path incrementally
+    void drawLassoRectPreview(QPainter& painter) const;  ///< Rectangle-mode marquee preview
     
     // P3: Selection stroke caching
     QPixmap m_selectionStrokeCache;      ///< Strokes rendered at identity transform
@@ -3740,6 +3833,17 @@ private:
         }
     };
     static StrokeClipboard s_clipboard;
+
+    // ===== Universal paste arbitration =====
+    // The system clipboard carries no timestamp; we synthesize one by noting
+    // QClipboard::dataChanged (and re-checking a mime fingerprint on window
+    // activation). The internal stamp is written by copySelection() and the
+    // object-copy path. At paste time the newer one wins; on a tie the
+    // internal clipboard is preferred.
+    static qint64 s_internalClipboardStamp;       ///< ms epoch of last internal copy
+    static qint64 s_systemClipboardStamp;         ///< ms epoch of last system change
+    static qint64 s_internalCopyEchoGuardUntil;   ///< ignore system stamps before this
+    static QByteArray s_systemClipboardFingerprint; ///< mime fingerprint at last stamp
     
     // ----- Performance/Memory Settings -----
     /// CUSTOMIZABLE: PDF cache capacity - higher = more RAM, smoother scrolling (range: 4-16)
@@ -3782,6 +3886,11 @@ private:
     // ===== Input State (Task 1.3.8) =====
     int m_activeDrawingPage = -1;       ///< Page currently receiving strokes (-1 = none)
     bool m_pointerActive = false;       ///< True if pointer is pressed
+    // Set when a dismissal press hands the tool back post-paste: swallows
+    // every remaining event of this physical contact (duplicate presses some
+    // platforms send alongside the tablet event, moves, the release) so the
+    // restored drawing tool cannot turn them into a stroke.
+    bool m_suppressUntilRelease = false;
     PointerEvent::Source m_activeSource = PointerEvent::Unknown;  ///< Active input source
     GestureState m_gestureState;        ///< Multi-touch gesture state
     QPointF m_lastPointerPos;           ///< Last pointer position (for delta calculation)

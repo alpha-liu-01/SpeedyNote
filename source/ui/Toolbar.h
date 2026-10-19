@@ -16,6 +16,7 @@ class PenSubToolbar;
 class MarkerSubToolbar;
 class EraserSubToolbar;
 class HighlighterSubToolbar;
+class LassoSubToolbar;
 class OcrSubToolbar;
 
 /**
@@ -54,6 +55,7 @@ public:
     MarkerSubToolbar* markerSubToolbar() const { return m_markerSubToolbar; }
     EraserSubToolbar* eraserSubToolbar() const { return m_eraserSubToolbar; }
     HighlighterSubToolbar* highlighterSubToolbar() const { return m_highlighterSubToolbar; }
+    LassoSubToolbar* lassoSubToolbar() const { return m_lassoSubToolbar; }
     OcrSubToolbar* ocrSubToolbar() const { return m_ocrSubToolbar; }
 
     void setOcrAvailable(bool available);
@@ -127,11 +129,13 @@ private:
     ExpandableToolButton *m_penExpandable;
     ExpandableToolButton *m_markerExpandable;
     ExpandableToolButton *m_eraserExpandable;
+    ExpandableToolButton *m_lassoExpandable;
     ExpandableToolButton *m_textExpandable;
     ExpandableToolButton *m_ocrExpandable;
 
+    LassoSubToolbar *m_lassoSubToolbar;
+
     // Plain tool buttons (no subtoolbar)
-    ToolButton *m_lassoButton;
     ToolButton *m_objectImageButton;
     /// The Link tool's controls float in the viewport (LinkObjectBar), so this
     /// button carries no subtoolbar of its own.
